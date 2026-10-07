@@ -4,11 +4,31 @@
 
 ```bash
 npm install
-npx drizzle-kit push
+npm run db:push
 npm run dev
 ```
 
-PostgreSQL must be running (see `DATABASE_URL` in `.env`).
+PostgreSQL must be running. The Drizzle config reads `DATABASE_URL` from `.env`
+or the process environment.
+
+## Vercel with Neon
+
+Set the Vercel **Root Directory** to `trading-command-v3`. Add the Neon pooled
+connection string as `DATABASE_URL` in the Vercel project's Environment Variables.
+After changing the database or deploying this dashboard for the first time, apply
+the schema from this directory using the Neon **direct** connection string:
+
+```powershell
+cd trading-command-v3
+$env:DATABASE_URL = "<Neon direct connection string>"
+npm run db:push
+Remove-Item Env:DATABASE_URL
+```
+
+Keep the connection string private; do not paste it into the dashboard or commit
+it. A successful `/api/health` response should report `"ok": true` and
+`"backend": "postgres"`. Health only checks database connectivity; applying the
+schema is also required for settings and credential persistence.
 
 ## Production build
 

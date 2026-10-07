@@ -30,6 +30,14 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const status = await deltaCredentialsStatus();
+  if (status.source === "env") {
+    return Response.json(
+      { error: "Delta credentials are managed by the server environment. Update DELTA_API_KEY and DELTA_API_SECRET in Vercel, then redeploy." },
+      { status: 409 }
+    );
+  }
+
   let apiKey = "";
   let apiSecret = "";
   try {
@@ -49,10 +57,14 @@ export async function POST(req: Request) {
 
   try {
     await saveDeltaCredentials(apiKey, apiSecret);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Could not store credentials";
-    await logAudit("delta_credentials_save_failed", { reason: message });
-    return Response.json({ error: message }, { status: 500 });
+  } catch {
+    // Driver errors may include SQL and bound credential ciphertext. Never
+    // return them to the browser or record them in the audit log.
+    await logAudit("delta_credentials_save_failed", {});
+    return Response.json(
+      { error: "Could not persist Delta credentials. Verify the storage connection and apply the dashboard database schema." },
+      { status: 503 }
+    );
   }
 
   // Audit records that credentials changed, never their values.

@@ -220,7 +220,7 @@ export interface AlertRule {
 export interface SystemStatus {
   db: boolean;
   deltaMarket: "online" | "offline" | "disabled";
-  deltaAccount: "connected" | "disconnected" | "disabled";
+  deltaAccount: "configured" | "disconnected" | "disabled";
   strategy: boolean;
   execution: string; // READ ONLY | PAPER | LIVE DISABLED | LIVE ARMED
   webhook: boolean;

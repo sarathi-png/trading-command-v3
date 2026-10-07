@@ -42,17 +42,22 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [capabilities, setCapabilities] = useState({ liveExecution: false, deltaAccountConfigured: false });
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const [authDenied, setAuthDenied] = useState(false);
+  const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
   const [settingsNonce, setSettingsNonce] = useState(0);
 
   /* ---- load settings + system status ---------------------------------- */
   useEffect(() => {
     api.get<{ settings: typeof settings; capabilities: typeof capabilities }>("/api/settings")
-      .then((res) => { applySettings(res.settings); setCapabilities(res.capabilities); })
+      .then((res) => {
+        setSettingsLoadError(null);
+        applySettings(res.settings);
+        setCapabilities(res.capabilities);
+      })
       .catch((e) => {
         // 401 = no/expired session: show the login gate rather than falling
         // back to defaults (which silently re-triggered onboarding every time).
         if (e instanceof ApiError && e.status === 401) { setAuthDenied(true); return; }
-        applySettings(useApp.getState().settings);
+        setSettingsLoadError(e instanceof Error ? e.message : "Could not load saved settings.");
       });
   }, [applySettings, settingsNonce]);
 
@@ -246,6 +251,21 @@ export default function AppShell({ children }: { children: ReactNode }) {
     );
   }
 
+  if (settingsLoadError) {
+    return (
+      <div className="h-screen grid-bg flex flex-col items-center justify-center gap-4 p-4">
+        <Logo size={34} />
+        <p className="microlabel text-warn">SAVED SETTINGS UNAVAILABLE</p>
+        <p className="max-w-lg text-center text-[12px] text-mut">{settingsLoadError}</p>
+        <p className="max-w-lg text-center text-[11px] text-dim">
+          Verify the Vercel database connection and apply the dashboard schema before retrying.
+          Your saved settings have not been replaced with onboarding defaults.
+        </p>
+        <Btn variant="primary" onClick={() => setSettingsNonce((n) => n + 1)}>RETRY</Btn>
+      </div>
+    );
+  }
+
   if (!settingsLoaded) {
     return (
       <div className="h-screen grid-bg flex flex-col items-center justify-center gap-4">
@@ -425,7 +445,11 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
           </span>
         )}
         <Chip className="hidden sm:inline-flex">
-          {settings.dataSource === "demo" ? "DEMO ACCOUNT" : system?.deltaAccount === "connected" ? "CONNECTED" : "DISCONNECTED"}
+          {settings.dataSource === "demo"
+            ? "DEMO ACCOUNT"
+            : system?.deltaAccount === "configured"
+              ? "DELTA · ACCOUNT UNVERIFIED"
+              : "DELTA · NOT CONFIGURED"}
         </Chip>
         {modeBadge}
         <NotifBell />

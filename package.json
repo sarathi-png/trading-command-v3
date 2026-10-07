@@ -5,6 +5,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "db:push": "drizzle-kit push --config=drizzle.config.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:quant": "tsc -p tsconfig.quant.json && node --test output/quant-js/lib/strategy/quant/quant.test.js",

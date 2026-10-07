@@ -2,10 +2,11 @@
 import { useState } from "react";
 import { ShieldCheck, Wifi, WifiOff, ChartCandlestick, LayoutGrid, Check } from "lucide-react";
 import { useApp, modulesForPreset } from "@/stores";
+import { api } from "@/lib/api";
 import { DEFAULT_SETTINGS } from "@/lib/settingsDefaults";
 import { Btn } from "./ui";
 import { cx } from "@/lib/format";
-import type { ExecMode, LayoutPreset } from "@/lib/types";
+import type { AppSettings, ExecMode, LayoutPreset } from "@/lib/types";
 
 const SYMBOLS = ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD"];
 
@@ -22,7 +23,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 export default function Onboarding({ capabilities }: {
   capabilities: { liveExecution: boolean; deltaAccountConfigured: boolean };
 }) {
-  const { patchSettings, applySettings, settings } = useApp();
+  const { applySettings, notify } = useApp();
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState<ExecMode>("read_only");
   const [symbol, setSymbol] = useState("BTCUSD");
@@ -33,13 +34,25 @@ export default function Onboarding({ capabilities }: {
     setFinishing(true);
     const modules = modulesForPreset(layout, DEFAULT_SETTINGS.modules);
     const watchlist = [symbol, ...["BTCUSD", "ETHUSD", "SOLUSD"].filter((s) => s !== symbol)];
-    const res = await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ onboarded: true, mode, layout, modules, watchlist }),
-    }).then((r) => r.json()).catch(() => null);
-    if (res?.settings) applySettings(res.settings);
-    else await patchSettings({ onboarded: true, mode, layout, modules, watchlist });
+    try {
+      const res = await api.post<{ settings: AppSettings }>("/api/settings", {
+        onboarded: true,
+        mode,
+        layout,
+        modules,
+        watchlist,
+        dataSource: capabilities.deltaAccountConfigured ? "delta" : "demo",
+      });
+      applySettings(res.settings);
+    } catch (e) {
+      notify({
+        title: "Could not save workspace",
+        body: e instanceof Error ? e.message : "Settings were not saved. Please retry.",
+        tone: "danger",
+      });
+    } finally {
+      setFinishing(false);
+    }
   };
 
   return (
@@ -108,8 +121,12 @@ export default function Onboarding({ capabilities }: {
               <div className="panel-2 p-3 flex items-center gap-3">
                 <Wifi size={16} className="text-up" />
                 <div>
-                  <p className="text-[12px] text-up">Delta credentials detected</p>
-                  <p className="text-[11px] text-dim">Server environment provides DELTA_API_KEY / DELTA_API_SECRET. Enable “Delta data source” in Settings → Market Data when ready.</p>
+                  <p className="text-[12px] text-up">Delta credentials are configured</p>
+                  <p className="text-[11px] text-dim">
+                    This confirms the key and secret are present, not that Delta has accepted them.
+                    Setup will use Delta public market data; a private-account authentication error
+                    means the credentials, permissions, or IP allowlist need checking.
+                  </p>
                 </div>
               </div>
             ) : (

@@ -7,19 +7,26 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const settings = await getSettings();
-  return Response.json({
-    settings,
-    capabilities: {
-      deltaAccountConfigured: await deltaAccountConfigured(),
-      deltaMarket: flags.deltaMarket(),
-      paperTrading: flags.paperTrading(),
-      liveExecution: flags.liveExecution(),
-      webhook: flags.tradingviewWebhook(),
-      orderbook: flags.orderbook(),
-      strategyEngine: flags.strategyEngine(),
-    },
-  });
+  try {
+    const settings = await getSettings();
+    return Response.json({
+      settings,
+      capabilities: {
+        deltaAccountConfigured: await deltaAccountConfigured(),
+        deltaMarket: flags.deltaMarket(),
+        paperTrading: flags.paperTrading(),
+        liveExecution: flags.liveExecution(),
+        webhook: flags.tradingviewWebhook(),
+        orderbook: flags.orderbook(),
+        strategyEngine: flags.strategyEngine(),
+      },
+    });
+  } catch {
+    return Response.json(
+      { error: "Settings storage is unavailable. Check the database connection and apply the dashboard schema." },
+      { status: 503 }
+    );
+  }
 }
 
 export async function POST(req: Request) {
@@ -29,7 +36,15 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  const current = await getSettings();
+  let current: Awaited<ReturnType<typeof getSettings>>;
+  try {
+    current = await getSettings();
+  } catch {
+    return Response.json(
+      { error: "Settings storage is unavailable. Check the database connection and apply the dashboard schema." },
+      { status: 503 }
+    );
+  }
 
   // ---- execution-mode safety gates ---------------------------------------
   if (patch.mode === "live" && !flags.liveExecution()) {
@@ -58,6 +73,13 @@ export async function POST(req: Request) {
   }
 
   const { confirm: _c, ...clean } = patch;
-  const next = await updateSettings(clean);
-  return Response.json({ settings: next });
+  try {
+    const next = await updateSettings(clean);
+    return Response.json({ settings: next });
+  } catch {
+    return Response.json(
+      { error: "Could not save settings. Check the database connection and apply the dashboard schema." },
+      { status: 503 }
+    );
+  }
 }

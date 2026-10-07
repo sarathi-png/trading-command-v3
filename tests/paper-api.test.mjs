@@ -62,8 +62,8 @@ test("authenticated read-only to paper order and journal flow", { timeout: 60000
         DATA_BACKEND: "file",
         TC_DATA_DIR: dataDir,
         DATABASE_URL: "",
-        DELTA_API_KEY: "",
-        DELTA_API_SECRET: "",
+        DELTA_API_KEY: "paper-test-delta-key",
+        DELTA_API_SECRET: "paper-test-delta-secret",
         DELTA_MARKET_ENABLED: "false",
         LIVE_EXECUTION_ENABLED: "false",
         PAPER_TRADING_ENABLED: "true",
@@ -114,9 +114,19 @@ test("authenticated read-only to paper order and journal flow", { timeout: 60000
         body: JSON.stringify(body),
       });
 
+    const credentialOverride = await json("/api/settings/delta-credentials", {
+      apiKey: "test-key",
+      apiSecret: "test-secret",
+    });
+    assert.equal(credentialOverride.status, 409);
+    const credentialError = await credentialOverride.json();
+    assert.match(credentialError.error, /server environment/i);
+    assert.doesNotMatch(JSON.stringify(credentialError), /paper-test|test-secret|insert into/i);
+
     const initialSettings = await request("/api/settings").then((response) => response.json());
     assert.equal(initialSettings.settings.mode, "read_only");
     assert.equal(initialSettings.capabilities.liveExecution, false);
+    assert.equal(initialSettings.capabilities.deltaAccountConfigured, true);
 
     const readOnlyOrder = await json("/api/paper", { symbol: "BTCUSD", qty: 0.001 });
     assert.equal(readOnlyOrder.status, 403);

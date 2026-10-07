@@ -224,13 +224,14 @@ export async function getDeltaSummary(): Promise<DeltaSummary> {
     ]);
 
     if (balRes.status !== 200) {
-      const detail =
-        ((balRes.json as { error?: { message?: string } } | null)?.error?.message ?? "")
-          .replace(/api[- ]?key|signature|secret/gi, "*")
-          .slice(0, 80);
+      const authHint = balRes.status === 401
+        ? " Check that the key and secret are correct for Delta Exchange India, the key allows read access, and its IP allowlist includes the Vercel deployment."
+        : balRes.status === 403
+          ? " Check that the API key has read access to account balances."
+          : "";
       return {
         ...base,
-        error: `Delta balances unavailable (HTTP ${balRes.status})${detail ? `: ${detail}` : ""}`,
+        error: `Delta balances unavailable (HTTP ${balRes.status}).${authHint}`,
       };
     }
 

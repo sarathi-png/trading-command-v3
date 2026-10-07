@@ -70,15 +70,12 @@ function merge(base: AppSettings, patch: Partial<AppSettings>): AppSettings {
 
 export async function getSettings(): Promise<AppSettings> {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.value;
-  try {
-    // Backed by Postgres when one is reachable, otherwise the JSON store.
-    const stored = (await (await getRepo()).getSetting(KEY)) as Partial<AppSettings> | null;
-    const value = stored ? merge(DEFAULT_SETTINGS, stored) : { ...DEFAULT_SETTINGS };
-    cache = { at: Date.now(), value };
-    return value;
-  } catch {
-    return { ...DEFAULT_SETTINGS };
-  }
+  // A failed database read must not masquerade as first-run defaults: doing so
+  // can make onboarding reappear and conceal an unapplied database schema.
+  const stored = (await (await getRepo()).getSetting(KEY)) as Partial<AppSettings> | null;
+  const value = stored ? merge(DEFAULT_SETTINGS, stored) : { ...DEFAULT_SETTINGS };
+  cache = { at: Date.now(), value };
+  return value;
 }
 
 export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {

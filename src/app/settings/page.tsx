@@ -57,6 +57,7 @@ export default function SettingsPage() {
   const [credKey, setCredKey] = useState("");
   const [credSecret, setCredSecret] = useState("");
   const [credBusy, setCredBusy] = useState(false);
+  const credentialsFromEnv = creds?.source === "env";
 
   const saveCredentials = async () => {
     if (!credKey.trim() || !credSecret.trim()) {
@@ -80,8 +81,8 @@ export default function SettingsPage() {
       notify({
         title: "Credentials saved",
         body: switched
-          ? "Stored encrypted. Market data switched to Delta Exchange — live rates and your real balance now load on next refresh."
-          : "Stored encrypted. Live rates and your real balance load on next refresh.",
+          ? "Stored encrypted. Market data switched to Delta Exchange. Public rates load independently; account balances require valid, authorized keys."
+          : "Stored encrypted. Public rates load independently; account balances require valid, authorized keys.",
         tone: "success",
       });
     } catch (e) {
@@ -250,6 +251,12 @@ export default function SettingsPage() {
           <p className="text-[10px] text-dim leading-relaxed">
             Public market data needs no credentials. Demo mode is a deterministic simulator and is always clearly labelled — it never impersonates live data.
           </p>
+          {settings.dataSource === "demo" && creds?.configured && (
+            <p className="text-[10px] text-warn">
+              Delta keys are configured, but the chart is currently using demo prices. Select{" "}
+              <span className="text-ink">Delta Exchange India</span> above to switch to its public market feed.
+            </p>
+          )}
         </div>
       </Panel>
 
@@ -366,7 +373,7 @@ export default function SettingsPage() {
                 <span className="num text-ink">
                   {creds.source === "env" ? "the server environment" : "encrypted storage"}
                 </span>
-                . Values are write-only — they can be replaced or removed, never read back.
+                . Their presence does not confirm that Delta accepts them.
               </>
             ) : (
               <>
@@ -378,61 +385,67 @@ export default function SettingsPage() {
             )}
           </p>
 
-          <div className="grid gap-2 sm:grid-cols-2">
-            <label className="space-y-1">
-              <span className="block text-[10px] uppercase tracking-wide">API key</span>
-              <input
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                value={credKey}
-                onChange={(e) => setCredKey(e.target.value)}
-                placeholder="paste Delta API key"
-                className="w-full rounded border border-edge bg-panel px-2 py-1.5 num text-ink outline-none focus:border-accent/60"
-              />
-            </label>
-            <label className="space-y-1">
-              <span className="block text-[10px] uppercase tracking-wide">API secret</span>
-              <input
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                value={credSecret}
-                onChange={(e) => setCredSecret(e.target.value)}
-                placeholder="paste Delta API secret"
-                className="w-full rounded border border-edge bg-panel px-2 py-1.5 num text-ink outline-none focus:border-accent/60"
-              />
-            </label>
-          </div>
+          {credentialsFromEnv ? (
+            <p className="rounded border border-edge bg-bg2 p-2 text-[11px] text-dim">
+              To replace these keys, update both <span className="num text-ink">DELTA_API_KEY</span> and{" "}
+              <span className="num text-ink">DELTA_API_SECRET</span> in Vercel → Project → Settings →
+              Environment Variables, then redeploy. Environment credentials take precedence over stored keys.
+            </p>
+          ) : (
+            <>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="space-y-1">
+                  <span className="block text-[10px] uppercase tracking-wide">API key</span>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={credKey}
+                    onChange={(e) => setCredKey(e.target.value)}
+                    placeholder="paste Delta API key"
+                    className="w-full rounded border border-edge bg-panel px-2 py-1.5 num text-ink outline-none focus:border-accent/60"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="block text-[10px] uppercase tracking-wide">API secret</span>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={credSecret}
+                    onChange={(e) => setCredSecret(e.target.value)}
+                    placeholder="paste Delta API secret"
+                    className="w-full rounded border border-edge bg-panel px-2 py-1.5 num text-ink outline-none focus:border-accent/60"
+                  />
+                </label>
+              </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              disabled={credBusy}
-              onClick={() => void saveCredentials()}
-              className="rounded border border-accent/60 bg-accent-dim px-3 py-1.5 text-accent hover:text-ink disabled:opacity-50"
-            >
-              {credBusy ? "Working…" : creds?.configured ? "Replace keys" : "Save keys"}
-            </button>
-            {creds?.source === "stored" && (
-              <button
-                disabled={credBusy}
-                onClick={() => void clearCredentials()}
-                className="rounded border border-edge px-3 py-1.5 text-mut hover:text-danger disabled:opacity-50"
-              >
-                Remove stored keys
-              </button>
-            )}
-            {creds?.source === "env" && (
-              <span className="text-[10px]">
-                Supplied by the environment — remove them there to change.
-              </span>
-            )}
-          </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  disabled={credBusy}
+                  onClick={() => void saveCredentials()}
+                  className="rounded border border-accent/60 bg-accent-dim px-3 py-1.5 text-accent hover:text-ink disabled:opacity-50"
+                >
+                  {credBusy ? "Working…" : creds?.configured ? "Replace keys" : "Save keys"}
+                </button>
+                {creds?.source === "stored" && (
+                  <button
+                    disabled={credBusy}
+                    onClick={() => void clearCredentials()}
+                    className="rounded border border-edge px-3 py-1.5 text-mut hover:text-danger disabled:opacity-50"
+                  >
+                    Remove stored keys
+                  </button>
+                )}
+              </div>
+            </>
+          )}
 
           <p className="text-[10px]">
             Stored keys are encrypted with AES-256-GCM using a key derived from{" "}
             <span className="num">SESSION_SECRET</span>, are never returned by any endpoint, and
-            never appear in the audit log. Transactions require{" "}
+            never appear in the audit log. The badge indicates configured keys, not successful
+            authentication. Transactions require{" "}
             <span className="num">docs/DELTA_SETUP.md</span> for key permissions. Live orders stay
             blocked by <span className="num">LIVE_EXECUTION_ENABLED</span> regardless of these keys.
           </p>

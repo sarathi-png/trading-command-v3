@@ -42,7 +42,7 @@ export async function GET() {
     deltaMarket,
     deltaAccount: deltaCreds
       ? settings.dataSource === "delta"
-        ? "connected"
+        ? "configured"
         : "disconnected"
       : "disabled",
     strategy: flags.strategyEngine(),
