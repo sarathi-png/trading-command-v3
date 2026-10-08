@@ -335,6 +335,11 @@ test("Vercel ↔ trading gateway boundary, paper isolation and live-order safety
     assert.equal(system.gateway.configured, true);
     assert.equal(system.gateway.liveExecutionEnabled, false);
     assert.ok(system.gateway.host);
+    // A gateway that answers /ready 200 is reported as reachable AND ready.
+    // (A gateway that answers 503 "missing DELTA_API_KEY" must be reported as
+    // reachable-but-not-ready — see gatewayHealth — never as unreachable.)
+    assert.equal(system.gateway.reachable, true);
+    assert.equal(system.gateway.ready, true);
 
     // Served client bundles are the real test of "not exposed to the browser".
     const html = await (await request("/")).text();

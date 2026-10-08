@@ -163,6 +163,11 @@ export class DeltaClient {
         }
         return result as DeltaResult<T>;
       } catch (error) {
+        // A GatewayError raised *before* the request left the process — missing
+        // Delta credentials, an invalid path — is not a network failure.
+        // Rethrow it unchanged (503 GATEWAY_NOT_CONFIGURED, not 502 "could not
+        // reach Delta") and never retry it: retrying cannot fix configuration.
+        if (error instanceof GatewayError) throw error;
         lastError = error;
         const aborted = error instanceof Error && error.name === "AbortError";
         if (i < attempts - 1) continue;
@@ -206,6 +211,10 @@ export class DeltaClient {
     try {
       result = await this.attempt(method, path, {}, bodyString, auth, 1);
     } catch (error) {
+      // Never report a request that was never sent as an unknown venue outcome:
+      // a missing-credential GatewayError means nothing reached Delta, so there
+      // is nothing to reconcile and the caller must not treat it as ambiguous.
+      if (error instanceof GatewayError) throw error;
       const aborted = error instanceof Error && error.name === "AbortError";
       throw deltaUnknownResult(
         aborted

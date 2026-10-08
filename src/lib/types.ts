@@ -238,6 +238,8 @@ export interface SystemStatus {
     ready: boolean;
     host: string | null;
     liveExecutionEnabled: boolean;
+    /** Environment variable NAMES the gateway reports as unset (never values). */
+    missing?: string[];
     error?: string;
   };
   flags: Record<string, boolean>;

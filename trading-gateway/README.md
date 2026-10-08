@@ -92,7 +92,7 @@ Public (no auth, no configuration detail):
 | Route | Purpose |
 |---|---|
 | `GET /health` | liveness: process is up |
-| `GET /ready` | 200 when configuration is complete, 503 otherwise. With a valid bearer it also lists missing variable NAMES (never values). |
+| `GET /ready` | 200 when configuration is complete, 503 otherwise. With a valid bearer it also lists missing variable NAMES (never values); a *wrong* bearer is 401 so a mismatched deployment is diagnosable. |
 
 Authenticated (`Authorization: Bearer <TRADING_GATEWAY_SECRET>`):
 

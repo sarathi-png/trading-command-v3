@@ -7,10 +7,17 @@
  * gateway is correctly configured — for an authenticated caller it also lists
  * the NAMES of missing variables (never their values) so a misconfiguration is
  * diagnosable from Vercel without shelling into the box.
+ *
+ * A caller that PRESENTS credentials gets an honest answer about them: a wrong
+ * bearer is 401, exactly like every private route. Without this, a deployment
+ * holding the wrong TRADING_GATEWAY_SECRET looks identical to one holding none,
+ * and the operator hunts the Delta key instead of the mismatched secret. An
+ * anonymous caller still learns nothing it could not learn from `/health`.
  */
 import { describeConfig } from "../config.js";
 import type { RouteContext, RouteResult } from "../context.js";
 import { bearerFrom, constantTimeEqual } from "../auth/gatewayAuth.js";
+import { GatewayError } from "../errors.js";
 
 const startedAt = Date.now();
 
@@ -34,6 +41,13 @@ export function handleReady(ctx: RouteContext): RouteResult {
   const authenticated = Boolean(
     presented && ctx.config.gatewaySecret && constantTimeEqual(presented, ctx.config.gatewaySecret)
   );
+
+  // Presented but wrong: tell the caller its credential is bad (401) rather
+  // than answering as if it had sent none. Nothing is disclosed that the
+  // private routes do not already disclose.
+  if (presented && !authenticated) {
+    throw new GatewayError("UNAUTHORIZED", 401, "Invalid or missing gateway credentials.");
+  }
 
   return {
     status: summary.ready ? 200 : 503,

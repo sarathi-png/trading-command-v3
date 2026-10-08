@@ -63,6 +63,7 @@ export async function GET() {
       ready: gateway.ready,
       host: gateway.host,
       liveExecutionEnabled: gateway.liveExecutionEnabled ?? false,
+      ...(gateway.missing ? { missing: gateway.missing } : {}),
       ...(gateway.error ? { error: gateway.error } : {}),
     },
     flags: {

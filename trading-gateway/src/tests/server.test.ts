@@ -244,7 +244,12 @@ async function startGateway(options: {
     baseUrl: config.deltaBaseUrl,
     timeoutMs: config.deltaTimeoutMs,
     maxRetries: config.deltaMaxRetries,
-    credentials: { apiKey: config.deltaApiKey, apiSecret: config.deltaApiSecret },
+    // Mirror the production wiring exactly: no keys -> null credentials, so
+    // tests can exercise the "gateway has no Delta credentials" failure mode.
+    credentials:
+      config.deltaApiKey && config.deltaApiSecret
+        ? { apiKey: config.deltaApiKey, apiSecret: config.deltaApiSecret }
+        : null,
   });
 
   const gateway = buildGateway(config, {
@@ -307,6 +312,17 @@ test("gateway: /ready reports configuration without disclosing values", async ()
     assert.equal(body.missingConfigCount, 0);
     const text = JSON.stringify(body);
     for (const secret of [API_SECRET, API_KEY, GATEWAY_SECRET]) assert.ok(!text.includes(secret));
+
+    // A caller that presents the WRONG secret is told so, not answered as if it
+    // had presented none — otherwise a mismatched Vercel deployment looks
+    // exactly like a gateway with no Delta key.
+    const wrongBearer = await fetch(`${ready.url}/ready`, {
+      headers: { Authorization: "Bearer not-the-secret" },
+    });
+    assert.equal(wrongBearer.status, 401);
+    const wrongBody = (await wrongBearer.json()) as { error: { code: string }; missing?: string[] };
+    assert.equal(wrongBody.error.code, "UNAUTHORIZED");
+    assert.equal(wrongBody.missing, undefined, "a wrong bearer learns nothing about the config");
   } finally {
     await ready.close();
   }
@@ -348,6 +364,49 @@ test("gateway: private routes reject missing, wrong and unconfigured secrets", a
     assert.equal(response.status, 503, "an unconfigured gateway must fail closed");
   } finally {
     await unconfigured.close();
+  }
+});
+
+test("gateway: private reads fail closed with 503 when Delta credentials are absent", async () => {
+  // No Delta key/secret on the gateway: the read must be refused as
+  // "gateway not configured" — never as "could not reach Delta", which would
+  // send the operator hunting for a network problem that does not exist.
+  const h = await startGateway({ env: { DELTA_API_KEY: "", DELTA_API_SECRET: "" } });
+  try {
+    const response = await fetch(`${h.url}/api/account/balance`, { headers: AUTH });
+    assert.equal(response.status, 503);
+    const body = (await response.json()) as { error: { code: string; message: string } };
+    assert.equal(body.error.code, "GATEWAY_NOT_CONFIGURED");
+    assert.match(body.error.message, /credentials/i);
+    assert.equal(h.delta.requests.length, 0, "nothing may be sent to Delta without credentials");
+
+    const ready = await fetch(`${h.url}/ready`);
+    assert.equal(ready.status, 503);
+    const readyBody = (await ready.json()) as { missingConfigCount: number };
+    assert.equal(readyBody.missingConfigCount, 2);
+  } finally {
+    await h.close();
+  }
+});
+
+test("gateway: a refused mutation is never reported as an unknown venue outcome", async () => {
+  // A request that never left the process has a KNOWN outcome (it was not
+  // sent). Reporting ORDER_STATUS_UNKNOWN here would tell the operator that an
+  // order might exist when it demonstrably does not.
+  const h = await startGateway({ env: { DELTA_API_KEY: "", DELTA_API_SECRET: "" } });
+  try {
+    const response = await fetch(`${h.url}/api/orders/cancel`, {
+      method: "POST",
+      headers: AUTH,
+      body: JSON.stringify({ clientOrderId: "tc-probe-cancel" }),
+    });
+    assert.equal(response.status, 503);
+    const body = (await response.json()) as { error: { code: string } };
+    assert.equal(body.error.code, "GATEWAY_NOT_CONFIGURED");
+    assert.notEqual(body.error.code, "ORDER_STATUS_UNKNOWN");
+    assert.equal(h.delta.requests.length, 0);
+  } finally {
+    await h.close();
   }
 });
 

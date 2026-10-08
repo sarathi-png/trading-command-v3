@@ -104,6 +104,13 @@ interface RequestOptions {
   requestId?: string;
   /** Only ever true for read-only requests. */
   retries?: number;
+  /**
+   * Statuses whose body should be returned instead of thrown. Use only for
+   * probes that need the gateway's own explanation of a non-2xx answer
+   * (see gatewayHealth, which reads the /ready readiness envelope). Requests
+   * that move money must never opt in: an unexpected status there has to fail.
+   */
+  acceptStatuses?: number[];
 }
 
 function buildUrl(base: string, path: string, query?: RequestOptions["query"]): string {
@@ -189,6 +196,9 @@ export async function gatewayRequest<T = Record<string, unknown>>(
       if (!response.ok || envelope.success === false) {
         const upstreamCode = envelope.error?.code;
         const status = response.status;
+        if (options.acceptStatuses?.includes(status) && parsed !== null) {
+          return parsed as T;
+        }
         const canRetry =
           method === "GET" && (status === 429 || status === 502 || status === 503 || status === 504);
         if (canRetry && attempt < attempts - 1) {
@@ -256,13 +266,32 @@ function classify(status: number, upstreamCode?: string): GatewayErrorCode {
   return status >= 500 ? "GATEWAY_UNAVAILABLE" : "GATEWAY_UPSTREAM_ERROR";
 }
 
-/** Liveness/readiness of the gateway, for /api/system. Never throws. */
+/**
+ * Liveness/readiness of the gateway, for /api/system and the settings panel.
+ * Never throws.
+ *
+ * `reachable` answers "did the gateway process answer at all", which is a
+ * different question from "is it ready to sign Delta requests". The gateway's
+ * `/ready` endpoint deliberately answers 503 when its own Delta credentials are
+ * missing, so a naive "non-2xx means unreachable" reading sends an operator
+ * looking for a network fault when the real problem is a missing Delta API key
+ * on the gateway host. The three states are reported separately:
+ *
+ *   reachable + ready      -> configured, credentials present, Delta host known
+ *   reachable + !ready     -> the process is up but cannot sign (missing keys)
+ *   !reachable             -> network/DNS/TLS/timeout, or the app's secret was
+ *                             rejected (401), or the app is not configured
+ *
+ * Only variable NAMES are ever surfaced, never values.
+ */
 export async function gatewayHealth(): Promise<{
   reachable: boolean;
   ready: boolean;
   configured: boolean;
   host: string | null;
   liveExecutionEnabled?: boolean;
+  /** Environment variable NAMES missing on the gateway (never values). */
+  missing?: string[];
   error?: string;
 }> {
   const state = gatewayConfigState();
@@ -277,27 +306,81 @@ export async function gatewayHealth(): Promise<{
         : "Trading gateway is not configured.",
     };
   }
+
+  type ReadyEnvelope = {
+    ready?: boolean;
+    liveExecutionEnabled?: boolean;
+    missing?: string[];
+    missingConfigCount?: number;
+    error?: { code?: string; message?: string };
+  };
+
+  let ready: ReadyEnvelope;
   try {
-    const ready = await gatewayRequest<{ ready?: boolean; liveExecutionEnabled?: boolean }>("/ready", {
+    ready = await gatewayRequest<ReadyEnvelope>("/ready", {
       timeoutMs: 5000,
       retries: 0,
+      // Read the gateway's own verdict instead of assuming "non-2xx = down".
+      acceptStatuses: [200, 401, 403, 503],
     });
-    return {
-      reachable: true,
-      ready: ready.ready === true,
-      configured: true,
-      host: state.host,
-      ...(typeof ready.liveExecutionEnabled === "boolean"
-        ? { liveExecutionEnabled: ready.liveExecutionEnabled }
-        : {}),
-    };
   } catch (error) {
+    // No answer at all: nothing listened, or the connection failed.
     return {
       reachable: false,
       ready: false,
       configured: true,
       host: state.host,
-      error: error instanceof TradingGatewayError ? error.message : "The trading gateway is unreachable.",
+      error:
+        error instanceof TradingGatewayError
+          ? error.message
+          : "The trading gateway is unreachable.",
     };
   }
+
+  const missing = Array.isArray(ready.missing) ? ready.missing : undefined;
+  const live =
+    typeof ready.liveExecutionEnabled === "boolean"
+      ? { liveExecutionEnabled: ready.liveExecutionEnabled }
+      : {};
+
+  // The app's secret is wrong: the gateway answered, but as a stranger.
+  if (ready.error?.code === "UNAUTHORIZED" || ready.error?.code === "FORBIDDEN") {
+    return {
+      reachable: true,
+      ready: false,
+      configured: true,
+      host: state.host,
+      ...live,
+      error:
+        "The gateway rejected this app's TRADING_GATEWAY_SECRET (HTTP 401): the secret here and on the gateway must be identical.",
+    };
+  }
+
+  if (ready.ready !== true) {
+    const missingText = missing?.length
+      ? ` It is missing: ${missing.join(", ")}.`
+      : "";
+    return {
+      reachable: true,
+      ready: false,
+      configured: true,
+      host: state.host,
+      ...live,
+      ...(missing ? { missing } : {}),
+      error: `The gateway is running but cannot sign Delta requests.${missingText}${
+        missingText
+          ? " Set those variables on the gateway host and restart it."
+          : " Check its Delta API key, its IP allowlist at Delta, and its configuration."
+      }`,
+    };
+  }
+
+  return {
+    reachable: true,
+    ready: true,
+    configured: true,
+    host: state.host,
+    ...live,
+    ...(ready.missing ? { missing: ready.missing } : {}),
+  };
 }

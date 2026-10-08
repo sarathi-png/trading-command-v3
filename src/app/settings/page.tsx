@@ -376,6 +376,10 @@ export default function SettingsPage() {
             <KV k="Delta egress IP" v="Gateway's static IPv4 (allowlist it at Delta)" />
           </div>
 
+          {system?.gateway?.error && (
+            <p className="text-[11px] text-warn">{system.gateway.error}</p>
+          )}
+
           <p className="text-[10px]">
             Deployment steps (server, HTTPS, firewall, static IP, Delta allowlist) are in{" "}
             <span className="num">docs/TRADING_GATEWAY_DEPLOYMENT.md</span>. Live orders additionally
