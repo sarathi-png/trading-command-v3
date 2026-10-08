@@ -1,3 +1,13 @@
+# Local/dev compose stack: Next.js application + PostgreSQL.
+#
+# The application signs CoinDCX requests itself, so this stack needs nothing
+# else: no gateway, no static IP, no second host. Credentials come from the
+# environment as COINDCX_API_KEY / COINDCX_API_SECRET and stay server-side.
+#
+# The retired static-IP trading gateway (trading-gateway/) is NOT part of this
+# stack. It still exists for Delta-era deployments; if you need it, that is a
+# separate compose file and a separate decision, because it requires a host with
+# a dedicated public IPv4 (see docs/TRADING_GATEWAY_DEPLOYMENT.md).
 services:
   web:
     build: .
@@ -5,8 +15,13 @@ services:
       - "3000:3000"
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/app_db
-      DELTA_API_KEY: ${DELTA_API_KEY:-}
-      DELTA_API_SECRET: ${DELTA_API_SECRET:-}
+      # Private exchange access: credentials, or nothing (the app then runs on
+      # demo/public data and refuses private reads rather than guessing).
+      COINDCX_API_KEY: ${COINDCX_API_KEY:-}
+      COINDCX_API_SECRET: ${COINDCX_API_SECRET:-}
+      # COINDCX_BASE_URL / COINDCX_PUBLIC_BASE_URL default to the real hosts.
+      EXCHANGE_MARKET_ENABLED: "true"
+      # Keep live submission off until you deliberately arm it in the UI as well.
       LIVE_EXECUTION_ENABLED: "false"
       PAPER_TRADING_ENABLED: "true"
       TRADINGVIEW_WEBHOOK_ENABLED: "false"

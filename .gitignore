@@ -3,7 +3,7 @@ node_modules/
 .pnp
 .pnp.js
 
-# Secrets — never commit. Holds DELTA_API_KEY/SECRET, API_PASSWORD, SESSION_SECRET.
+# Secrets — never commit. Holds COINDCX_API_KEY/SECRET, API_PASSWORD, SESSION_SECRET.
 .env
 .env.local
 .env*.local

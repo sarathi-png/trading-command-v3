@@ -27,7 +27,7 @@ export default function PositionsPage() {
   return (
     <div className="p-3 space-y-3 max-w-[1400px] mx-auto">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-        <MetricCard label="EQUITY" value={fmtUsd(account?.equity)} sub={account?.source === "demo" ? "DEMO / PAPER" : "DELTA"} />
+        <MetricCard label="EQUITY" value={fmtUsd(account?.equity)} sub={account?.source === "demo" ? "DEMO / PAPER" : "COINDCX"} />
         <MetricCard label="OPEN P&L" value={fmtUsd(account?.openPnl, { sign: true })}
           tone={pnlTone(account?.openPnl ?? 0) === "pos" ? "up" : pnlTone(account?.openPnl ?? 0) === "neg" ? "dn" : "flat"} />
         <MetricCard label="MARGIN USED" value={fmtUsd(account?.marginUsed)}
@@ -45,15 +45,15 @@ export default function PositionsPage() {
           />
           <Panel title="LIVE EXCHANGE POSITIONS">
             <div className="p-4 text-[11px] text-dim leading-relaxed">
-              {settings.dataSource === "delta" ? (
+              {settings.dataSource === "live" ? (
                 <p className="flex items-center gap-2">
-                  <Chip tone="up">DELTA</Chip> Live positions merge into the table above when Delta account data is connected.
+                  <Chip tone="up">LIVE</Chip> Live positions merge into the table above when CoinDCX account data is connected.
                 </p>
               ) : (
                 <p>
-                  The data source is currently <span className="text-warn">demo</span>. Connect Delta in
+                  The data source is currently <span className="text-warn">demo</span>. Configure CoinDCX in
                   Settings → Market Data to overlay real exchange positions. Live positions are always
-                  labelled <Chip>DELTA</Chip>, paper positions <Chip>PAPER</Chip> — they are never mixed.
+                  labelled <Chip>LIVE</Chip>, paper positions <Chip>PAPER</Chip> — they are never mixed.
                 </p>
               )}
             </div>

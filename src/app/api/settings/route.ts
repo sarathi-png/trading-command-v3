@@ -1,4 +1,4 @@
-import { deltaAccountConfigured } from "@/lib/credentials";
+import { exchangeAccountConfigured } from "@/lib/credentials";
 import { flags } from "@/lib/flags";
 import { getSettings, logAudit, updateSettings } from "@/lib/settings";
 import type { AppSettings } from "@/lib/types";
@@ -12,8 +12,8 @@ export async function GET() {
     return Response.json({
       settings,
       capabilities: {
-        deltaAccountConfigured: await deltaAccountConfigured(),
-        deltaMarket: flags.deltaMarket(),
+        exchangeAccountConfigured: await exchangeAccountConfigured(),
+        exchangeMarket: flags.exchangeMarket(),
         paperTrading: flags.paperTrading(),
         liveExecution: flags.liveExecution(),
         webhook: flags.tradingviewWebhook(),

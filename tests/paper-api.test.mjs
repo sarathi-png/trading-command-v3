@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -22,7 +23,7 @@ async function reservePort() {
 }
 
 async function waitForServer(server, url, getOutput) {
-  const deadline = Date.now() + 45000;
+  const deadline = Date.now() + 90000;
   while (Date.now() < deadline) {
     if (server.exitCode !== null) {
       throw new Error(`Next.js exited before becoming ready:\n${getOutput()}`);
@@ -37,7 +38,15 @@ async function waitForServer(server, url, getOutput) {
   throw new Error(`Next.js did not become ready:\n${getOutput()}`);
 }
 
-test("authenticated read-only to paper order and journal flow", { timeout: 60000 }, async () => {
+/**
+ * The suite normally runs against a production build (`npm test` builds first).
+ * When no build exists — e.g. a sandbox that cannot reach fonts.googleapis.com,
+ * which `next/font/google` in src/app/layout.tsx needs — it falls back to a dev
+ * server so the API contract is still verified.
+ */
+const hasProductionBuild = existsSync(path.join(projectRoot, ".next", "BUILD_ID"));
+
+test("authenticated read-only to paper order and journal flow", { timeout: 120000 }, async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "trading-command-paper-test-"));
   const port = await reservePort();
   const url = `http://127.0.0.1:${port}`;
@@ -46,7 +55,7 @@ test("authenticated read-only to paper order and journal flow", { timeout: 60000
     process.execPath,
     [
       path.join(projectRoot, "node_modules", "next", "dist", "bin", "next"),
-      "start",
+      hasProductionBuild ? "start" : "dev",
       "--hostname",
       "127.0.0.1",
       "--port",
@@ -56,15 +65,23 @@ test("authenticated read-only to paper order and journal flow", { timeout: 60000
       cwd: projectRoot,
       env: {
         ...process.env,
-        NODE_ENV: "production",
+        NODE_ENV: hasProductionBuild ? "production" : "development",
         API_PASSWORD: "paper-test-password",
         SESSION_SECRET: "paper-test-session-secret",
         DATA_BACKEND: "file",
         TC_DATA_DIR: dataDir,
         DATABASE_URL: "",
-        DELTA_API_KEY: "paper-test-delta-key",
-        DELTA_API_SECRET: "paper-test-delta-secret",
-        DELTA_MARKET_ENABLED: "false",
+        // Deliberately NOT set: the application must run paper trading with no
+        // exchange credentials at all. If a stray COINDCX_API_KEY/SECRET (or a
+        // legacy DELTA_*/TRADING_GATEWAY_* variable) were still required here,
+        // this test would fail — that is the point.
+        COINDCX_API_KEY: "",
+        COINDCX_API_SECRET: "",
+        DELTA_API_KEY: "",
+        DELTA_API_SECRET: "",
+        TRADING_GATEWAY_URL: "",
+        TRADING_GATEWAY_SECRET: "",
+        EXCHANGE_MARKET_ENABLED: "false",
         LIVE_EXECUTION_ENABLED: "false",
         PAPER_TRADING_ENABLED: "true",
         HF_TOKEN: "",
@@ -114,19 +131,31 @@ test("authenticated read-only to paper order and journal flow", { timeout: 60000
         body: JSON.stringify(body),
       });
 
-    const credentialOverride = await json("/api/settings/delta-credentials", {
+    // Credentials can no longer be entered from the dashboard at all: the
+    // server reads them from its own environment. The refusal must explain that
+    // and must not echo anything the caller sent.
+    const credentialOverride = await json("/api/settings/exchange-credentials", {
       apiKey: "test-key",
       apiSecret: "test-secret",
     });
     assert.equal(credentialOverride.status, 409);
     const credentialError = await credentialOverride.json();
-    assert.match(credentialError.error, /server environment/i);
+    assert.match(credentialError.error, /environment/i);
     assert.doesNotMatch(JSON.stringify(credentialError), /paper-test|test-secret|insert into/i);
+
+    // Status reports presence and VARIABLE NAMES (unconfigured here), nothing else.
+    const credentialStatus = await request("/api/settings/exchange-credentials").then((r) => r.json());
+    assert.equal(credentialStatus.configured, false);
+    assert.equal(credentialStatus.source, "none");
+    assert.deepEqual(credentialStatus.missing, ["COINDCX_API_KEY", "COINDCX_API_SECRET"]);
+    assert.equal(credentialStatus.legacyStoredKeys, false);
 
     const initialSettings = await request("/api/settings").then((response) => response.json());
     assert.equal(initialSettings.settings.mode, "read_only");
     assert.equal(initialSettings.capabilities.liveExecution, false);
-    assert.equal(initialSettings.capabilities.deltaAccountConfigured, true);
+    // No credentials in this test, so private exchange access is off while
+    // paper trading keeps working.
+    assert.equal(initialSettings.capabilities.exchangeAccountConfigured, false);
 
     const readOnlyOrder = await json("/api/paper", { symbol: "BTCUSD", qty: 0.001 });
     assert.equal(readOnlyOrder.status, 403);
@@ -174,6 +203,22 @@ test("authenticated read-only to paper order and journal flow", { timeout: 60000
     assert.equal(journal.entries[0].mode, "paper");
     assert.equal(journal.entries[0].source, "paper");
     assert.ok(Number.isFinite(journal.entries[0].pnl));
+
+    // ---- separation of paper from private/exchange paths -------------------
+    // Private CoinDCX reads need credentials; without them they fail closed
+    // with a readable message instead of falling back to demo numbers.
+    const summary = await request("/api/exchange/summary").then((r) => r.json());
+    assert.equal(summary.available, false);
+    assert.match(String(summary.error), /not configured/i);
+
+    // ...and nothing about that failure leaks a credential-shaped value.
+    const summaryText = JSON.stringify(summary);
+    assert.doesNotMatch(summaryText, /paper-test|test-secret|api[_-]?key/i);
+
+    // Paper state still works end to end with exchange credentials absent.
+    const paperAfter = await request("/api/paper").then((r) => r.json());
+    assert.ok(Array.isArray(paperAfter.orders));
+    assert.ok(Array.isArray(paperAfter.positions));
 
     const liveMode = await json("/api/settings", { mode: "live" });
     assert.equal(liveMode.status, 403);

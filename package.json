@@ -7,10 +7,13 @@
     "start": "next start",
     "db:push": "drizzle-kit push --config=drizzle.config.ts",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && npm --prefix trading-gateway run typecheck",
     "test:quant": "tsc -p tsconfig.quant.json && node --test output/quant-js/lib/strategy/quant/quant.test.js",
     "test:paper": "node --test tests/paper-api.test.mjs",
-    "test": "npm run test:quant && npm run build && npm run test:paper"
+    "test": "npm run test:quant && npm run test:exchange && npm run test:gateway && npm run build && npm run test:paper && npm run test:live-exchange",
+    "test:gateway": "npm --prefix trading-gateway test",
+    "test:exchange": "tsc -p tsconfig.exchange.json && node --test output/exchange-js/tests/exchange/coindcx.test.js",
+    "test:live-exchange": "node --test tests/live-exchange.test.mjs"
   },
   "dependencies": {
     "dotenv": "17.3.1",

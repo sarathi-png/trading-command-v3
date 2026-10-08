@@ -95,7 +95,7 @@ export default function MarketsPage() {
                       {t.openInterest !== null ? fmtCompactUsd(t.openInterest) : "N/A"}
                     </td>
                     <td className="px-2 py-2 text-right">
-                      <Chip tone={t.source === "demo" ? "warn" : "up"}>{t.source === "demo" ? "DEMO" : "DELTA"}</Chip>
+                      <Chip tone={t.source === "demo" ? "warn" : "up"}>{t.source === "demo" ? "DEMO" : "LIVE"}</Chip>
                     </td>
                     <td className="px-2 py-2 text-right">
                       <button
@@ -157,7 +157,7 @@ function MarketDetail({ symbol }: { symbol: string }) {
   const { activeSymbol } = useApp();
   void activeSymbol;
   return (
-    <Panel title={symbol} badge={t && <Chip tone={t.source === "demo" ? "warn" : "up"}>{t.source === "demo" ? "DEMO DATA" : "DELTA LIVE"}</Chip>}>
+    <Panel title={symbol} badge={t && <Chip tone={t.source === "demo" ? "warn" : "up"}>{t.source === "demo" ? "DEMO DATA" : "COINDCX LIVE"}</Chip>}>
       <div className="p-3">
         {t ? (
           <div className="flex items-baseline gap-3 mb-2">

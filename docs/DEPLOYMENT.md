@@ -1,5 +1,12 @@
 # Deployment
 
+> **Deployment today is Vercel-only.** The canonical guide is
+> **`docs/VERCEL_DEPLOYMENT.md`**: Vercel + a hosted Postgres + a CoinDCX API
+> key. No static IP, no gateway, no VPS. The sections below that describe the
+> gateway or Cloudflare Tunnel remain useful for a Delta-era set-up or for
+> self-hosting behind a tunnel, but they are not part of the current path.
+
+
 ## Local development (Windows / macOS / Linux)
 
 ```bash
@@ -28,7 +35,26 @@ Remove-Item Env:DATABASE_URL
 Keep the connection string private; do not paste it into the dashboard or commit
 it. A successful `/api/health` response should report `"ok": true` and
 `"backend": "postgres"`. Health only checks database connectivity; applying the
-schema is also required for settings and credential persistence.
+schema is also required for settings and live-order idempotency records.
+
+## The trading gateway (RETIRED — kept only for Delta-era setups)
+
+This application no longer calls the gateway: CoinDCX does not require an
+IP-bound key, so the serverless functions sign their own requests. The section
+below is retained for anyone still running a Delta-era deployment. Public market
+data does not need it. Deploy it separately and point the deployment at it:
+
+```bash
+cd trading-gateway && npm install && npm run build && npm start
+```
+
+```env
+TRADING_GATEWAY_URL=https://gateway.example.com
+TRADING_GATEWAY_SECRET=<same value as the gateway's TRADING_GATEWAY_SECRET>
+```
+
+Full runbook, including the static-IP/allowlist steps:
+`docs/TRADING_GATEWAY_DEPLOYMENT.md`.
 
 ## Production build
 
@@ -36,6 +62,18 @@ schema is also required for settings and credential persistence.
 npm run build
 npm start
 ```
+
+`next build` fetches the Inter and JetBrains Mono stylesheets from Google Fonts.
+On a machine without outbound access to `fonts.googleapis.com` the build fails
+with `Can't resolve '@vercel/turbopack-next/internal/font/google/font'`. For
+offline/CI builds run the bundled helper in one terminal and build in another:
+
+```bash
+node scripts/offline-font-mock.mjs
+NEXT_FONT_GOOGLE_MOCKED_RESPONSES=/tmp/font-mock/mock.json npm run build
+```
+
+Vercel and any normally-connected host need nothing extra.
 
 Node ≥ 20. The app binds to port 3000 by default (`PORT` env to change).
 
@@ -74,12 +112,12 @@ database port through the tunnel.
 Run `npm test` from the project root. It compiles and runs the quant tests, builds
 the production app, and exercises login plus the paper-order/journal flow against
 an isolated local file store. The smoke test uses demo prices and does not
-contact Delta or enable live execution.
+contact the exchange or enable live execution.
 
 ## Checklist
 
 - [ ] `LIVE_EXECUTION_ENABLED=false` until you truly need it
-- [ ] Delta API key IP-whitelisted
+- [ ] CoinDCX API key created WITHOUT IP binding (Vercel has no fixed egress IP)
 - [ ] HTTPS enforced
 - [ ] Postgres not publicly reachable
 - [ ] `.env` excluded from git and backups encrypted

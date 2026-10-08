@@ -165,15 +165,15 @@ export default function ChartPanel({
     let stop = false;
     const load = async () => {
       try {
-        const res = await api.get<{ candles: Candle[]; source: "demo" | "delta" }>(
+        const res = await api.get<{ candles: Candle[]; source: "demo" | "live" }>(
           `/api/market/candles?symbol=${symbol}&timeframe=${timeframe}&limit=300`
         );
         if (stop) return;
         candlesRef.current = res.candles;
         setLastCandle(res.candles.at(-1) ?? null);
         applyCandles(res.candles);
-        setError(res.source === "demo" && settings.dataSource === "delta"
-          ? "Delta candles unavailable — showing demo data (labelled)."
+        setError(res.source === "demo" && settings.dataSource === "live"
+          ? "CoinDCX candles unavailable — showing demo data (labelled)."
           : null);
       } catch (e) {
         if (!stop) setError(e instanceof Error ? e.message : "Candles unavailable");

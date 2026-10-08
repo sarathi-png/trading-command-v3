@@ -274,7 +274,7 @@ export function PositionsTable({
       badge={<span className="text-[9px] num text-dim">{positions.length} OPEN</span>}>
       {positions.length === 0 ? (
         <EmptyState icon={<Inbox size={18} />} title="No open positions"
-          hint={source === "all" ? "Connect Delta or switch to PAPER mode to open simulated positions." : "Paper positions appear here when you place simulated orders."} />
+          hint={source === "all" ? "Connect CoinDCX or switch to PAPER mode to open simulated positions." : "Paper positions appear here when you place simulated orders."} />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-[11px]">

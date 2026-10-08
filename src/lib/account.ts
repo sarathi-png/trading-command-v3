@@ -1,11 +1,14 @@
 /**
- * Account aggregation: demo/paper wallet + (optionally) live Delta account.
+ * Account aggregation: demo/paper wallet + (optionally) the live exchange account.
  * Demo & paper figures are estimates clearly separated from exchange data.
+ *
+ * Live figures come from src/lib/exchange/service.ts, which signs CoinDCX
+ * requests in this process — there is no gateway hop any more.
  */
 import { getRepo } from "@/lib/repo";
-import { deltaAccountConfigured } from "./credentials";
+import { exchangeAccountConfigured } from "./credentials";
 import { flags } from "./flags";
-import { deltaPositions, deltaWalletBalances } from "./market/delta";
+import { liveBalances, livePositions } from "./exchange/service";
 import { getTickers } from "./market/service";
 import { getPaperState } from "./paper/engine";
 import { getSettings } from "./settings";
@@ -50,27 +53,30 @@ export async function getAccountState(): Promise<AccountState> {
     source: "paper" as const,
   }));
 
-  let source: "demo" | "delta" = "demo";
-  if (settings.dataSource === "delta" && (await deltaAccountConfigured())) {
+  let source: "demo" | "live" = "demo";
+  if (settings.dataSource === "live" && (await exchangeAccountConfigured())) {
     // Wallet and positions are fetched independently: if the positions query
     // fails (no open positions / endpoint hiccup) the real balance must still
     // show — previously one failure in Promise.all dropped everything to demo.
+    // CoinDCX futures balances are denominated in the margin currency (USDT);
+    // INR-margined accounts report INR, which is surfaced rather than converted
+    // silently.
     let usdBalance: number | null = null;
     try {
-      const balances = await deltaWalletBalances();
-      const usd = balances.find((b) => b.asset === "USD" || b.asset === "USDC");
-      if (usd) usdBalance = usd.balance;
+      const balances = await liveBalances();
+      const margin = balances.find((b) => b.asset === "USDT" || b.asset === "USD" || b.asset === "USDC");
+      if (margin) usdBalance = margin.balance;
     } catch {
       usdBalance = null;
     }
     if (usdBalance !== null) {
-      let livePos: Awaited<ReturnType<typeof deltaPositions>> = [];
+      let livePos: Awaited<ReturnType<typeof livePositions>> = [];
       try {
-        livePos = await deltaPositions();
+        livePos = await livePositions();
       } catch {
         livePos = []; // wallet still valid; positions shown as unavailable
       }
-      source = "delta";
+      source = "live";
       const liveUpl = livePos.reduce((a, p) => a + p.upl, 0);
       return {
         equity: usdBalance + liveUpl,
@@ -83,7 +89,7 @@ export async function getAccountState(): Promise<AccountState> {
         source,
         positions: [
           ...positions,
-          ...livePos.map((p) => ({ ...p, source: "delta" as const })),
+          ...livePos.map((p) => ({ ...p, source: "live" as const })),
         ],
       };
     }

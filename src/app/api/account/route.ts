@@ -1,5 +1,5 @@
 import { getAccountState } from "@/lib/account";
-import { deltaAccountConfigured } from "@/lib/credentials";
+import { exchangeAccountConfigured } from "@/lib/credentials";
 import { flags } from "@/lib/flags";
 import { getSettings } from "@/lib/settings";
 
@@ -8,16 +8,16 @@ export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    const [account, settings, deltaCreds] = await Promise.all([
+    const [account, settings, exchangeConfigured] = await Promise.all([
       getAccountState(),
       getSettings(),
-      deltaAccountConfigured(),
+      exchangeAccountConfigured(),
     ]);
     return Response.json({
       account,
       mode: settings.mode,
       liveArmed: settings.liveArmed,
-      deltaAccountConfigured: deltaCreds,
+      exchangeAccountConfigured: exchangeConfigured,
       paperTradingEnabled: flags.paperTrading(),
     });
   } catch (e) {

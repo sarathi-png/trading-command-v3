@@ -1,7 +1,7 @@
 "use client";
 import { useState, useSyncExternalStore } from "react";
 import { KeyRound, ShieldAlert } from "lucide-react";
-import { Btn, Chip, Input, Panel, Select, StatusDot, Toggle, useConfirm } from "@/components/ui";
+import { Btn, Chip, Input, KV, Panel, Select, StatusDot, Toggle, useConfirm } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtDateTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -47,68 +47,47 @@ export default function SettingsPage() {
     30000
   );
 
-  // ---- Delta credentials (write-only) ------------------------------------
-  // The server never returns a stored key, so there is nothing to prefill:
-  // the fields are always empty and the badge is the only feedback.
+  // ---- CoinDCX credentials live in the deployment environment -------------
+  // There is deliberately nothing to enter here: the server reads
+  // COINDCX_API_KEY / COINDCX_API_SECRET from its own environment. This panel
+  // reports presence and the NAMES of anything missing (never values), plus
+  // whether a legacy encrypted Delta row from an older build is still around.
   const { data: creds, refresh: refreshCreds } = usePoll(
-    () => api.get<{ configured: boolean; source: "env" | "stored" | "none" }>("/api/settings/delta-credentials"),
+    () =>
+      api.get<{
+        configured: boolean;
+        source: "environment" | "none";
+        exchange: string;
+        missing: string[];
+        misconfigured: boolean;
+        baseUrl: string;
+        legacyStoredKeys: boolean;
+      }>("/api/settings/exchange-credentials"),
     300000
   );
-  const [credKey, setCredKey] = useState("");
-  const [credSecret, setCredSecret] = useState("");
   const [credBusy, setCredBusy] = useState(false);
-  const credentialsFromEnv = creds?.source === "env";
 
-  const saveCredentials = async () => {
-    if (!credKey.trim() || !credSecret.trim()) {
-      notify({ title: "Both fields are required", body: "Enter the Delta API key and secret.", tone: "warn" });
-      return;
-    }
-    setCredBusy(true);
-    try {
-      await api.post("/api/settings/delta-credentials", {
-        apiKey: credKey.trim(),
-        apiSecret: credSecret.trim(),
-      });
-      setCredKey("");
-      setCredSecret("");
-      refreshCreds();
-      refreshCaps();
-      // Saving keys only matters if the data source actually uses them —
-      // flip a demo feed over to Delta so rates + balance appear right away.
-      const switched = settings.dataSource !== "delta";
-      if (switched) await patchSettings({ dataSource: "delta" });
-      notify({
-        title: "Credentials saved",
-        body: switched
-          ? "Stored encrypted. Market data switched to Delta Exchange. Public rates load independently; account balances require valid, authorized keys."
-          : "Stored encrypted. Public rates load independently; account balances require valid, authorized keys.",
-        tone: "success",
-      });
-    } catch (e) {
-      notify({
-        title: "Could not save credentials",
-        body: e instanceof Error ? e.message : "Unknown error",
-        tone: "danger",
-      });
-    } finally {
-      setCredBusy(false);
-    }
-  };
-
-  const clearCredentials = async () => {
+  /**
+   * Purge the legacy encrypted Delta-keys row.
+   *
+   * Only relevant to deployments that upgraded from a build where keys could be
+   * pasted into this dashboard. Nothing reads that row any more — credentials
+   * come from the environment — but leaving a dormant secret in the database is
+   * still a liability, so removing it is one click.
+   */
+  const purgeLegacyCredentials = async () => {
     const ok = await confirm({
-      title: "Remove stored keys?",
+      title: "Remove legacy stored keys?",
       danger: true,
-      confirmLabel: "Remove keys",
-      body: "The encrypted Delta credentials saved from this dashboard will be deleted. Keys supplied through environment variables are unaffected.",
+      confirmLabel: "Remove legacy keys",
+      body: "Deletes the encrypted Delta credentials an older version of this dashboard saved to the database. The running system reads credentials only from the deployment environment, so nothing stops working.",
     });
     if (!ok) return;
     setCredBusy(true);
     try {
-      await api.del("/api/settings/delta-credentials");
+      await api.del("/api/settings/exchange-credentials");
       refreshCreds();
-      notify({ title: "Credentials removed", tone: "success" });
+      notify({ title: "Legacy credentials removed", tone: "success" });
     } catch (e) {
       notify({
         title: "Could not remove credentials",
@@ -148,7 +127,7 @@ export default function SettingsPage() {
       title: "ARM LIVE TRADING",
       danger: true,
       confirmLabel: "ARM LIVE TRADING",
-      body: "You are enabling the master trading switch. With this armed — and only with LIVE_EXECUTION_ENABLED on the server — confirmed orders can reach Delta Exchange. Type-level confirmation is enforced server-side.",
+      body: "You are enabling the master trading switch. With this armed — and only with LIVE_EXECUTION_ENABLED on the server — confirmed orders can reach CoinDCX Futures. Type-level confirmation is enforced server-side.",
     });
     if (!ok) return;
     try {
@@ -233,19 +212,19 @@ export default function SettingsPage() {
         <div className="p-3 space-y-2.5">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="microlabel w-28">SOURCE</span>
-            {(["demo", "delta"] as const).map((src) => (
+            {(["demo", "live"] as const).map((src) => (
               <button key={src} onClick={() => void patchSettings({ dataSource: src })}
                 className={cx("h-7 px-3 rounded border text-[10px] tracking-wider uppercase",
                   settings.dataSource === src ? "border-accent/60 text-accent bg-accent-dim" : "border-edge text-mut hover:text-ink")}>
-                {src === "demo" ? "Demo simulator" : "Delta Exchange India"}
+                {src === "demo" ? "Demo simulator" : "CoinDCX Futures"}
               </button>
             ))}
           </div>
           <div className="flex items-center gap-2 text-[11px] text-mut">
-            <StatusDot tone={system?.deltaMarket === "online" ? "ok" : system?.deltaMarket === "offline" ? "err" : "off"} />
-            Delta REST: {system?.deltaMarket ?? "unknown"}
-            {settings.dataSource === "delta" && system?.deltaMarket !== "online" && (
-              <span className="text-warn text-[10px]">— charts fall back to labelled demo candles if Delta is unreachable</span>
+            <StatusDot tone={system?.exchangeMarket === "online" ? "ok" : system?.exchangeMarket === "offline" ? "err" : "off"} />
+            CoinDCX REST: {system?.exchangeMarket ?? "unknown"}
+            {settings.dataSource === "live" && system?.exchangeMarket !== "online" && (
+              <span className="text-warn text-[10px]">— charts fall back to labelled demo candles if CoinDCX is unreachable</span>
             )}
           </div>
           <p className="text-[10px] text-dim leading-relaxed">
@@ -253,8 +232,8 @@ export default function SettingsPage() {
           </p>
           {settings.dataSource === "demo" && creds?.configured && (
             <p className="text-[10px] text-warn">
-              Delta keys are configured, but the chart is currently using demo prices. Select{" "}
-              <span className="text-ink">Delta Exchange India</span> above to switch to its public market feed.
+              CoinDCX credentials are configured, but the chart is currently using demo prices. Select{" "}
+              <span className="text-ink">CoinDCX Futures</span> above to switch to its public market feed.
             </p>
           )}
         </div>
@@ -351,104 +330,88 @@ export default function SettingsPage() {
         </div>
       </Panel>
 
-      {/* delta api */}
+      {/* exchange api — credentials live in the deployment environment */}
       <Panel
-        title="DELTA API"
+        title="EXCHANGE API · COINDCX FUTURES"
         badge={
           creds?.configured ? (
-            <Chip tone="up">
-              CONFIGURED{creds.source === "env" ? " · ENV" : " · STORED"}
-            </Chip>
+            <Chip tone="up">CONFIGURED</Chip>
+          ) : creds?.misconfigured ? (
+            <Chip tone="warn">MISCONFIGURED</Chip>
           ) : (
             <Chip>NOT CONFIGURED</Chip>
           )
         }
       >
         <div className="p-3 space-y-3 text-[11px] text-mut leading-relaxed">
-          <p className="flex items-center gap-2">
-            <KeyRound size={13} className="text-accent" />
+          <p className="flex items-start gap-2">
+            <KeyRound size={13} className="text-accent flex-none mt-0.5" />
             {creds?.configured ? (
-              <>
-                Keys are active from{" "}
-                <span className="num text-ink">
-                  {creds.source === "env" ? "the server environment" : "encrypted storage"}
-                </span>
-                . Their presence does not confirm that Delta accepts them.
-              </>
+              <span>
+                Private CoinDCX requests are signed by this deployment&apos;s own server functions,
+                which read <span className="num text-ink">COINDCX_API_KEY</span> and{" "}
+                <span className="num text-ink">COINDCX_API_SECRET</span> from the environment.
+                Credentials are never stored in the database, never sent to the browser and never
+                logged. Presence does not prove CoinDCX has accepted the key — check the account
+                balance card for a real read.
+              </span>
             ) : (
-              <>
-                No keys configured. Paste them below, or set{" "}
-                <span className="num text-ink">DELTA_API_KEY</span> /{" "}
-                <span className="num text-ink">DELTA_API_SECRET</span> in the server environment
-                (environment takes precedence).
-              </>
+              <span>
+                No CoinDCX credentials on this deployment, so live balances, positions and orders are
+                unavailable and the workspace uses demo or public data.
+                Set <span className="num text-ink">COINDCX_API_KEY</span> and{" "}
+                <span className="num text-ink">COINDCX_API_SECRET</span> in the environment
+                (Vercel → Settings → Environment Variables) and redeploy. Full steps:{" "}
+                <span className="num">docs/COINDCX_SETUP.md</span>.
+              </span>
             )}
           </p>
 
-          {credentialsFromEnv ? (
-            <p className="rounded border border-edge bg-bg2 p-2 text-[11px] text-dim">
-              To replace these keys, update both <span className="num text-ink">DELTA_API_KEY</span> and{" "}
-              <span className="num text-ink">DELTA_API_SECRET</span> in Vercel → Project → Settings →
-              Environment Variables, then redeploy. Environment credentials take precedence over stored keys.
+          {creds?.misconfigured && (
+            <p className="rounded border border-warn/40 bg-warn/10 p-2 text-[11px] text-warn">
+              Only{" "}
+              <span className="num">{creds.missing[0] ?? "one of the two variables"}</span> is
+              missing. Both <span className="num">COINDCX_API_KEY</span> and{" "}
+              <span className="num">COINDCX_API_SECRET</span> are required before any private request
+              is made.
             </p>
-          ) : (
-            <>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <label className="space-y-1">
-                  <span className="block text-[10px] uppercase tracking-wide">API key</span>
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={credKey}
-                    onChange={(e) => setCredKey(e.target.value)}
-                    placeholder="paste Delta API key"
-                    className="w-full rounded border border-edge bg-panel px-2 py-1.5 num text-ink outline-none focus:border-accent/60"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="block text-[10px] uppercase tracking-wide">API secret</span>
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={credSecret}
-                    onChange={(e) => setCredSecret(e.target.value)}
-                    placeholder="paste Delta API secret"
-                    className="w-full rounded border border-edge bg-panel px-2 py-1.5 num text-ink outline-none focus:border-accent/60"
-                  />
-                </label>
-              </div>
+          )}
 
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  disabled={credBusy}
-                  onClick={() => void saveCredentials()}
-                  className="rounded border border-accent/60 bg-accent-dim px-3 py-1.5 text-accent hover:text-ink disabled:opacity-50"
-                >
-                  {credBusy ? "Working…" : creds?.configured ? "Replace keys" : "Save keys"}
-                </button>
-                {creds?.source === "stored" && (
-                  <button
-                    disabled={credBusy}
-                    onClick={() => void clearCredentials()}
-                    className="rounded border border-edge px-3 py-1.5 text-mut hover:text-danger disabled:opacity-50"
-                  >
-                    Remove stored keys
-                  </button>
-                )}
-              </div>
-            </>
+          <div className="grid gap-1.5">
+            <KV k="Credentials held by" v="This deployment's environment (server-side only)" />
+            <KV k="Exchange host" v={creds?.baseUrl ?? "https://api.coindcx.com"} />
+            <KV k="API reachable" v={system?.exchange?.reachable ? "yes (public probe)" : "unverified"} />
+            <KV k="Missing variables" v={creds?.missing?.length ? creds.missing.join(", ") : "none"} />
+            <KV k="IP binding" v="Not required by CoinDCX for futures API keys" />
+          </div>
+
+          {system?.exchange?.error && (
+            <p className="text-[11px] text-warn">{system.exchange.error}</p>
           )}
 
           <p className="text-[10px]">
-            Stored keys are encrypted with AES-256-GCM using a key derived from{" "}
-            <span className="num">SESSION_SECRET</span>, are never returned by any endpoint, and
-            never appear in the audit log. The badge indicates configured keys, not successful
-            authentication. Transactions require{" "}
-            <span className="num">docs/DELTA_SETUP.md</span> for key permissions. Live orders stay
-            blocked by <span className="num">LIVE_EXECUTION_ENABLED</span> regardless of these keys.
+            Live orders additionally require <span className="num">LIVE_EXECUTION_ENABLED</span>{" "}
+            (off by default), LIVE mode armed, and a verifiable daily P&amp;L — the daily figure is read
+            from CoinDCX and fails closed, so an unverifiable day blocks submission. This build does not
+            send stop or take-profit orders on the order endpoint; position TP/SL uses CoinDCX&apos;s
+            dedicated endpoint.
           </p>
+
+          {creds?.legacyStoredKeys && (
+            <div className="rounded border border-edge bg-bg2 p-2 space-y-2">
+              <p className="text-[11px]">
+                An encrypted Delta key pair saved by an older version of this dashboard is still in the
+                database. Nothing reads it, but it can be removed.
+              </p>
+              <button
+                disabled={credBusy}
+                onClick={() => void purgeLegacyCredentials()}
+                className="rounded border border-edge px-3 py-1.5 text-mut hover:text-danger disabled:opacity-50"
+              >
+                {credBusy ? "Working…" : "Remove legacy stored keys"}
+              </button>
+            </div>
+          )}
         </div>
       </Panel>
 

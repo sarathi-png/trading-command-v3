@@ -66,7 +66,7 @@ export default function AutomationPage() {
           <ShieldCheck size={18} className="text-accent flex-none mt-0.5" />
           <ul className="text-[11px] text-mut leading-relaxed space-y-1 list-disc pl-4">
             <li>READ ONLY is the default; paper trading is a separate explicit mode.</li>
-            <li>Live execution needs env flag + LIVE mode + master switch + Delta credentials.</li>
+            <li>Live execution needs env flag + LIVE mode + master switch + CoinDCX API credentials.</li>
             <li>Risk limits (daily loss, order value, leverage, positions) block orders before submission.</li>
             <li>Every mode change, arming event and order request is written to the audit log.</li>
           </ul>

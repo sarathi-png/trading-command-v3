@@ -9,14 +9,25 @@ function envBool(name: string, fallback: boolean): boolean {
   return v === "true" || v === "1";
 }
 
+/** First non-empty value among equivalent names (rename support). */
+function envBoolAny(names: string[], fallback: boolean): boolean {
+  for (const name of names) {
+    const v = process.env[name];
+    if (v !== undefined && v !== "") return v === "true" || v === "1";
+  }
+  return fallback;
+}
+
 export const flags = {
-  /** Public Delta market data via REST (no credentials required). */
-  deltaMarket: () => envBool("DELTA_MARKET_ENABLED", true),
-  // NOTE: there is deliberately no `deltaAccountEnabled` here anymore. It used
-  // to check environment variables only, while credentials can also be stored
-  // encrypted in the database (Settings → Delta API) — which made the account
-  // view show the demo wallet and the header show DISCONNECTED even with valid
-  // saved keys. Use `deltaAccountConfigured()` from "@/lib/credentials" instead.
+  /**
+   * Public exchange market data via REST (no credentials required).
+   * EXCHANGE_MARKET_ENABLED is the current name; DELTA_MARKET_ENABLED is still
+   * honoured so an existing deployment's environment keeps working.
+   */
+  exchangeMarket: () => envBoolAny(["EXCHANGE_MARKET_ENABLED", "DELTA_MARKET_ENABLED"], true),
+  // NOTE: there is deliberately no `accountEnabled` flag here. Configuration is
+  // decided by whether COINDCX_API_KEY/COINDCX_API_SECRET are present — use
+  // `exchangeAccountConfigured()` from "@/lib/credentials".
   paperTrading: () => envBool("PAPER_TRADING_ENABLED", true),
   liveExecution: () => envBool("LIVE_EXECUTION_ENABLED", false),
   orderbook: () => envBool("ORDERBOOK_ENABLED", true),
@@ -28,9 +39,12 @@ export const flags = {
   telegram: () => envBool("TELEGRAM_ENABLED", false),
 };
 
-export const APP_VERSION = "1.0.0";
-export const DELTA_REST_BASE =
-  process.env.DELTA_REST_BASE || "https://api.india.delta.exchange";
-export const DELTA_WS_URL =
-  process.env.DELTA_WS_URL || "wss://socket.india.delta.exchange";
+export const APP_VERSION = "1.1.0";
+
+/** Public CoinDCX REST base for market data (no credentials). */
+export const COINDCX_BASE_URL = process.env.COINDCX_BASE_URL || "https://api.coindcx.com";
+/** Public data host used for candlesticks and order-book depth. */
+export const COINDCX_PUBLIC_BASE_URL =
+  process.env.COINDCX_PUBLIC_BASE_URL || "https://public.coindcx.com";
+
 export const PAPER_FEE_RATE = 0.0005; // 0.05% taker per side

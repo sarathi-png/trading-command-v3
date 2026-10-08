@@ -21,7 +21,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 }
 
 export default function Onboarding({ capabilities }: {
-  capabilities: { liveExecution: boolean; deltaAccountConfigured: boolean };
+  capabilities: { liveExecution: boolean; exchangeAccountConfigured: boolean };
 }) {
   const { applySettings, notify } = useApp();
   const [step, setStep] = useState(0);
@@ -41,7 +41,7 @@ export default function Onboarding({ capabilities }: {
         layout,
         modules,
         watchlist,
-        dataSource: capabilities.deltaAccountConfigured ? "delta" : "demo",
+        dataSource: capabilities.exchangeAccountConfigured ? "live" : "demo",
       });
       applySettings(res.settings);
     } catch (e) {
@@ -88,7 +88,7 @@ export default function Onboarding({ capabilities }: {
                 [
                   { id: "read_only", name: "Read Only", desc: "Market data, analysis, journal. No order entry. Recommended start." },
                   { id: "paper", name: "Paper Trading", desc: "Simulated orders and positions against live-style prices." },
-                  { id: "live", name: "Live Trading", desc: "Real orders via Delta. Requires server configuration and explicit arming." },
+                  { id: "live", name: "Live Trading", desc: "Real orders via CoinDCX Futures. Requires API credentials and explicit arming." },
                 ] as const
               ).map((m) => (
                 <button
@@ -116,16 +116,17 @@ export default function Onboarding({ capabilities }: {
         )}
 
         {step === 2 && (
-          <Step n={3} title="Connect Delta Exchange">
-            {capabilities.deltaAccountConfigured ? (
+          <Step n={3} title="Connect CoinDCX Futures">
+            {capabilities.exchangeAccountConfigured ? (
               <div className="panel-2 p-3 flex items-center gap-3">
                 <Wifi size={16} className="text-up" />
                 <div>
-                  <p className="text-[12px] text-up">Delta credentials are configured</p>
+                  <p className="text-[12px] text-up">CoinDCX API credentials are configured</p>
                   <p className="text-[11px] text-dim">
-                    This confirms the key and secret are present, not that Delta has accepted them.
-                    Setup will use Delta public market data; a private-account authentication error
-                    means the credentials, permissions, or IP allowlist need checking.
+                    This confirms the server has credentials; it does not prove CoinDCX has accepted
+                    them. Setup uses public market data either way — a private-account authentication
+                    error means the key, its permissions, or its IP binding need checking in the
+                    CoinDCX API dashboard.
                   </p>
                 </div>
               </div>
@@ -133,18 +134,20 @@ export default function Onboarding({ capabilities }: {
               <div className="panel-2 p-3 flex items-center gap-3">
                 <WifiOff size={16} className="text-warn" />
                 <div>
-                  <p className="text-[12px] text-warn">No Delta credentials configured</p>
+                  <p className="text-[12px] text-warn">No CoinDCX credentials configured</p>
                   <p className="text-[11px] text-dim leading-relaxed">
                     The workspace runs in demo mode with simulated market data — clearly labelled.
-                    To connect your account, add <span className="num text-mut">DELTA_API_KEY</span> and{" "}
-                    <span className="num text-mut">DELTA_API_SECRET</span> to the server environment.
-                    Secrets are never sent to the browser and never stored in the database.
+                    To connect your account, set{" "}
+                    <span className="num text-mut">COINDCX_API_KEY</span> and{" "}
+                    <span className="num text-mut">COINDCX_API_SECRET</span> in the deployment
+                    environment (Vercel → Settings → Environment Variables). They are read only on
+                    the server: never in this app&apos;s browser bundle, its database or its logs.
                   </p>
                 </div>
               </div>
             )}
             <p className="text-[11px] text-dim mt-3 flex items-center gap-1.5">
-              <ShieldCheck size={12} className="text-accent" /> You can change this at any time in Settings → Delta API.
+              <ShieldCheck size={12} className="text-accent" /> You can change this at any time in Settings → Exchange API.
             </p>
           </Step>
         )}
