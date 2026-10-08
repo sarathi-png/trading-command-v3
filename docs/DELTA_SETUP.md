@@ -4,17 +4,32 @@
 
 Delta India app → Profile → **API Management** → Create API Key.
 Grant *Read Data* (+ *Trading* only if you intend live execution).
-Whitelist your server IP — Delta rejects non-whitelisted signed requests.
+Whitelist your **gateway's static IPv4** — Delta rejects non-whitelisted signed
+requests, and Vercel cannot offer a fixed outbound IP. See
+`docs/TRADING_GATEWAY_DEPLOYMENT.md` Part 3 for how to find that address.
 
-## 2. Configure the server
+## 2. Configure the GATEWAY (not the app)
+
+The Delta key and secret belong to the static-IP trading gateway:
 
 ```env
+# trading-gateway/.env  — on the host whose IPv4 you allowlisted at Delta
 DELTA_API_KEY=your_key
 DELTA_API_SECRET=your_secret
+DELTA_BASE_URL=https://api.india.delta.exchange
 ```
 
-Restart. Settings → Delta API will show **CONFIGURED**. Secrets are read from the
-environment only — never from the browser, database or logs.
+The Vercel application is configured with the gateway instead:
+
+```env
+TRADING_GATEWAY_URL=https://gateway.example.com
+TRADING_GATEWAY_SECRET=<same value as the gateway's TRADING_GATEWAY_SECRET>
+```
+
+Restart the gateway, then Settings → **Delta API · Trading gateway** should show
+**GATEWAY CONFIGURED**. Secrets are read from the environment only — never from
+the browser, the database, or logs. Full runbook:
+`docs/TRADING_GATEWAY_DEPLOYMENT.md`.
 
 ## 3. Endpoints used (current docs)
 
@@ -24,15 +39,20 @@ environment only — never from the browser, database or logs.
 | Candles | `GET /v2/history/candles?symbol=&resolution=&start=&end=` |
 | Order book | `GET /v2/orderbook?symbol=` |
 | Trades | `GET /v2/trades?symbol=` |
-| Wallet | `GET /v2/wallet/balances` (auth) |
-| Positions | `GET /v2/positions` (auth) |
-| Orders | `GET/POST /v2/orders` (auth) |
-| Product lookup | `GET /v2/products/{symbol}` |
+| Wallet | `GET /v2/wallet/balances` (auth) — via the gateway |
+| Wallet ledger | `GET /v2/wallet/transactions` (auth) — via the gateway |
+| Fills | `GET /v2/fills` (auth) — via the gateway |
+| Positions | `GET /v2/positions?underlying_asset_symbol=` (auth) — via the gateway |
+| Orders | `GET/POST /v2/orders` (auth) — via the gateway |
+| Cancel order | `DELETE /v2/orders` (auth) — via the gateway |
+| Order lookup | `GET /v2/orders/client_order_id/{id}` (auth) — via the gateway |
+| Product lookup | `GET /v2/products/{symbol}` — public, used to resolve product_id |
 
-Authentication for private calls:
+Authentication for private calls (performed by the GATEWAY, never by the app):
 `signature = HMAC_SHA256(secret, METHOD + timestamp + path + queryString + body)`,
 sent as `api-key`, `timestamp`, `signature` headers. Signatures expire in ~5 s;
-the client signs per-request with the current unix time.
+the client signs per-request with the current unix time. See
+`trading-gateway/src/delta/signing.ts` and its deterministic test vectors.
 
 ## 4. WebSocket
 

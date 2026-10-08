@@ -1,3 +1,10 @@
+# Local/dev compose stack: Next.js application + PostgreSQL + trading gateway.
+#
+# The gateway mirrors the production topology: it is a separate process with
+# its own environment, its own outbound identity and the ONLY copy of the Delta
+# credentials. In production it must run on a host with a dedicated public
+# IPv4 (see docs/TRADING_GATEWAY_DEPLOYMENT.md) — a VPS, not a container host
+# that NATs you behind a shared address.
 services:
   web:
     build: .
@@ -5,13 +12,36 @@ services:
       - "3000:3000"
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/app_db
-      DELTA_API_KEY: ${DELTA_API_KEY:-}
-      DELTA_API_SECRET: ${DELTA_API_SECRET:-}
+      # Private Delta access goes through the gateway; the app holds no keys.
+      TRADING_GATEWAY_URL: http://gateway:8787
+      TRADING_GATEWAY_SECRET: ${TRADING_GATEWAY_SECRET:?set TRADING_GATEWAY_SECRET in .env}
       LIVE_EXECUTION_ENABLED: "false"
       PAPER_TRADING_ENABLED: "true"
       TRADINGVIEW_WEBHOOK_ENABLED: "false"
     depends_on:
       - postgres
+      - gateway
+    restart: unless-stopped
+
+  gateway:
+    build: ./trading-gateway
+    ports:
+      # Keep this bound to localhost in development; in production terminate
+      # HTTPS at a reverse proxy and firewall 8787 from the internet.
+      - "127.0.0.1:8787:8787"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8787"
+      TRADING_GATEWAY_SECRET: ${TRADING_GATEWAY_SECRET:?set TRADING_GATEWAY_SECRET in .env}
+      # Delta credentials live ONLY here.
+      DELTA_API_KEY: ${DELTA_API_KEY:-}
+      DELTA_API_SECRET: ${DELTA_API_SECRET:-}
+      DELTA_BASE_URL: https://api.india.delta.exchange
+      LIVE_EXECUTION_ENABLED: "false"
+      IDEMPOTENCY_STORE: /data/order-ledger.jsonl
+      LOG_LEVEL: info
+    volumes:
+      - gatewaydata:/data
     restart: unless-stopped
 
   postgres:
@@ -29,3 +59,4 @@ services:
 
 volumes:
   pgdata:
+  gatewaydata:

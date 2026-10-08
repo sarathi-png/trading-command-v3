@@ -1,8 +1,9 @@
 /**
  * Exchange account analytics for the dashboard.
  *
- * Delta Exchange is the connected venue. This module pulls the private
- * account endpoints and derives the numbers the UI needs:
+ * Delta Exchange is the connected venue. The private endpoints are pulled
+ * through the static-IP trading gateway (src/lib/tradingGateway) — Vercel holds
+ * no Delta credentials. This module derives the numbers the UI needs:
  *   - wallet balance in USD and in INR
  *   - cumulative deposits and withdrawals
  *   - realized P&L, best trade and worst trade (FIFO-matched from fills)
@@ -15,11 +16,15 @@
  *   GET /v2/wallet/balances     -> [{ asset_symbol, balance, available_balance }]
  *   GET /v2/wallet/transactions -> [{ transaction_type, amount, asset_symbol, created_at }]
  *   GET /v2/fills               -> [{ product_symbol, side, price, size, commission, created_at }]
- * Delta has no "all positions" endpoint; positions live in market/delta.ts.
+ * Delta has no "all positions" endpoint; positions live in tradingGateway/positions.ts.
  */
-import crypto from "node:crypto";
-import { resolveDeltaCredentials } from "./credentials";
-import { DELTA_REST_BASE } from "./flags";
+import {
+  TradingGatewayError,
+  gatewayConfigured,
+  gatewayFills,
+  gatewayWalletBalances,
+  gatewayWalletTransactions,
+} from "./tradingGateway";
 
 const DEFAULT_USD_INR = 83;
 
@@ -87,36 +92,8 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function signedHttp(
-  path: string,
-  apiKey: string,
-  apiSecret: string
-): Promise<{ status: number; json: unknown }> {
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const signature = crypto
-    .createHmac("sha256", apiSecret)
-    .update("GET" + timestamp + path)
-    .digest("hex");
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12000);
-  return fetch(`${DELTA_REST_BASE}${path}`, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "api-key": apiKey,
-      timestamp,
-      signature,
-    },
-    signal: ctrl.signal,
-  })
-    .then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }))
-    .finally(() => clearTimeout(timer));
-}
-
-function resultOf(json: unknown): unknown[] {
-  const j = json as { result?: unknown } | null;
-  return Array.isArray(j?.result) ? j.result : [];
+function resultOf(rows: unknown): unknown[] {
+  return Array.isArray(rows) ? rows : [];
 }
 
 /**
@@ -213,29 +190,24 @@ export async function getDeltaSummary(): Promise<DeltaSummary> {
     topSymbols: [],
   };
 
-  const creds = await resolveDeltaCredentials();
-  if (!creds) return { ...base, error: "Delta credentials are not configured" };
+  // Private reads go through the static-IP trading gateway, which holds the
+  // Delta credentials. The application never signs anything itself.
+  if (!gatewayConfigured()) {
+    return {
+      ...base,
+      error:
+        "The Trading Gateway is not configured, so live account data is unavailable. Set TRADING_GATEWAY_URL and TRADING_GATEWAY_SECRET.",
+    };
+  }
 
   try {
-    const [balRes, txRes, fillRes] = await Promise.all([
-      signedHttp("/v2/wallet/balances", creds.apiKey, creds.apiSecret),
-      signedHttp("/v2/wallet/transactions?page_size=200", creds.apiKey, creds.apiSecret),
-      signedHttp("/v2/fills?page_size=500", creds.apiKey, creds.apiSecret),
+    const [balanceRows, txRows, fillRows] = await Promise.all([
+      gatewayWalletBalances(),
+      gatewayWalletTransactions(200),
+      gatewayFills(500),
     ]);
 
-    if (balRes.status !== 200) {
-      const authHint = balRes.status === 401
-        ? " Check that the key and secret are correct for Delta Exchange India, the key allows read access, and its IP allowlist includes the Vercel deployment."
-        : balRes.status === 403
-          ? " Check that the API key has read access to account balances."
-          : "";
-      return {
-        ...base,
-        error: `Delta balances unavailable (HTTP ${balRes.status}).${authHint}`,
-      };
-    }
-
-    const balances = (resultOf(balRes.json) as BalanceRow[])
+    const balances = (resultOf(balanceRows) as BalanceRow[])
       .map((b) => ({
         asset: String(b.asset_symbol ?? "?"),
         balance: num(b.balance),
@@ -246,7 +218,7 @@ export async function getDeltaSummary(): Promise<DeltaSummary> {
       .filter((b) => b.asset === "USD" || b.asset === "USDT")
       .reduce((s, b) => s + b.balance, 0);
 
-    const txs = resultOf(txRes.json) as TransactionRow[];
+    const txs = resultOf(txRows) as TransactionRow[];
     const sumType = (needle: string) =>
       txs
         .filter((t) => String(t.transaction_type).toLowerCase().includes(needle))
@@ -266,7 +238,7 @@ export async function getDeltaSummary(): Promise<DeltaSummary> {
     const commissionUsd = Math.abs(sumType("commission"));
     const fundingUsd = Math.abs(sumType("funding"));
 
-    const fills = resultOf(fillRes.json) as FillRow[];
+    const fills = resultOf(fillRows) as FillRow[];
     const trades = matchTrades(fills);
     const derivedPnlUsd = trades.reduce((s, t) => s + t.pnlUsd, 0);
     const pnls = trades.map((t) => t.pnlUsd);
@@ -315,9 +287,15 @@ export async function getDeltaSummary(): Promise<DeltaSummary> {
         .sort((a, b) => b.pnlUsd - a.pnlUsd),
     };
   } catch (e) {
-    return {
-      ...base,
-      error: e instanceof Error ? `Delta request failed: ${e.message}` : "Delta request failed",
-    };
+    // TradingGatewayError messages are already normalised and secret-free
+    // ("Delta rejected the signature or API key during wallet balances
+    // (expired_signature)", "The trading gateway did not answer within ...").
+    const message =
+      e instanceof TradingGatewayError
+        ? e.message
+        : e instanceof Error
+          ? e.message
+          : "Delta request failed";
+    return { ...base, error: `Delta request failed: ${message}` };
   }
 }

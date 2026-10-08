@@ -28,7 +28,25 @@ Remove-Item Env:DATABASE_URL
 Keep the connection string private; do not paste it into the dashboard or commit
 it. A successful `/api/health` response should report `"ok": true` and
 `"backend": "postgres"`. Health only checks database connectivity; applying the
-schema is also required for settings and credential persistence.
+schema is also required for settings and live-order idempotency records.
+
+## The trading gateway (required for private Delta data and live orders)
+
+Private Delta requests (wallet, positions, fills, orders) are served by the
+static-IP trading gateway, not by this application. Public market data does not
+need it. Deploy it separately and point this deployment at it:
+
+```bash
+cd trading-gateway && npm install && npm run build && npm start
+```
+
+```env
+TRADING_GATEWAY_URL=https://gateway.example.com
+TRADING_GATEWAY_SECRET=<same value as the gateway's TRADING_GATEWAY_SECRET>
+```
+
+Full runbook, including the static-IP/allowlist steps:
+`docs/TRADING_GATEWAY_DEPLOYMENT.md`.
 
 ## Production build
 
@@ -36,6 +54,18 @@ schema is also required for settings and credential persistence.
 npm run build
 npm start
 ```
+
+`next build` fetches the Inter and JetBrains Mono stylesheets from Google Fonts.
+On a machine without outbound access to `fonts.googleapis.com` the build fails
+with `Can't resolve '@vercel/turbopack-next/internal/font/google/font'`. For
+offline/CI builds run the bundled helper in one terminal and build in another:
+
+```bash
+node scripts/offline-font-mock.mjs
+NEXT_FONT_GOOGLE_MOCKED_RESPONSES=/tmp/font-mock/mock.json npm run build
+```
+
+Vercel and any normally-connected host need nothing extra.
 
 Node ≥ 20. The app binds to port 3000 by default (`PORT` env to change).
 

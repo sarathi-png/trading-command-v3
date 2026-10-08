@@ -1,11 +1,14 @@
 /**
  * Account aggregation: demo/paper wallet + (optionally) live Delta account.
  * Demo & paper figures are estimates clearly separated from exchange data.
+ *
+ * Live figures arrive through the static-IP trading gateway, which holds the
+ * Delta credentials; this process never signs a Delta request.
  */
 import { getRepo } from "@/lib/repo";
 import { deltaAccountConfigured } from "./credentials";
 import { flags } from "./flags";
-import { deltaPositions, deltaWalletBalances } from "./market/delta";
+import { livePositions, liveWalletBalances } from "./tradingGateway";
 import { getTickers } from "./market/service";
 import { getPaperState } from "./paper/engine";
 import { getSettings } from "./settings";
@@ -57,16 +60,16 @@ export async function getAccountState(): Promise<AccountState> {
     // show — previously one failure in Promise.all dropped everything to demo.
     let usdBalance: number | null = null;
     try {
-      const balances = await deltaWalletBalances();
+      const balances = await liveWalletBalances();
       const usd = balances.find((b) => b.asset === "USD" || b.asset === "USDC");
       if (usd) usdBalance = usd.balance;
     } catch {
       usdBalance = null;
     }
     if (usdBalance !== null) {
-      let livePos: Awaited<ReturnType<typeof deltaPositions>> = [];
+      let livePos: Awaited<ReturnType<typeof livePositions>> = [];
       try {
-        livePos = await deltaPositions();
+        livePos = await livePositions();
       } catch {
         livePos = []; // wallet still valid; positions shown as unavailable
       }

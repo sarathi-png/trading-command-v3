@@ -1,7 +1,7 @@
 "use client";
 import { useState, useSyncExternalStore } from "react";
 import { KeyRound, ShieldAlert } from "lucide-react";
-import { Btn, Chip, Input, Panel, Select, StatusDot, Toggle, useConfirm } from "@/components/ui";
+import { Btn, Chip, Input, KV, Panel, Select, StatusDot, Toggle, useConfirm } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtDateTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -47,68 +47,44 @@ export default function SettingsPage() {
     30000
   );
 
-  // ---- Delta credentials (write-only) ------------------------------------
-  // The server never returns a stored key, so there is nothing to prefill:
-  // the fields are always empty and the badge is the only feedback.
+  // ---- Delta credentials live on the trading gateway ----------------------
+  // The application holds no Delta key or secret, so there is nothing to enter
+  // here: this panel only reports whether the static-IP gateway is configured
+  // (and whether a legacy database row from an older build is still present).
   const { data: creds, refresh: refreshCreds } = usePoll(
-    () => api.get<{ configured: boolean; source: "env" | "stored" | "none" }>("/api/settings/delta-credentials"),
+    () =>
+      api.get<{
+        configured: boolean;
+        source: "gateway" | "none";
+        gatewayHost: string | null;
+        misconfigured: boolean;
+        legacyStoredKeys: boolean;
+      }>("/api/settings/delta-credentials"),
     300000
   );
-  const [credKey, setCredKey] = useState("");
-  const [credSecret, setCredSecret] = useState("");
   const [credBusy, setCredBusy] = useState(false);
-  const credentialsFromEnv = creds?.source === "env";
 
-  const saveCredentials = async () => {
-    if (!credKey.trim() || !credSecret.trim()) {
-      notify({ title: "Both fields are required", body: "Enter the Delta API key and secret.", tone: "warn" });
-      return;
-    }
-    setCredBusy(true);
-    try {
-      await api.post("/api/settings/delta-credentials", {
-        apiKey: credKey.trim(),
-        apiSecret: credSecret.trim(),
-      });
-      setCredKey("");
-      setCredSecret("");
-      refreshCreds();
-      refreshCaps();
-      // Saving keys only matters if the data source actually uses them —
-      // flip a demo feed over to Delta so rates + balance appear right away.
-      const switched = settings.dataSource !== "delta";
-      if (switched) await patchSettings({ dataSource: "delta" });
-      notify({
-        title: "Credentials saved",
-        body: switched
-          ? "Stored encrypted. Market data switched to Delta Exchange. Public rates load independently; account balances require valid, authorized keys."
-          : "Stored encrypted. Public rates load independently; account balances require valid, authorized keys.",
-        tone: "success",
-      });
-    } catch (e) {
-      notify({
-        title: "Could not save credentials",
-        body: e instanceof Error ? e.message : "Unknown error",
-        tone: "danger",
-      });
-    } finally {
-      setCredBusy(false);
-    }
-  };
-
-  const clearCredentials = async () => {
+  /**
+   * Purge the legacy encrypted Delta-keys row.
+   *
+   * Only relevant to deployments that upgraded from a build where keys could be
+   * pasted into this dashboard. Nothing reads that row any more — the keys live
+   * on the trading gateway — but leaving a dormant secret in the database is
+   * still a liability, so removing it is one click.
+   */
+  const purgeLegacyCredentials = async () => {
     const ok = await confirm({
-      title: "Remove stored keys?",
+      title: "Remove legacy stored keys?",
       danger: true,
-      confirmLabel: "Remove keys",
-      body: "The encrypted Delta credentials saved from this dashboard will be deleted. Keys supplied through environment variables are unaffected.",
+      confirmLabel: "Remove legacy keys",
+      body: "Deletes the encrypted Delta credentials an older version of this dashboard saved to the database. The running system reads keys only from the trading gateway, so nothing stops working.",
     });
     if (!ok) return;
     setCredBusy(true);
     try {
       await api.del("/api/settings/delta-credentials");
       refreshCreds();
-      notify({ title: "Credentials removed", tone: "success" });
+      notify({ title: "Legacy credentials removed", tone: "success" });
     } catch (e) {
       notify({
         title: "Could not remove credentials",
@@ -351,104 +327,78 @@ export default function SettingsPage() {
         </div>
       </Panel>
 
-      {/* delta api */}
+      {/* delta api — credentials live on the static-IP trading gateway */}
       <Panel
-        title="DELTA API"
+        title="DELTA API · TRADING GATEWAY"
         badge={
           creds?.configured ? (
-            <Chip tone="up">
-              CONFIGURED{creds.source === "env" ? " · ENV" : " · STORED"}
-            </Chip>
+            <Chip tone="up">GATEWAY CONFIGURED</Chip>
+          ) : creds?.misconfigured ? (
+            <Chip tone="warn">MISCONFIGURED</Chip>
           ) : (
             <Chip>NOT CONFIGURED</Chip>
           )
         }
       >
         <div className="p-3 space-y-3 text-[11px] text-mut leading-relaxed">
-          <p className="flex items-center gap-2">
-            <KeyRound size={13} className="text-accent" />
+          <p className="flex items-start gap-2">
+            <KeyRound size={13} className="text-accent flex-none mt-0.5" />
             {creds?.configured ? (
-              <>
-                Keys are active from{" "}
-                <span className="num text-ink">
-                  {creds.source === "env" ? "the server environment" : "encrypted storage"}
-                </span>
-                . Their presence does not confirm that Delta accepts them.
-              </>
+              <span>
+                Private Delta requests are signed by the static-IP trading gateway at{" "}
+                <span className="num text-ink">{creds.gatewayHost ?? "the configured host"}</span>. This
+                application holds no Delta key or secret — there is nothing to paste here. Whether the
+                gateway is configured does not confirm that Delta accepts its key.
+              </span>
             ) : (
-              <>
-                No keys configured. Paste them below, or set{" "}
+              <span>
+                No trading gateway configured, so live balances, positions and orders are unavailable.
+                Set <span className="num text-ink">TRADING_GATEWAY_URL</span> and{" "}
+                <span className="num text-ink">TRADING_GATEWAY_SECRET</span> on this deployment, and put{" "}
                 <span className="num text-ink">DELTA_API_KEY</span> /{" "}
-                <span className="num text-ink">DELTA_API_SECRET</span> in the server environment
-                (environment takes precedence).
-              </>
+                <span className="num text-ink">DELTA_API_SECRET</span> on the gateway host only.
+              </span>
             )}
           </p>
 
-          {credentialsFromEnv ? (
-            <p className="rounded border border-edge bg-bg2 p-2 text-[11px] text-dim">
-              To replace these keys, update both <span className="num text-ink">DELTA_API_KEY</span> and{" "}
-              <span className="num text-ink">DELTA_API_SECRET</span> in Vercel → Project → Settings →
-              Environment Variables, then redeploy. Environment credentials take precedence over stored keys.
+          {creds?.misconfigured && (
+            <p className="rounded border border-warn/40 bg-warn/10 p-2 text-[11px] text-warn">
+              Only one of <span className="num">TRADING_GATEWAY_URL</span> /{" "}
+              <span className="num">TRADING_GATEWAY_SECRET</span> is set. Both are required before any
+              private Delta request will be made.
             </p>
-          ) : (
-            <>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <label className="space-y-1">
-                  <span className="block text-[10px] uppercase tracking-wide">API key</span>
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={credKey}
-                    onChange={(e) => setCredKey(e.target.value)}
-                    placeholder="paste Delta API key"
-                    className="w-full rounded border border-edge bg-panel px-2 py-1.5 num text-ink outline-none focus:border-accent/60"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="block text-[10px] uppercase tracking-wide">API secret</span>
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={credSecret}
-                    onChange={(e) => setCredSecret(e.target.value)}
-                    placeholder="paste Delta API secret"
-                    className="w-full rounded border border-edge bg-panel px-2 py-1.5 num text-ink outline-none focus:border-accent/60"
-                  />
-                </label>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  disabled={credBusy}
-                  onClick={() => void saveCredentials()}
-                  className="rounded border border-accent/60 bg-accent-dim px-3 py-1.5 text-accent hover:text-ink disabled:opacity-50"
-                >
-                  {credBusy ? "Working…" : creds?.configured ? "Replace keys" : "Save keys"}
-                </button>
-                {creds?.source === "stored" && (
-                  <button
-                    disabled={credBusy}
-                    onClick={() => void clearCredentials()}
-                    className="rounded border border-edge px-3 py-1.5 text-mut hover:text-danger disabled:opacity-50"
-                  >
-                    Remove stored keys
-                  </button>
-                )}
-              </div>
-            </>
           )}
 
+          <div className="grid gap-1.5">
+            <KV k="Credentials held by" v="Trading gateway (not Vercel)" />
+            <KV k="Gateway host" v={creds?.gatewayHost ?? "—"} />
+            <KV k="Gateway status" v={system?.gateway?.reachable ? (system.gateway.ready ? "ready" : "degraded") : "unreachable"} />
+            <KV k="Delta egress IP" v="Gateway's static IPv4 (allowlist it at Delta)" />
+          </div>
+
           <p className="text-[10px]">
-            Stored keys are encrypted with AES-256-GCM using a key derived from{" "}
-            <span className="num">SESSION_SECRET</span>, are never returned by any endpoint, and
-            never appear in the audit log. The badge indicates configured keys, not successful
-            authentication. Transactions require{" "}
-            <span className="num">docs/DELTA_SETUP.md</span> for key permissions. Live orders stay
-            blocked by <span className="num">LIVE_EXECUTION_ENABLED</span> regardless of these keys.
+            Deployment steps (server, HTTPS, firewall, static IP, Delta allowlist) are in{" "}
+            <span className="num">docs/TRADING_GATEWAY_DEPLOYMENT.md</span>. Live orders additionally
+            require <span className="num">LIVE_EXECUTION_ENABLED</span> on both deployments, LIVE mode
+            armed, and a verifiable daily P&amp;L — the last of these is deliberately not implemented, so
+            live submission stays blocked.
           </p>
+
+          {creds?.legacyStoredKeys && (
+            <div className="rounded border border-edge bg-bg2 p-2 space-y-2">
+              <p className="text-[11px]">
+                An encrypted Delta key pair saved by an older version of this dashboard is still in the
+                database. Nothing reads it, but it can be removed.
+              </p>
+              <button
+                disabled={credBusy}
+                onClick={() => void purgeLegacyCredentials()}
+                className="rounded border border-edge px-3 py-1.5 text-mut hover:text-danger disabled:opacity-50"
+              >
+                {credBusy ? "Working…" : "Remove legacy stored keys"}
+              </button>
+            </div>
+          )}
         </div>
       </Panel>
 

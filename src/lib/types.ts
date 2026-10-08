@@ -220,6 +220,10 @@ export interface AlertRule {
 export interface SystemStatus {
   db: boolean;
   deltaMarket: "online" | "offline" | "disabled";
+  /**
+   * Private Delta account access. After the static-IP gateway migration this
+   * reflects the GATEWAY's configuration, not any credential on Vercel.
+   */
   deltaAccount: "configured" | "disconnected" | "disabled";
   strategy: boolean;
   execution: string; // READ ONLY | PAPER | LIVE DISABLED | LIVE ARMED
@@ -227,6 +231,15 @@ export interface SystemStatus {
   demoMode: boolean;
   latencyMs: number | null;
   version: string;
+  /** Static-IP trading gateway: the only path to private Delta endpoints. */
+  gateway?: {
+    configured: boolean;
+    reachable: boolean;
+    ready: boolean;
+    host: string | null;
+    liveExecutionEnabled: boolean;
+    error?: string;
+  };
   flags: Record<string, boolean>;
 }
 

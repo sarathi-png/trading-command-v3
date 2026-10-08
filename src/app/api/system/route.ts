@@ -3,12 +3,14 @@ import { deltaAccountConfigured } from "@/lib/credentials";
 import { flags, APP_VERSION } from "@/lib/flags";
 import { deltaPing } from "@/lib/market/delta";
 import { getSettings } from "@/lib/settings";
+import { gatewayHealth } from "@/lib/tradingGateway";
 import type { SystemStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 let pingCache: { at: number; ok: boolean } | null = null;
+let gatewayCache: { at: number; value: Awaited<ReturnType<typeof gatewayHealth>> } | null = null;
 
 export async function GET() {
   const settings = await getSettings();
@@ -33,9 +35,13 @@ export async function GET() {
         ? "PAPER MODE"
         : "READ ONLY";
 
-  // Credentials count when they come from the environment OR the encrypted
-  // database row (Settings → Delta API) — see lib/credentials.ts.
+  // "Configured" now means the static-IP trading gateway is reachable and has
+  // its own Delta credentials — Vercel holds none. See lib/credentials.ts.
   const deltaCreds = await deltaAccountConfigured();
+  if (!gatewayCache || Date.now() - gatewayCache.at > 30000) {
+    gatewayCache = { at: Date.now(), value: await gatewayHealth() };
+  }
+  const gateway = gatewayCache.value;
 
   const status: SystemStatus = {
     db: dbOk,
@@ -51,6 +57,14 @@ export async function GET() {
     demoMode: settings.dataSource === "demo",
     latencyMs: null,
     version: APP_VERSION,
+    gateway: {
+      configured: gateway.configured,
+      reachable: gateway.reachable,
+      ready: gateway.ready,
+      host: gateway.host,
+      liveExecutionEnabled: gateway.liveExecutionEnabled ?? false,
+      ...(gateway.error ? { error: gateway.error } : {}),
+    },
     flags: {
       DELTA_MARKET: flags.deltaMarket(),
       DELTA_ACCOUNT: deltaCreds,

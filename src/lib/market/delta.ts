@@ -1,14 +1,18 @@
 /**
- * Delta Exchange India REST adapter (server-side only).
+ * Delta Exchange India PUBLIC market-data adapter (server-side only).
  *
- * - Public market data needs no credentials.
- * - Private endpoints are signed with HMAC-SHA256 per Delta's docs:
- *   signature = HMAC_SHA256(secret, METHOD + timestamp + path + queryString + body)
- *   headers: api-key, timestamp (unix seconds), signature.
- * - API secrets are read from the environment and NEVER leave the server.
+ * Public endpoints (tickers, candles, order book, trades, products) need no
+ * credentials, so they stay on the application as they always were.
+ *
+ * PRIVATE endpoints no longer exist in this file. Signing moved to the
+ * static-IP trading gateway (trading-gateway/src/delta/signing.ts) because
+ * Vercel cannot present a dedicated outbound IPv4 for Delta's allowlist, and
+ * because the Delta API secret must not exist on Vercel at all. The private
+ * paths (wallet, positions, orders) now live in src/lib/tradingGateway.
+ *
+ * As a guardrail, `http(..., auth: true)` throws: a future edit cannot quietly
+ * reintroduce signed calls from here.
  */
-import crypto from "node:crypto";
-import { resolveDeltaCredentials } from "../credentials";
 import { DELTA_REST_BASE } from "../flags";
 import type { Candle, OrderBook, Ticker, Timeframe } from "../types";
 
@@ -55,17 +59,13 @@ export async function http(
   };
   const bodyStr = body ? JSON.stringify(body) : "";
   if (auth) {
-    // Environment first, then the encrypted row saved from the dashboard.
-    const credentials = await resolveDeltaCredentials();
-    if (!credentials) throw new DeltaError("Delta API credentials are not configured", 401);
-    const key = credentials.apiKey;
-    const secret = credentials.apiSecret;
-    const timestamp = Math.floor(Date.now() / 1000).toString();
-    const payload = method + timestamp + path + (qs ? `?${qs}` : "") + bodyStr;
-    const signature = crypto.createHmac("sha256", secret).update(payload).digest("hex");
-    headers["api-key"] = key;
-    headers["timestamp"] = timestamp;
-    headers["signature"] = signature;
+    // Refuse, loudly. Private Delta calls belong on the static-IP gateway:
+    // Vercel has no allowlistable egress IP and must never hold the API secret.
+    throw new DeltaError(
+      "Private Delta endpoints are served by the trading gateway. " +
+        "Use src/lib/tradingGateway (gatewayWalletBalances, gatewayPositionsForUnderlying, ...) instead of signing here.",
+      501
+    );
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -200,98 +200,6 @@ export async function deltaOrderbook(symbol: string): Promise<OrderBook> {
     ts: Date.now(),
     source: "delta",
   };
-}
-
-/** Authenticated account endpoints. */
-export async function deltaWalletBalances(): Promise<{ asset: string; balance: number }[]> {
-  const data = (await http("GET", "/v2/wallet/balances", {}, null, true)) as {
-    result?: { asset_symbol: string; balance: string }[];
-  };
-  // balance comes back as a plain decimal string ("0.20113084") — verified
-  // against the live API. The old code divided by 1e6 here, turning a $0.20
-  // balance into $0.0000002.
-  return (data.result ?? []).map((b) => ({
-    asset: b.asset_symbol,
-    balance: parseFloat(b.balance),
-  }));
-}
-
-/** Map product_id → symbol, so positions (which carry only an id) get names. */
-let productsCache: { at: number; map: Map<number, string> } | null = null;
-async function productIdSymbolMap(): Promise<Map<number, string>> {
-  if (productsCache && Date.now() - productsCache.at < 60_000) return productsCache.map;
-  try {
-    const data = (await http("GET", "/v2/products", {}, null, false)) as {
-      result?: { id?: number; symbol?: string }[];
-    };
-    const map = new Map<number, string>();
-    for (const p of data.result ?? []) {
-      if (p.id !== undefined && p.symbol) map.set(Number(p.id), String(p.symbol));
-    }
-    productsCache = { at: Date.now(), map };
-    return map;
-  } catch {
-    return productsCache?.map ?? new Map();
-  }
-}
-
-/**
- * Open positions across the watchlist's underlying assets.
- *
- * Delta has no "all positions" endpoint: GET /v2/positions requires either
- * product_id (returns ONE position) or underlying_asset_symbol (returns the
- * list for that asset — symbol must be the base, e.g. "BTC", not "BTCUSD";
- * a wrong form answers 404). So we fan out over the watchlist's underlyings.
- * Positions on symbols outside the watchlist are not seen here.
- */
-export async function deltaPositions(): Promise<
-  { symbol: string; side: "long" | "short"; qty: number; entry: number; upl: number; mark: number }[]
-> {
-  const settings = await (await import("../settings")).getSettings();
-  const underlyings = [
-    ...new Set(
-      settings.watchlist.map((s) => s.replace(/(USDT|USDC|USD|PERP)$/i, "")).filter(Boolean)
-    ),
-  ];
-  if (underlyings.length === 0) underlyings.push("BTC");
-
-  const idMap = await productIdSymbolMap();
-  const out: { symbol: string; side: "long" | "short"; qty: number; entry: number; upl: number; mark: number }[] =
-    [];
-  for (const underlying of underlyings) {
-    const data = (await http(
-      "GET",
-      "/v2/positions",
-      { underlying_asset_symbol: underlying },
-      null,
-      true
-    )) as { result?: Record<string, unknown>[] | Record<string, unknown> };
-    const rows = Array.isArray(data.result)
-      ? data.result
-      : data.result
-        ? [data.result]
-        : [];
-    for (const p of rows) {
-      const qty = Math.abs(Number(p.size ?? 0));
-      if (!qty || qty <= 0) continue;
-      const symbol =
-        String(p.symbol ?? "") || idMap.get(Number(p.product_id ?? -1)) || "";
-      if (!symbol) continue;
-      const side: "long" | "short" =
-        String(p.side ?? "").toLowerCase() === "short" || Number(p.size) < 0
-          ? "short"
-          : "long";
-      out.push({
-        symbol,
-        side,
-        qty,
-        entry: Number(p.entry_price ?? 0),
-        upl: Number(p.unrealized_pnl ?? 0),
-        mark: Number(p.mark_price ?? 0),
-      });
-    }
-  }
-  return out;
 }
 
 /** Lightweight connectivity probe used by the system monitor. */

@@ -1,25 +1,50 @@
 /**
- * LIVE order endpoint.
+ * LIVE order endpoint (Vercel side).
  *
  * Four independent gates must all pass before anything is sent:
  *   1. LIVE_EXECUTION_ENABLED=true (environment)
  *   2. settings.mode === "live"
  *   3. settings.liveArmed === true (master switch, confirmation token)
- *   4. Delta credentials configured
+ *   4. the trading gateway is configured (TRADING_GATEWAY_URL + SECRET)
  *
  * Then the order must clear the SAME risk evaluation that guards paper fills
  * (see lib/risk.ts), and it carries a client_order_id so a retry returns the
  * original result instead of placing a second order.
  *
- * Authentication is enforced for every /api route by middleware.ts and is not
- * duplicated here. Default configuration is always 403.
+ * WHERE THE ORDER GOES: not to Delta. Vercel cannot present a dedicated
+ * outbound IPv4 for Delta's IP allowlist, so the order is sent to the
+ * static-IP trading gateway, which signs it with the Delta secret and submits
+ * it exactly once. That gateway enforces its own (stricter) copy of the risk
+ * layer, so a bug or a bypass here still cannot produce an unrestricted order.
+ *
+ * IDEMPOTENCY IS TWO-LAYERED:
+ *   - this route claims the client_order_id in Postgres BEFORE calling the
+ *     gateway (a Vercel timeout or a double-click returns the stored row), and
+ *   - the gateway keeps its own durable ledger, so even a lost response between
+ *     Vercel and the gateway cannot submit the same id twice.
+ *
+ * `liveRealizedPnlToday()` intentionally still returns null, which the risk
+ * layer treats as "unknown" and therefore blocks. The gateway applies the same
+ * fail-closed rule independently. Live orders therefore remain closed until a
+ * verified daily P&L is implemented in trading-gateway/src/risk/dailyPnl.ts.
+ *
+ * Authentication is enforced for every /api route by middleware/proxy.ts and is
+ * not duplicated here. Default configuration is always 403.
  */
-import { getRepo } from "@/lib/repo";
 import { deltaAccountConfigured } from "@/lib/credentials";
 import { flags } from "@/lib/flags";
-import { http, deltaPositions, deltaTickers, deltaWalletBalances } from "@/lib/market/delta";
+import { deltaTickers } from "@/lib/market/delta";
 import { evaluateOrderRisk, normalizeRiskLimits } from "@/lib/risk";
 import { getSettings, logAudit } from "@/lib/settings";
+import {
+  baseAssetOf,
+  gatewayCreateOrder,
+  livePositions,
+  liveWalletBalances,
+  newClientOrderId,
+  TradingGatewayError,
+} from "@/lib/tradingGateway";
+import { getRepo } from "@/lib/repo";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,6 +56,11 @@ export const runtime = "nodejs";
  * therefore blocks. A daily-loss limit that assumes zero realised loss is not a
  * limit, so live orders stay closed until this reads actual fills from the
  * exchange (sum realised_pnl over today's fills) and caches it.
+ *
+ * The gateway enforces the identical rule in its own process
+ * (trading-gateway/src/risk/dailyPnl.ts). Implementing the figure here alone is
+ * NOT enough, and implementing it there alone is not enough either — both
+ * layers fail closed by design. See docs/SECURITY.md.
  */
 async function liveRealizedPnlToday(): Promise<number | null> {
   return null;
@@ -43,6 +73,7 @@ export async function GET() {
     mode: settings.mode,
     liveArmed: settings.liveArmed,
     deltaConfigured: await deltaAccountConfigured(),
+    routedVia: "trading-gateway",
   });
 }
 
@@ -64,7 +95,11 @@ export async function POST(req: Request) {
     );
   }
   if (!(await deltaAccountConfigured())) {
-    return Response.json({ error: "Delta API credentials are not configured." }, { status: 403 });
+    await logAudit("live_order_rejected", { reason: "gateway_not_configured" });
+    return Response.json(
+      { error: "The trading gateway is not configured, so live orders cannot be routed." },
+      { status: 403 }
+    );
   }
 
   let body: Record<string, unknown>;
@@ -85,23 +120,44 @@ export async function POST(req: Request) {
     return Response.json({ error: "symbol and positive size are required" }, { status: 400 });
   }
 
-  // ---- idempotency ------------------------------------------------------
+  // ---- idempotency (layer 1: Postgres) -----------------------------------
   // A retried request must return the first result, never place a second order.
+  // clientOrderId is capped at 32 characters — Delta's documented maximum for
+  // `client_order_id`; the previous format (tc-<timestamp>-<uuid>, 53 chars)
+  // would have been rejected by the exchange.
   const clientOrderId =
     typeof body.client_order_id === "string" && body.client_order_id.trim()
-      ? body.client_order_id.trim()
-      : `tc-${Date.now()}-${crypto.randomUUID()}`;
+      ? body.client_order_id.trim().slice(0, 32)
+      : newClientOrderId();
 
-  const existing = await (await getRepo()).findLiveOrderByClientId(clientOrderId);
+  const repo = await getRepo();
+  const existing = await repo.findLiveOrderByClientId(clientOrderId);
   if (existing) {
+    // A previously UNKNOWN submission must be reconciled, never resubmitted:
+    // the order may already exist at Delta.
+    if (existing.status === "unknown") {
+      await logAudit("live_order_blocked_unknown", { clientOrderId, symbol });
+      return Response.json(
+        {
+          error:
+            "A previous attempt with this client_order_id has an UNKNOWN outcome at Delta. Reconcile it before retrying.",
+          code: "ORDER_STATUS_UNKNOWN",
+          clientOrderId,
+          reconcile: `/api/orders/status?clientOrderId=${encodeURIComponent(clientOrderId)}`,
+        },
+        { status: 409 }
+      );
+    }
     await logAudit("live_order_deduplicated", { clientOrderId, symbol });
     return Response.json({
       ok: true,
       deduplicated: true,
       clientOrderId,
       order: existing.response,
+      status: existing.status,
     });
   }
+
   // ---- reference price for the risk maths --------------------------------
   let referencePrice: number;
   try {
@@ -118,18 +174,15 @@ export async function POST(req: Request) {
     return Response.json({ error: msg }, { status: 502 });
   }
 
-  // ---- risk evaluation ---------------------------------------------------
+  // ---- risk evaluation (application layer) -------------------------------
   const limits = normalizeRiskLimits(settings.riskLimits);
   let openSymbols: string[] = [];
   let currentNotional = 0;
   let equity = 0;
   try {
-    const [positions, balances] = await Promise.all([deltaPositions(), deltaWalletBalances()]);
+    const [positions, balances] = await Promise.all([livePositions(), liveWalletBalances()]);
     openSymbols = positions.map((p) => p.symbol);
-    currentNotional = positions.reduce(
-      (a, p) => a + Math.abs(p.qty) * (p.mark || p.entry),
-      0
-    );
+    currentNotional = positions.reduce((a, p) => a + Math.abs(p.qty) * (p.mark || p.entry), 0);
     const usd = balances.find((b) => b.asset === "USD" || b.asset === "USDC");
     equity = usd?.balance ?? 0;
   } catch (e) {
@@ -164,8 +217,7 @@ export async function POST(req: Request) {
     );
   }
 
-  // ---- claim the idempotency key, then submit ----------------------------
-  const repo = await getRepo();
+  // ---- claim the idempotency key, then submit through the gateway --------
   await repo.insertLiveOrder({
     clientOrderId,
     symbol,
@@ -177,40 +229,70 @@ export async function POST(req: Request) {
   });
 
   try {
-    const product = (await http("GET", `/v2/products/${symbol}`, {}, null, false)) as {
-      result?: { id?: number };
-    };
-    const productId = product.result?.id;
-    if (!productId) throw new Error(`Product ${symbol} not found on Delta`);
-
-    const payload: Record<string, unknown> = {
-      product_id: productId,
-      order_type: type,
+    const result = await gatewayCreateOrder({
+      symbol,
       side,
       size,
-      reduce_only: reduceOnly,
-      // Echoed by the exchange so a retry maps back to the same order.
-      client_order_id: clientOrderId,
-    };
-    if (type === "limit_order" && limitPrice !== null) {
-      payload.limit_price = String(limitPrice);
-    }
-
-    const res = (await http("POST", "/v2/orders", {}, payload, true)) as {
-      result?: Record<string, unknown>;
-    };
+      type,
+      limitPrice,
+      reduceOnly,
+      clientOrderId,
+      // Base assets the gateway should inspect for its own exposure maths.
+      underlyingAssets: [...new Set(settings.watchlist.map((s) => baseAssetOf(s)).filter(Boolean))],
+      riskLimits: limits as unknown as Record<string, unknown>,
+    });
 
     await repo.updateLiveOrderByClientId(clientOrderId, {
       status: "submitted",
-      response: (res.result ?? null) as Record<string, unknown> | null,
+      response: (result.order ?? null) as Record<string, unknown> | null,
     });
 
-    await logAudit("live_order_placed", { clientOrderId, symbol, side, type, size });
-    return Response.json({ ok: true, clientOrderId, order: res.result });
+    await logAudit("live_order_placed", {
+      clientOrderId,
+      symbol,
+      side,
+      type,
+      size,
+      deduplicated: result.deduplicated,
+      routedVia: "trading-gateway",
+    });
+    return Response.json({
+      ok: true,
+      clientOrderId,
+      order: result.order,
+      deduplicated: result.deduplicated,
+      risk: result.risk,
+    });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Live order failed";
-    await repo.updateLiveOrderByClientId(clientOrderId, { status: "failed" });
-    await logAudit("live_order_failed", { clientOrderId, symbol, error: msg });
-    return Response.json({ error: msg }, { status: 502 });
+    // An uncertain outcome is recorded as such and NEVER retried. The operator
+    // reconciles with GET /api/orders/status?clientOrderId=...
+    const isUnknown = e instanceof TradingGatewayError && e.upstreamCode === "ORDER_STATUS_UNKNOWN";
+    const message = e instanceof Error ? e.message : "Live order failed";
+
+    await repo.updateLiveOrderByClientId(clientOrderId, {
+      status: isUnknown ? "unknown" : "failed",
+    });
+    await logAudit(isUnknown ? "live_order_unknown" : "live_order_failed", {
+      clientOrderId,
+      symbol,
+      error: message,
+      code: e instanceof TradingGatewayError ? e.upstreamCode ?? e.code : undefined,
+    });
+
+    return Response.json(
+      {
+        error: message,
+        code: e instanceof TradingGatewayError ? e.upstreamCode ?? e.code : "LIVE_ORDER_FAILED",
+        clientOrderId,
+        ...(isUnknown
+          ? {
+              reconcile: `/api/orders/status?clientOrderId=${encodeURIComponent(clientOrderId)}`,
+              guidance:
+                "The order may or may not exist at Delta. Reconcile before doing anything else — do not resubmit.",
+            }
+          : {}),
+      },
+      { status: 502 }
+    );
   }
 }

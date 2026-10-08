@@ -1,0 +1,11 @@
+# Build context hygiene for the trading gateway image.
+node_modules
+dist
+data
+tests
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
+coverage

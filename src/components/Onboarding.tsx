@@ -123,9 +123,9 @@ export default function Onboarding({ capabilities }: {
                 <div>
                   <p className="text-[12px] text-up">Delta credentials are configured</p>
                   <p className="text-[11px] text-dim">
-                    This confirms the key and secret are present, not that Delta has accepted them.
-                    Setup will use Delta public market data; a private-account authentication error
-                    means the credentials, permissions, or IP allowlist need checking.
+                    This confirms the trading gateway is configured, not that Delta has accepted its
+                    key. Setup will use Delta public market data; a private-account authentication
+                    error means the gateway&apos;s key, permissions, or IP allowlist need checking.
                   </p>
                 </div>
               </div>
@@ -136,9 +136,10 @@ export default function Onboarding({ capabilities }: {
                   <p className="text-[12px] text-warn">No Delta credentials configured</p>
                   <p className="text-[11px] text-dim leading-relaxed">
                     The workspace runs in demo mode with simulated market data — clearly labelled.
-                    To connect your account, add <span className="num text-mut">DELTA_API_KEY</span> and{" "}
-                    <span className="num text-mut">DELTA_API_SECRET</span> to the server environment.
-                    Secrets are never sent to the browser and never stored in the database.
+                    To connect your account, deploy the static-IP trading gateway and set{" "}
+                    <span className="num text-mut">TRADING_GATEWAY_URL</span> /{" "}
+                    <span className="num text-mut">TRADING_GATEWAY_SECRET</span> here. The Delta key and
+                    secret exist only on the gateway, never in this app, the browser or the database.
                   </p>
                 </div>
               </div>

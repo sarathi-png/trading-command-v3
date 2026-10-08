@@ -11,12 +11,12 @@ store (`src/lib/fileStore.ts`) silently falls back to `/tmp/trading-command-v3-d
 on hosts that mount the deployment directory read-only. `/tmp` is erased on
 every cold start. Result:
 
-- `settings.json` (incl. `dataSource: delta`) and the encrypted credentials
-  are lost on restart. Every fresh request loads `DEFAULT_SETTINGS`
-  (`dataSource: "demo"`) — so chart, coins names and live balance all show
-  the dummy demo simulator.
-- `deltaAccountConfigured()` also resolves to `none` when the encrypted
-  credentials row disappears → account panel shows "NOT CONNECTED".
+- `settings.json` (incl. `dataSource: delta`) is lost on restart. Every fresh
+  request loads `DEFAULT_SETTINGS` (`dataSource: "demo"`) — so chart, coin
+  names and live balance all show the dummy demo simulator.
+- Private account data (balance, positions) is unavailable because the gateway
+  is not configured on that deployment → the account panel shows
+  "NOT CONNECTED" instead of live figures.
 
 There is no workaround code for this: the only durable state is a real
 database. Fix the deployment, don't add more environment fallbacks.
@@ -35,9 +35,13 @@ Required (secrets):
 |------|-------|-----|
 | `API_PASSWORD` | from local `.env` | Operator login; routes fail closed (503) when unset |
 | `SESSION_SECRET` | from local `.env` | Signs session cookie; keep different from `API_PASSWORD` |
-| `DELTA_API_KEY` | from local `.env` | Delta read-only API key (server-side only) |
-| `DELTA_API_SECRET` | from local `.env` | Delta API secret (used to sign requests) |
+| `TRADING_GATEWAY_URL` | `https://gateway.example.com` | Static-IP gateway base URL (no trailing slash) |
+| `TRADING_GATEWAY_SECRET` | from the gateway's `.env` | Server-to-server bearer secret — must match the gateway |
 | `USD_INR_RATE` | `83` | USD-to-INR display rate (defaults to `83`) |
+
+**Do not set `DELTA_API_KEY` / `DELTA_API_SECRET` on Vercel.** They belong to
+the gateway host only; the application no longer reads or signs with them. See
+`docs/TRADING_GATEWAY_DEPLOYMENT.md`.
 
 Feature flags:
 
@@ -94,14 +98,28 @@ deployment that needs persistence.
 1. Open the app → the **login gate** appears if `API_PASSWORD` is set
    (correct), or **503** (wrong/absent).
 2. Settings → **System status**: expect `db: true`, `deltaMarket: online`,
-   `deltaAccount: connected`, `demoMode: false`. Any other combination
-   indicates the misconfigured item below.
-3. Settings → **Delta API**: expect `CONFIGURED: true`, `source: env|stored`.
+   `deltaAccount: configured`, `gateway.reachable: true`, `demoMode: false`. Any
+   other combination indicates the misconfigured item below.
+3. Settings → **Delta API · Trading gateway**: expect `GATEWAY CONFIGURED` and
+   the gateway host.
 4. `GET /api/settings` → confirm `dataSource === "delta"`.
 5. `GET /api/delta/summary` → expect `available: true` (live balance).
-   `available: false` plus an error means credentials are wrong/revoked or
-   the DB is unreachable.
+   `available: false` plus an error means the gateway is unreachable, its key is
+   wrong/revoked, or its IP is not allowlisted at Delta.
 6. `GET /api/market/tickers` → expect `source: "delta"` (live markets).
+
+## Rotating the gateway secret
+
+Change `TRADING_GATEWAY_SECRET` on the gateway first, then update it on Vercel and
+redeploy. Requests between the two changes fail with 401 — expected, and safer
+than a window in which two secrets are valid.
+
+## Rotating the Delta API key
+
+Do this on the gateway host (never here):
+create the new key at Delta with the same IP allowlist → update the gateway's
+`.env` → restart the gateway → verify `GET /ready` and a balance read → revoke the
+old key.
 
 ## Rotating secrets after a leak
 
