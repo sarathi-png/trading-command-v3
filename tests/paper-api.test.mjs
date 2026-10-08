@@ -72,14 +72,16 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
         TC_DATA_DIR: dataDir,
         DATABASE_URL: "",
         // Deliberately NOT set: the application must run paper trading with no
-        // Delta credentials whatsoever (they live on the trading gateway). If a
-        // stray DELTA_API_KEY/SECRET were still required here, this test would
-        // fail — that is the point.
+        // exchange credentials at all. If a stray COINDCX_API_KEY/SECRET (or a
+        // legacy DELTA_*/TRADING_GATEWAY_* variable) were still required here,
+        // this test would fail — that is the point.
+        COINDCX_API_KEY: "",
+        COINDCX_API_SECRET: "",
         DELTA_API_KEY: "",
         DELTA_API_SECRET: "",
         TRADING_GATEWAY_URL: "",
         TRADING_GATEWAY_SECRET: "",
-        DELTA_MARKET_ENABLED: "false",
+        EXCHANGE_MARKET_ENABLED: "false",
         LIVE_EXECUTION_ENABLED: "false",
         PAPER_TRADING_ENABLED: "true",
         HF_TOKEN: "",
@@ -129,30 +131,31 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
         body: JSON.stringify(body),
       });
 
-    // Credentials can no longer be entered from the dashboard at all: they live
-    // on the static-IP trading gateway. The refusal must explain that and must
-    // not echo anything the caller sent.
-    const credentialOverride = await json("/api/settings/delta-credentials", {
+    // Credentials can no longer be entered from the dashboard at all: the
+    // server reads them from its own environment. The refusal must explain that
+    // and must not echo anything the caller sent.
+    const credentialOverride = await json("/api/settings/exchange-credentials", {
       apiKey: "test-key",
       apiSecret: "test-secret",
     });
     assert.equal(credentialOverride.status, 409);
     const credentialError = await credentialOverride.json();
-    assert.match(credentialError.error, /trading gateway/i);
+    assert.match(credentialError.error, /environment/i);
     assert.doesNotMatch(JSON.stringify(credentialError), /paper-test|test-secret|insert into/i);
 
-    // Status reports the gateway (unconfigured here) and nothing else.
-    const credentialStatus = await request("/api/settings/delta-credentials").then((r) => r.json());
+    // Status reports presence and VARIABLE NAMES (unconfigured here), nothing else.
+    const credentialStatus = await request("/api/settings/exchange-credentials").then((r) => r.json());
     assert.equal(credentialStatus.configured, false);
     assert.equal(credentialStatus.source, "none");
+    assert.deepEqual(credentialStatus.missing, ["COINDCX_API_KEY", "COINDCX_API_SECRET"]);
     assert.equal(credentialStatus.legacyStoredKeys, false);
 
     const initialSettings = await request("/api/settings").then((response) => response.json());
     assert.equal(initialSettings.settings.mode, "read_only");
     assert.equal(initialSettings.capabilities.liveExecution, false);
-    // No gateway configured in this test, so private Delta access is off while
-    // public market data and paper trading keep working.
-    assert.equal(initialSettings.capabilities.deltaAccountConfigured, false);
+    // No credentials in this test, so private exchange access is off while
+    // paper trading keeps working.
+    assert.equal(initialSettings.capabilities.exchangeAccountConfigured, false);
 
     const readOnlyOrder = await json("/api/paper", { symbol: "BTCUSD", qty: 0.001 });
     assert.equal(readOnlyOrder.status, 403);
@@ -202,17 +205,17 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.ok(Number.isFinite(journal.entries[0].pnl));
 
     // ---- separation of paper from private/exchange paths -------------------
-    // Private Delta reads need the gateway; without it they fail closed with a
-    // readable message instead of falling back to demo numbers.
-    const summary = await request("/api/delta/summary").then((r) => r.json());
+    // Private CoinDCX reads need credentials; without them they fail closed
+    // with a readable message instead of falling back to demo numbers.
+    const summary = await request("/api/exchange/summary").then((r) => r.json());
     assert.equal(summary.available, false);
-    assert.match(String(summary.error), /gateway/i);
+    assert.match(String(summary.error), /not configured/i);
 
     // ...and nothing about that failure leaks a credential-shaped value.
     const summaryText = JSON.stringify(summary);
     assert.doesNotMatch(summaryText, /paper-test|test-secret|api[_-]?key/i);
 
-    // Paper state still works end to end with the gateway absent.
+    // Paper state still works end to end with exchange credentials absent.
     const paperAfter = await request("/api/paper").then((r) => r.json());
     assert.ok(Array.isArray(paperAfter.orders));
     assert.ok(Array.isArray(paperAfter.positions));

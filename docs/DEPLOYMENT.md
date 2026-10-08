@@ -1,5 +1,12 @@
 # Deployment
 
+> **Deployment today is Vercel-only.** The canonical guide is
+> **`docs/VERCEL_DEPLOYMENT.md`**: Vercel + a hosted Postgres + a CoinDCX API
+> key. No static IP, no gateway, no VPS. The sections below that describe the
+> gateway or Cloudflare Tunnel remain useful for a Delta-era set-up or for
+> self-hosting behind a tunnel, but they are not part of the current path.
+
+
 ## Local development (Windows / macOS / Linux)
 
 ```bash
@@ -30,11 +37,12 @@ it. A successful `/api/health` response should report `"ok": true` and
 `"backend": "postgres"`. Health only checks database connectivity; applying the
 schema is also required for settings and live-order idempotency records.
 
-## The trading gateway (required for private Delta data and live orders)
+## The trading gateway (RETIRED — kept only for Delta-era setups)
 
-Private Delta requests (wallet, positions, fills, orders) are served by the
-static-IP trading gateway, not by this application. Public market data does not
-need it. Deploy it separately and point this deployment at it:
+This application no longer calls the gateway: CoinDCX does not require an
+IP-bound key, so the serverless functions sign their own requests. The section
+below is retained for anyone still running a Delta-era deployment. Public market
+data does not need it. Deploy it separately and point the deployment at it:
 
 ```bash
 cd trading-gateway && npm install && npm run build && npm start
@@ -104,12 +112,12 @@ database port through the tunnel.
 Run `npm test` from the project root. It compiles and runs the quant tests, builds
 the production app, and exercises login plus the paper-order/journal flow against
 an isolated local file store. The smoke test uses demo prices and does not
-contact Delta or enable live execution.
+contact the exchange or enable live execution.
 
 ## Checklist
 
 - [ ] `LIVE_EXECUTION_ENABLED=false` until you truly need it
-- [ ] Delta API key IP-whitelisted
+- [ ] CoinDCX API key created WITHOUT IP binding (Vercel has no fixed egress IP)
 - [ ] HTTPS enforced
 - [ ] Postgres not publicly reachable
 - [ ] `.env` excluded from git and backups encrypted

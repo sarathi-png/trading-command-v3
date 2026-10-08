@@ -236,7 +236,13 @@ export interface LiveOrderRow {
   size: number;
   price: number | null;
   status: string;
-  deltaOrderId: string | null;
+  /** Venue the order was submitted to ("coindcx"). */
+  exchange: string;
+  /** Canonical symbol the app ordered, e.g. "BTCUSD". */
+  symbolCanonical: string;
+  /** Venue pair identifier, e.g. "B-BTC_USDT". */
+  exchangeSymbol: string | null;
+  exchangeOrderId: string | null;
   response: Record<string, unknown> | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -244,12 +250,16 @@ export interface LiveOrderRow {
 
 export type LiveOrderInsert = Omit<
   LiveOrderRow,
-  "id" | "createdAt" | "updatedAt" | "deltaOrderId" | "response"
+  "id" | "createdAt" | "updatedAt" | "exchange" | "symbolCanonical" | "exchangeSymbol" | "exchangeOrderId" | "response"
 > & {
   id?: string;
   createdAt?: Timestamp | Date;
   updatedAt?: Timestamp | Date;
-  deltaOrderId?: string | null;
+  exchange?: string;
+  /** Defaults to `symbol` when omitted. */
+  symbolCanonical?: string;
+  exchangeSymbol?: string | null;
+  exchangeOrderId?: string | null;
   response?: Record<string, unknown> | null;
 };
 

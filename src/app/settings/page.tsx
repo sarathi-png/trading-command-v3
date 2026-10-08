@@ -47,19 +47,22 @@ export default function SettingsPage() {
     30000
   );
 
-  // ---- Delta credentials live on the trading gateway ----------------------
-  // The application holds no Delta key or secret, so there is nothing to enter
-  // here: this panel only reports whether the static-IP gateway is configured
-  // (and whether a legacy database row from an older build is still present).
+  // ---- CoinDCX credentials live in the deployment environment -------------
+  // There is deliberately nothing to enter here: the server reads
+  // COINDCX_API_KEY / COINDCX_API_SECRET from its own environment. This panel
+  // reports presence and the NAMES of anything missing (never values), plus
+  // whether a legacy encrypted Delta row from an older build is still around.
   const { data: creds, refresh: refreshCreds } = usePoll(
     () =>
       api.get<{
         configured: boolean;
-        source: "gateway" | "none";
-        gatewayHost: string | null;
+        source: "environment" | "none";
+        exchange: string;
+        missing: string[];
         misconfigured: boolean;
+        baseUrl: string;
         legacyStoredKeys: boolean;
-      }>("/api/settings/delta-credentials"),
+      }>("/api/settings/exchange-credentials"),
     300000
   );
   const [credBusy, setCredBusy] = useState(false);
@@ -68,8 +71,8 @@ export default function SettingsPage() {
    * Purge the legacy encrypted Delta-keys row.
    *
    * Only relevant to deployments that upgraded from a build where keys could be
-   * pasted into this dashboard. Nothing reads that row any more — the keys live
-   * on the trading gateway — but leaving a dormant secret in the database is
+   * pasted into this dashboard. Nothing reads that row any more — credentials
+   * come from the environment — but leaving a dormant secret in the database is
    * still a liability, so removing it is one click.
    */
   const purgeLegacyCredentials = async () => {
@@ -77,12 +80,12 @@ export default function SettingsPage() {
       title: "Remove legacy stored keys?",
       danger: true,
       confirmLabel: "Remove legacy keys",
-      body: "Deletes the encrypted Delta credentials an older version of this dashboard saved to the database. The running system reads keys only from the trading gateway, so nothing stops working.",
+      body: "Deletes the encrypted Delta credentials an older version of this dashboard saved to the database. The running system reads credentials only from the deployment environment, so nothing stops working.",
     });
     if (!ok) return;
     setCredBusy(true);
     try {
-      await api.del("/api/settings/delta-credentials");
+      await api.del("/api/settings/exchange-credentials");
       refreshCreds();
       notify({ title: "Legacy credentials removed", tone: "success" });
     } catch (e) {
@@ -124,7 +127,7 @@ export default function SettingsPage() {
       title: "ARM LIVE TRADING",
       danger: true,
       confirmLabel: "ARM LIVE TRADING",
-      body: "You are enabling the master trading switch. With this armed — and only with LIVE_EXECUTION_ENABLED on the server — confirmed orders can reach Delta Exchange. Type-level confirmation is enforced server-side.",
+      body: "You are enabling the master trading switch. With this armed — and only with LIVE_EXECUTION_ENABLED on the server — confirmed orders can reach CoinDCX Futures. Type-level confirmation is enforced server-side.",
     });
     if (!ok) return;
     try {
@@ -209,19 +212,19 @@ export default function SettingsPage() {
         <div className="p-3 space-y-2.5">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="microlabel w-28">SOURCE</span>
-            {(["demo", "delta"] as const).map((src) => (
+            {(["demo", "live"] as const).map((src) => (
               <button key={src} onClick={() => void patchSettings({ dataSource: src })}
                 className={cx("h-7 px-3 rounded border text-[10px] tracking-wider uppercase",
                   settings.dataSource === src ? "border-accent/60 text-accent bg-accent-dim" : "border-edge text-mut hover:text-ink")}>
-                {src === "demo" ? "Demo simulator" : "Delta Exchange India"}
+                {src === "demo" ? "Demo simulator" : "CoinDCX Futures"}
               </button>
             ))}
           </div>
           <div className="flex items-center gap-2 text-[11px] text-mut">
-            <StatusDot tone={system?.deltaMarket === "online" ? "ok" : system?.deltaMarket === "offline" ? "err" : "off"} />
-            Delta REST: {system?.deltaMarket ?? "unknown"}
-            {settings.dataSource === "delta" && system?.deltaMarket !== "online" && (
-              <span className="text-warn text-[10px]">— charts fall back to labelled demo candles if Delta is unreachable</span>
+            <StatusDot tone={system?.exchangeMarket === "online" ? "ok" : system?.exchangeMarket === "offline" ? "err" : "off"} />
+            CoinDCX REST: {system?.exchangeMarket ?? "unknown"}
+            {settings.dataSource === "live" && system?.exchangeMarket !== "online" && (
+              <span className="text-warn text-[10px]">— charts fall back to labelled demo candles if CoinDCX is unreachable</span>
             )}
           </div>
           <p className="text-[10px] text-dim leading-relaxed">
@@ -229,8 +232,8 @@ export default function SettingsPage() {
           </p>
           {settings.dataSource === "demo" && creds?.configured && (
             <p className="text-[10px] text-warn">
-              Delta keys are configured, but the chart is currently using demo prices. Select{" "}
-              <span className="text-ink">Delta Exchange India</span> above to switch to its public market feed.
+              CoinDCX credentials are configured, but the chart is currently using demo prices. Select{" "}
+              <span className="text-ink">CoinDCX Futures</span> above to switch to its public market feed.
             </p>
           )}
         </div>
@@ -327,12 +330,12 @@ export default function SettingsPage() {
         </div>
       </Panel>
 
-      {/* delta api — credentials live on the static-IP trading gateway */}
+      {/* exchange api — credentials live in the deployment environment */}
       <Panel
-        title="DELTA API · TRADING GATEWAY"
+        title="EXCHANGE API · COINDCX FUTURES"
         badge={
           creds?.configured ? (
-            <Chip tone="up">GATEWAY CONFIGURED</Chip>
+            <Chip tone="up">CONFIGURED</Chip>
           ) : creds?.misconfigured ? (
             <Chip tone="warn">MISCONFIGURED</Chip>
           ) : (
@@ -345,47 +348,53 @@ export default function SettingsPage() {
             <KeyRound size={13} className="text-accent flex-none mt-0.5" />
             {creds?.configured ? (
               <span>
-                Private Delta requests are signed by the static-IP trading gateway at{" "}
-                <span className="num text-ink">{creds.gatewayHost ?? "the configured host"}</span>. This
-                application holds no Delta key or secret — there is nothing to paste here. Whether the
-                gateway is configured does not confirm that Delta accepts its key.
+                Private CoinDCX requests are signed by this deployment&apos;s own server functions,
+                which read <span className="num text-ink">COINDCX_API_KEY</span> and{" "}
+                <span className="num text-ink">COINDCX_API_SECRET</span> from the environment.
+                Credentials are never stored in the database, never sent to the browser and never
+                logged. Presence does not prove CoinDCX has accepted the key — check the account
+                balance card for a real read.
               </span>
             ) : (
               <span>
-                No trading gateway configured, so live balances, positions and orders are unavailable.
-                Set <span className="num text-ink">TRADING_GATEWAY_URL</span> and{" "}
-                <span className="num text-ink">TRADING_GATEWAY_SECRET</span> on this deployment, and put{" "}
-                <span className="num text-ink">DELTA_API_KEY</span> /{" "}
-                <span className="num text-ink">DELTA_API_SECRET</span> on the gateway host only.
+                No CoinDCX credentials on this deployment, so live balances, positions and orders are
+                unavailable and the workspace uses demo or public data.
+                Set <span className="num text-ink">COINDCX_API_KEY</span> and{" "}
+                <span className="num text-ink">COINDCX_API_SECRET</span> in the environment
+                (Vercel → Settings → Environment Variables) and redeploy. Full steps:{" "}
+                <span className="num">docs/COINDCX_SETUP.md</span>.
               </span>
             )}
           </p>
 
           {creds?.misconfigured && (
             <p className="rounded border border-warn/40 bg-warn/10 p-2 text-[11px] text-warn">
-              Only one of <span className="num">TRADING_GATEWAY_URL</span> /{" "}
-              <span className="num">TRADING_GATEWAY_SECRET</span> is set. Both are required before any
-              private Delta request will be made.
+              Only{" "}
+              <span className="num">{creds.missing[0] ?? "one of the two variables"}</span> is
+              missing. Both <span className="num">COINDCX_API_KEY</span> and{" "}
+              <span className="num">COINDCX_API_SECRET</span> are required before any private request
+              is made.
             </p>
           )}
 
           <div className="grid gap-1.5">
-            <KV k="Credentials held by" v="Trading gateway (not Vercel)" />
-            <KV k="Gateway host" v={creds?.gatewayHost ?? "—"} />
-            <KV k="Gateway status" v={system?.gateway?.reachable ? (system.gateway.ready ? "ready" : "degraded") : "unreachable"} />
-            <KV k="Delta egress IP" v="Gateway's static IPv4 (allowlist it at Delta)" />
+            <KV k="Credentials held by" v="This deployment's environment (server-side only)" />
+            <KV k="Exchange host" v={creds?.baseUrl ?? "https://api.coindcx.com"} />
+            <KV k="API reachable" v={system?.exchange?.reachable ? "yes (public probe)" : "unverified"} />
+            <KV k="Missing variables" v={creds?.missing?.length ? creds.missing.join(", ") : "none"} />
+            <KV k="IP binding" v="Not required by CoinDCX for futures API keys" />
           </div>
 
-          {system?.gateway?.error && (
-            <p className="text-[11px] text-warn">{system.gateway.error}</p>
+          {system?.exchange?.error && (
+            <p className="text-[11px] text-warn">{system.exchange.error}</p>
           )}
 
           <p className="text-[10px]">
-            Deployment steps (server, HTTPS, firewall, static IP, Delta allowlist) are in{" "}
-            <span className="num">docs/TRADING_GATEWAY_DEPLOYMENT.md</span>. Live orders additionally
-            require <span className="num">LIVE_EXECUTION_ENABLED</span> on both deployments, LIVE mode
-            armed, and a verifiable daily P&amp;L — the last of these is deliberately not implemented, so
-            live submission stays blocked.
+            Live orders additionally require <span className="num">LIVE_EXECUTION_ENABLED</span>{" "}
+            (off by default), LIVE mode armed, and a verifiable daily P&amp;L — the daily figure is read
+            from CoinDCX and fails closed, so an unverifiable day blocks submission. This build does not
+            send stop or take-profit orders on the order endpoint; position TP/SL uses CoinDCX&apos;s
+            dedicated endpoint.
           </p>
 
           {creds?.legacyStoredKeys && (

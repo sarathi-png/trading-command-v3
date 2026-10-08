@@ -1,5 +1,12 @@
 # Trading Gateway
 
+> **STANDALONE / NOT WIRED INTO THE APP.** Trading Command now talks to CoinDCX
+> directly, so nothing in the Next.js application imports or calls this service.
+> It is kept as a working, independently tested component for Delta-era
+> deployments. Buying the static IP it needs is not a prerequisite for anything
+> in the current product.
+
+
 Small, single-purpose Node.js/TypeScript service that owns the Delta Exchange
 India private API for Trading Command V3.
 

@@ -15,7 +15,7 @@ import type { AccountState, Analysis } from "@/lib/types";
 interface AccountRes {
   account: AccountState;
   mode: string;
-  deltaAccountConfigured: boolean;
+  exchangeAccountConfigured: boolean;
 }
 
 export default function OverviewPage() {
@@ -52,7 +52,7 @@ export default function OverviewPage() {
         {m.balance && (
           <MetricCard label="ACCOUNT EQUITY" tooltip="Starting balance + realized + unrealized P&L"
             value={accLoading ? <Skeleton className="h-6 w-24" /> : fmtUsd(account?.equity)}
-            sub={account?.source === "demo" ? "DEMO / PAPER WALLET" : "DELTA ACCOUNT"}
+            sub={account?.source === "demo" ? "DEMO / PAPER WALLET" : "COINDCX FUTURES"}
             onHide={hide("balance")} />
         )}
         {m.margin && (

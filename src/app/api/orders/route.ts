@@ -5,46 +5,53 @@
  *   1. LIVE_EXECUTION_ENABLED=true (environment)
  *   2. settings.mode === "live"
  *   3. settings.liveArmed === true (master switch, confirmation token)
- *   4. the trading gateway is configured (TRADING_GATEWAY_URL + SECRET)
+ *   4. COINDCX_API_KEY + COINDCX_API_SECRET present on this deployment
  *
  * Then the order must clear the SAME risk evaluation that guards paper fills
- * (see lib/risk.ts), and it carries a client_order_id so a retry returns the
- * original result instead of placing a second order.
+ * (see lib/risk.ts).
  *
- * WHERE THE ORDER GOES: not to Delta. Vercel cannot present a dedicated
- * outbound IPv4 for Delta's IP allowlist, so the order is sent to the
- * static-IP trading gateway, which signs it with the Delta secret and submits
- * it exactly once. That gateway enforces its own (stricter) copy of the risk
- * layer, so a bug or a bypass here still cannot produce an unrestricted order.
+ * WHERE THE ORDER GOES: straight to CoinDCX from this serverless function. The
+ * previous static-IP gateway hop existed only because Delta refuses trading keys
+ * from a non-allowlisted IP; CoinDCX does not require an IP-bound key, so the
+ * gateway is gone from the request path.
  *
- * IDEMPOTENCY IS TWO-LAYERED:
- *   - this route claims the client_order_id in Postgres BEFORE calling the
- *     gateway (a Vercel timeout or a double-click returns the stored row), and
- *   - the gateway keeps its own durable ledger, so even a lost response between
- *     Vercel and the gateway cannot submit the same id twice.
+ * IDEMPOTENCY WITHOUT A CLIENT ORDER ID
+ *   CoinDCX futures has NO client order id field, so there is no venue-side
+ *   deduplication to lean on. This route therefore:
+ *     1. claims the request in Postgres BEFORE submitting (unique constraint on
+ *        client_order_id, so a double-click or a retried request finds the row);
+ *     2. submits EXACTLY ONCE — never an automatic retry;
+ *     3. if the submission ends without a definitive answer, records
+ *        status='unknown' and RECONCILES by scanning the venue's recent orders,
+ *        because "the order may exist" is not "the order does not exist".
  *
- * `liveRealizedPnlToday()` intentionally still returns null, which the risk
- * layer treats as "unknown" and therefore blocks. The gateway applies the same
- * fail-closed rule independently. Live orders therefore remain closed until a
- * verified daily P&L is implemented in trading-gateway/src/risk/dailyPnl.ts.
+ * `liveRealizedPnlToday()` reads the venue and returns null whenever the figure
+ * cannot be proven, which the risk layer treats as "unknown" and therefore
+ * blocks. liveArmed plus LIVE_EXECUTION_ENABLED=false keep submission off by
+ * default; nothing here can enable it.
  *
  * Authentication is enforced for every /api route by middleware/proxy.ts and is
  * not duplicated here. Default configuration is always 403.
  */
-import { deltaAccountConfigured } from "@/lib/credentials";
+import { exchangeAccountConfigured } from "@/lib/credentials";
 import { flags } from "@/lib/flags";
-import { deltaTickers } from "@/lib/market/delta";
+import {
+  exchangeCapabilities,
+  liveBalances,
+  livePositions,
+  marketTickers,
+  realizedPnlTodayUtc,
+  reconcileLiveSubmission,
+  submitLiveOrder,
+  toExchangeSymbol,
+  ExchangeError,
+} from "@/lib/exchange/service";
+import { orderOutcomeKnown } from "@/lib/exchange/errors";
+import { isSupportedSymbol } from "@/lib/exchange/symbols";
 import { evaluateOrderRisk, normalizeRiskLimits } from "@/lib/risk";
 import { getSettings, logAudit } from "@/lib/settings";
-import {
-  baseAssetOf,
-  gatewayCreateOrder,
-  livePositions,
-  liveWalletBalances,
-  newClientOrderId,
-  TradingGatewayError,
-} from "@/lib/tradingGateway";
 import { getRepo } from "@/lib/repo";
+import crypto from "node:crypto";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -52,29 +59,49 @@ export const runtime = "nodejs";
 /**
  * Realised P&L since UTC midnight for the live account.
  *
- * NOT IMPLEMENTED — returns null, which the risk layer treats as "unknown" and
- * therefore blocks. A daily-loss limit that assumes zero realised loss is not a
- * limit, so live orders stay closed until this reads actual fills from the
- * exchange (sum realised_pnl over today's fills) and caches it.
+ * Reads CoinDCX's position transactions and returns the booked P&L, or null
+ * when it cannot be PROVEN (venue unreachable, truncated page, unknown timestamp)
+ * — which the risk layer treats as "unknown" and therefore blocks. A daily-loss
+ * limit that assumes zero realised loss is not a limit.
  *
- * The gateway enforces the identical rule in its own process
- * (trading-gateway/src/risk/dailyPnl.ts). Implementing the figure here alone is
- * NOT enough, and implementing it there alone is not enough either — both
- * layers fail closed by design. See docs/SECURITY.md.
+ * The gateway used to enforce the identical rule in its own process; that layer
+ * is no longer on the path, so this is now the only enforcement point and it
+ * fails closed by design. See docs/SECURITY.md.
  */
 async function liveRealizedPnlToday(): Promise<number | null> {
-  return null;
+  return realizedPnlTodayUtc();
+}
+
+/** Request key that makes a submission idempotent across retries. */
+function newClientOrderId(): string {
+  return `tc-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 12)}`;
 }
 
 export async function GET() {
   const settings = await getSettings();
+  const capabilities = exchangeCapabilities();
   return Response.json({
     liveExecutionFlag: flags.liveExecution(),
     mode: settings.mode,
     liveArmed: settings.liveArmed,
-    deltaConfigured: await deltaAccountConfigured(),
-    routedVia: "trading-gateway",
+    exchangeConfigured: await exchangeAccountConfigured(),
+    routedVia: "direct",
+    capabilities: {
+      clientOrderIds: capabilities.clientOrderIds,
+      orderReconciliation: capabilities.orderReconciliation,
+      reduceOnlyOrders: capabilities.reduceOnlyOrders,
+    },
   });
+}
+
+interface LiveOrderBody {
+  symbol?: unknown;
+  side?: unknown;
+  type?: unknown;
+  size?: unknown;
+  reduce_only?: unknown;
+  limit_price?: unknown;
+  client_order_id?: unknown;
 }
 
 export async function POST(req: Request) {
@@ -94,17 +121,17 @@ export async function POST(req: Request) {
       { status: 403 }
     );
   }
-  if (!(await deltaAccountConfigured())) {
-    await logAudit("live_order_rejected", { reason: "gateway_not_configured" });
+  if (!(await exchangeAccountConfigured())) {
+    await logAudit("live_order_rejected", { reason: "exchange_not_configured" });
     return Response.json(
-      { error: "The trading gateway is not configured, so live orders cannot be routed." },
+      { error: "CoinDCX API credentials are not configured on this deployment, so live orders cannot be sent." },
       { status: 403 }
     );
   }
 
-  let body: Record<string, unknown>;
+  let body: LiveOrderBody;
   try {
-    body = await req.json();
+    body = (await req.json()) as LiveOrderBody;
   } catch {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -119,28 +146,45 @@ export async function POST(req: Request) {
   if (!symbol || size <= 0) {
     return Response.json({ error: "symbol and positive size are required" }, { status: 400 });
   }
+  if (!isSupportedSymbol(symbol)) {
+    // Fail before any network call: an unsupported pair must never be mapped
+    // onto some other instrument.
+    return Response.json(
+      { error: `${symbol} is not a supported CoinDCX futures instrument on this deployment.` },
+      { status: 422 }
+    );
+  }
+  if (reduceOnly) {
+    // CoinDCX expresses "reduce only" by closing the position
+    // (positions/exit), not by a flag on order creation. Silently dropping the
+    // flag could OPEN a position the operator meant to reduce, so this refuses.
+    await logAudit("live_order_rejected", { reason: "reduce_only_unsupported", symbol });
+    return Response.json(
+      {
+        error:
+          "CoinDCX has no reduce-only order flag. Use the close-position action, which sends positions/exit.",
+        code: "REDUCE_ONLY_UNSUPPORTED",
+      },
+      { status: 422 }
+    );
+  }
 
-  // ---- idempotency (layer 1: Postgres) -----------------------------------
-  // A retried request must return the first result, never place a second order.
-  // clientOrderId is capped at 32 characters — Delta's documented maximum for
-  // `client_order_id`; the previous format (tc-<timestamp>-<uuid>, 53 chars)
-  // would have been rejected by the exchange.
+  // ---- idempotency (Postgres) -------------------------------------------
   const clientOrderId =
     typeof body.client_order_id === "string" && body.client_order_id.trim()
-      ? body.client_order_id.trim().slice(0, 32)
+      ? body.client_order_id.trim().slice(0, 64)
       : newClientOrderId();
 
   const repo = await getRepo();
   const existing = await repo.findLiveOrderByClientId(clientOrderId);
   if (existing) {
-    // A previously UNKNOWN submission must be reconciled, never resubmitted:
-    // the order may already exist at Delta.
     if (existing.status === "unknown") {
+      // A previously UNKNOWN submission must be reconciled, never resubmitted.
       await logAudit("live_order_blocked_unknown", { clientOrderId, symbol });
       return Response.json(
         {
           error:
-            "A previous attempt with this client_order_id has an UNKNOWN outcome at Delta. Reconcile it before retrying.",
+            "A previous attempt with this client_order_id has an UNKNOWN outcome at CoinDCX. Reconcile it before retrying.",
           code: "ORDER_STATUS_UNKNOWN",
           clientOrderId,
           reconcile: `/api/orders/status?clientOrderId=${encodeURIComponent(clientOrderId)}`,
@@ -164,9 +208,8 @@ export async function POST(req: Request) {
     if (type === "limit_order" && limitPrice !== null) {
       referencePrice = limitPrice;
     } else {
-      const tickers = await deltaTickers();
-      const found = tickers.find((t) => t.symbol === symbol);
-      referencePrice = found?.price ?? 0;
+      const tickers = await marketTickers([symbol]);
+      referencePrice = tickers.find((t) => t.symbol === symbol)?.price ?? 0;
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Could not read a reference price";
@@ -180,12 +223,13 @@ export async function POST(req: Request) {
   let currentNotional = 0;
   let equity = 0;
   try {
-    const [positions, balances] = await Promise.all([livePositions(), liveWalletBalances()]);
+    const [positions, balances] = await Promise.all([livePositions(), liveBalances()]);
     openSymbols = positions.map((p) => p.symbol);
     currentNotional = positions.reduce((a, p) => a + Math.abs(p.qty) * (p.mark || p.entry), 0);
-    const usd = balances.find((b) => b.asset === "USD" || b.asset === "USDC");
-    equity = usd?.balance ?? 0;
+    const margin = balances.find((b) => b.asset === "USDT" || b.asset === "USD" || b.asset === "USDC");
+    equity = margin?.balance ?? 0;
   } catch (e) {
+    // Unreadable account state means the risk maths cannot be trusted.
     const msg = e instanceof Error ? e.message : "Could not read live account state";
     await logAudit("live_order_failed", { clientOrderId, symbol, error: msg });
     return Response.json({ error: msg }, { status: 502 });
@@ -217,34 +261,53 @@ export async function POST(req: Request) {
     );
   }
 
-  // ---- claim the idempotency key, then submit through the gateway --------
-  await repo.insertLiveOrder({
-    clientOrderId,
-    symbol,
-    side,
-    type,
-    size,
-    price: referencePrice,
-    status: "pending",
-  });
-
+  // ---- claim the idempotency key, then submit exactly once ---------------
+  const claimedAt = Date.now();
   try {
-    const result = await gatewayCreateOrder({
+    await repo.insertLiveOrder({
+      clientOrderId,
       symbol,
       side,
-      size,
       type,
-      limitPrice,
-      reduceOnly,
-      clientOrderId,
-      // Base assets the gateway should inspect for its own exposure maths.
-      underlyingAssets: [...new Set(settings.watchlist.map((s) => baseAssetOf(s)).filter(Boolean))],
-      riskLimits: limits as unknown as Record<string, unknown>,
+      size,
+      price: referencePrice,
+      status: "pending",
+      exchange: "coindcx",
+      symbolCanonical: symbol,
+      exchangeSymbol: toExchangeSymbol(symbol),
+    });
+  } catch (e) {
+    // Unique-constraint loss means a concurrent request claimed this id first:
+    // treat it as a duplicate rather than as a failure.
+    const raced = await repo.findLiveOrderByClientId(clientOrderId);
+    if (raced) {
+      return Response.json(
+        { ok: true, deduplicated: true, clientOrderId, order: raced.response, status: raced.status },
+        { status: 200 }
+      );
+    }
+    const msg = e instanceof Error ? e.message : "Could not claim the order slot";
+    return Response.json({ error: msg }, { status: 500 });
+  }
+
+  try {
+    const outcome = await submitLiveOrder({
+      symbol,
+      side,
+      type: type === "limit_order" ? "limit" : "market",
+      quantity: size,
+      price: limitPrice,
+      // Leverage is deliberately NOT sent: the adapter aligns it with the
+      // existing position when the venue requires a match, and never changes a
+      // position's leverage as a side effect of placing an order.
+      reduceOnly: false,
     });
 
     await repo.updateLiveOrderByClientId(clientOrderId, {
       status: "submitted",
-      response: (result.order ?? null) as Record<string, unknown> | null,
+      exchangeOrderId: outcome.order?.id ?? null,
+      exchangeSymbol: outcome.order?.exchangeSymbol ?? null,
+      response: (outcome.order ?? null) as unknown as Record<string, unknown> | null,
     });
 
     await logAudit("live_order_placed", {
@@ -253,46 +316,101 @@ export async function POST(req: Request) {
       side,
       type,
       size,
-      deduplicated: result.deduplicated,
-      routedVia: "trading-gateway",
+      exchange: "coindcx",
+      exchangeOrderId: outcome.order?.id ?? null,
+      routedVia: "direct",
     });
     return Response.json({
       ok: true,
       clientOrderId,
-      order: result.order,
-      deduplicated: result.deduplicated,
-      risk: result.risk,
+      order: outcome.order,
+      deduplicated: false,
+      risk: { limits, orderValue: verdict.orderValue },
     });
   } catch (e) {
-    // An uncertain outcome is recorded as such and NEVER retried. The operator
-    // reconciles with GET /api/orders/status?clientOrderId=...
-    const isUnknown = e instanceof TradingGatewayError && e.upstreamCode === "ORDER_STATUS_UNKNOWN";
     const message = e instanceof Error ? e.message : "Live order failed";
+    const code = e instanceof ExchangeError ? e.code : "LIVE_ORDER_FAILED";
+
+    // The adapter reports an uncertain submission instead of throwing, but guard
+    // both shapes: anything that is not a clean venue refusal is UNKNOWN.
+    const uncertain = e instanceof ExchangeError && !orderOutcomeKnown(e);
 
     await repo.updateLiveOrderByClientId(clientOrderId, {
-      status: isUnknown ? "unknown" : "failed",
+      status: uncertain ? "unknown" : "failed",
     });
-    await logAudit(isUnknown ? "live_order_unknown" : "live_order_failed", {
+    await logAudit(uncertain ? "live_order_unknown" : "live_order_failed", {
       clientOrderId,
       symbol,
       error: message,
-      code: e instanceof TradingGatewayError ? e.upstreamCode ?? e.code : undefined,
+      code,
     });
 
+    if (!uncertain) {
+      return Response.json({ error: message, code, clientOrderId }, { status: 502 });
+    }
+
+    // ---- reconcile: the order may exist, so never resubmit ----------------
+    const verdictNow = await reconcileLiveSubmission({
+      symbol,
+      side,
+      quantity: size,
+      sinceMs: claimedAt,
+    });
+
+    if (verdictNow.status === "found") {
+      await repo.updateLiveOrderByClientId(clientOrderId, {
+        status: "submitted",
+        exchangeOrderId: verdictNow.order.id,
+        exchangeSymbol: verdictNow.order.exchangeSymbol,
+        response: verdictNow.order as unknown as Record<string, unknown>,
+      });
+      await logAudit("live_order_reconciled", {
+        clientOrderId,
+        symbol,
+        exchangeOrderId: verdictNow.order.id,
+        via: "recovery",
+      });
+      return Response.json({
+        ok: true,
+        clientOrderId,
+        order: verdictNow.order,
+        reconciled: true,
+        deduplicated: false,
+      });
+    }
+
+    if (verdictNow.status === "not_found") {
+      // Provably nothing was created: the scan reached the end of the venue's
+      // order history and found no match in the window.
+      await repo.updateLiveOrderByClientId(clientOrderId, { status: "failed" });
+      await logAudit("live_order_failed", { clientOrderId, symbol, reconciled: "not_found" });
+      return Response.json(
+        {
+          error: message,
+          code,
+          clientOrderId,
+          reconciled: "not_found",
+          guidance:
+            "CoinDCX has no matching order, so nothing was created. A retry must use a NEW client_order_id.",
+        },
+        { status: 502 }
+      );
+    }
+
+    // Ambiguous: the operator decides. The row stays 'unknown' so a retry of
+    // this client_order_id is refused above.
     return Response.json(
       {
         error: message,
-        code: e instanceof TradingGatewayError ? e.upstreamCode ?? e.code : "LIVE_ORDER_FAILED",
+        code,
         clientOrderId,
-        ...(isUnknown
-          ? {
-              reconcile: `/api/orders/status?clientOrderId=${encodeURIComponent(clientOrderId)}`,
-              guidance:
-                "The order may or may not exist at Delta. Reconcile before doing anything else — do not resubmit.",
-            }
-          : {}),
+        reconciled: "unknown",
+        detail: verdictNow.reason,
+        reconcile: `/api/orders/status?clientOrderId=${encodeURIComponent(clientOrderId)}`,
+        guidance:
+          "The order may or may not exist at CoinDCX. Reconcile before doing anything else — do not resubmit.",
       },
-      { status: 502 }
+      { status: 409 }
     );
   }
 }

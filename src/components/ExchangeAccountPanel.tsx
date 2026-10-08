@@ -1,12 +1,13 @@
 "use client";
 /**
- * Exchange account panel — live Delta balances and realized trading record.
+ * Exchange account panel — live CoinDCX balances and realized trading record.
  *
- * Reads /api/delta/summary, which derives figures from the private Delta
- * endpoints (wallet balances, wallet transactions, fills). Realized P&L comes
- * from Delta's `cashflow` ledger entries, so it is authoritative rather than
- * reconstructed; the per-trade table is FIFO-matched from fills and provides
- * the best/worst trade detail.
+ * Reads /api/exchange/summary, which derives figures from the private CoinDCX
+ * endpoints (futures wallet, wallet transactions, per-pair trades, position
+ * transactions). Realized P&L is reported from the venue's own position
+ * transactions when available (`realizedPnlUsd`, `null` when it could not be
+ * read — never zero-by-default); the per-trade table is FIFO-matched from fills
+ * and supplies the best/worst trade detail.
  */
 import { Wallet, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { Chip, EmptyState, MetricCard, Panel, Skeleton } from "@/components/ui";
@@ -25,7 +26,7 @@ interface Trade {
   at: string;
 }
 
-interface DeltaSummary {
+interface ExchangeSummary {
   available: boolean;
   error?: string;
   balanceUsd: number;
@@ -53,7 +54,7 @@ interface DeltaSummary {
 export default function ExchangeAccountPanel() {
   const { settings } = useApp();
   const { data, loading } = usePoll(
-    () => api.get<DeltaSummary>("/api/delta/summary"),
+    () => api.get<ExchangeSummary>("/api/exchange/summary"),
     30000
   );
 
@@ -63,7 +64,7 @@ export default function ExchangeAccountPanel() {
 
   return (
     <Panel
-      title="EXCHANGE ACCOUNT · DELTA"
+      title="EXCHANGE ACCOUNT · COINDCX"
       right={
         s ? (
           <Chip tone={s.available ? "up" : "warn"}>
@@ -82,7 +83,7 @@ export default function ExchangeAccountPanel() {
         <EmptyState
           icon={<Wallet size={18} />}
           title="Exchange account unavailable"
-          hint={s?.error ?? "Connect Delta credentials in Settings to see live balances and history."}
+          hint={s?.error ?? "Set COINDCX_API_KEY and COINDCX_API_SECRET in the deployment environment to see live balances and history."}
         />
       ) : (
         <div className="p-3 space-y-3">

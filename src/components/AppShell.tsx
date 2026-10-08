@@ -18,7 +18,6 @@ import LoginGate from "./LoginGate";
 import Onboarding, { Logo } from "./Onboarding";
 import { Btn, Chip, StatusDot } from "./ui";
 
-const DELTA_WS_URL = "wss://socket.india.delta.exchange";
 
 const NAV = [
   { href: "/", label: "OVERVIEW", icon: LayoutDashboard },
@@ -39,7 +38,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     settings, settingsLoaded, applySettings, system, setSystem,
     paletteOpen, setPalette, helpOpen, setHelp, notify,
   } = useApp();
-  const [capabilities, setCapabilities] = useState({ liveExecution: false, deltaAccountConfigured: false });
+  const [capabilities, setCapabilities] = useState({ liveExecution: false, exchangeAccountConfigured: false });
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const [authDenied, setAuthDenied] = useState(false);
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
@@ -82,7 +81,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     el.dataset.density = settings.density;
   }, [settings.accent, settings.reduceMotion, settings.density]);
 
-  /* ---- market feed: polling (always) + Delta WS overlay (delta mode) --- */
+  /* ---- market feed: REST polling (the venue socket is server-side only) -- */
   const symbolsKey = useMemo(() => {
     const set = new Set([...settings.watchlist, useApp.getState().activeSymbol, "BTCUSD"]);
     return [...set].join(",");
@@ -108,14 +107,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
     void pollOnce();
     timer = setInterval(() => void pollOnce(), 2600);
 
-    // Optional public Delta WebSocket overlay (no credentials involved).
-    let cleanupWs: (() => void) | null = null;
-    if (settings.dataSource === "delta") {
-      cleanupWs = startDeltaWs(symbolsKey.split(","), (t) => {
-        if (!stop) useMarket.getState().setTickers([t]);
-      });
-    }
-    return () => { stop = true; if (timer) clearInterval(timer); cleanupWs?.(); };
+    // No browser-side venue socket: market data is polled from our own API,
+    // which reads CoinDCX REST server-side. Streaming would need a long-lived
+    // process the Vercel deployment does not have (see
+    // src/lib/exchange/coindcx/websocket.ts), and a direct browser→venue socket
+    // would add an exfiltration surface for no functional gain.
+    return () => { stop = true; if (timer) clearInterval(timer); };
   }, [settingsLoaded, settings.dataSource, symbolsKey, reconnectNonce]);
 
   /* ---- alert rules ------------------------------------------------------ */
@@ -295,81 +292,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-/* ================= Delta public websocket (market data only) ============ */
-
-function startDeltaWs(symbols: string[], onTicker: (t: Ticker) => void): () => void {
-  let ws: WebSocket | null = null;
-  let closed = false;
-  let attempt = 0;
-  let hb: ReturnType<typeof setInterval> | null = null;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const num = (v: unknown): number | null => {
-    const n = typeof v === "string" ? parseFloat(v) : typeof v === "number" ? v : NaN;
-    return Number.isFinite(n) ? n : null;
-  };
-
-  function connect() {
-    if (closed) return;
-    useMarket.getState().setFeed("connecting");
-    try {
-      ws = new WebSocket(DELTA_WS_URL);
-    } catch {
-      scheduleReconnect();
-      return;
-    }
-    ws.onopen = () => {
-      attempt = 0;
-      ws?.send(JSON.stringify({ type: "subscribe", payload: { channels: [{ name: "v2/ticker", symbols }] } }));
-      hb = setInterval(() => { if (ws?.readyState === WebSocket.OPEN) ws.send('{"type":"heartbeat"}'); }, 20000);
-    };
-    ws.onmessage = (ev) => {
-      try {
-        const m = JSON.parse(String(ev.data));
-        if (m.type === "v2/ticker" && m.symbol && m.data) {
-          const d = m.data as Record<string, unknown>;
-          const price = num(d.close ?? d.last_price);
-          if (price === null) return;
-          const change = num(d.change_24h);
-          const fr = num(d.funding_rate);
-          onTicker({
-            symbol: m.symbol,
-            price,
-            markPrice: num(d.mark_price),
-            change24hPct: change !== null ? change * 100 : 0,
-            volume24hUsd: num(d.volume_24h) ?? 0,
-            fundingRate: fr !== null ? fr * 100 : null,
-            openInterest: num(d.oi_value),
-            high24h: num(d.high_24h),
-            low24h: num(d.low_24h),
-            bid: num(d.best_bid_price),
-            ask: num(d.best_ask_price),
-            ts: Date.now(),
-            source: "delta",
-          });
-        }
-      } catch { /* ignore malformed frames */ }
-    };
-    ws.onclose = () => { if (hb) clearInterval(hb); scheduleReconnect(); };
-    ws.onerror = () => { try { ws?.close(); } catch { /* noop */ } };
-  }
-
-  function scheduleReconnect() {
-    if (closed) return;
-    attempt += 1;
-    const delay = Math.min(15000, 600 * Math.pow(2, Math.min(attempt, 5)));
-    reconnectTimer = setTimeout(connect, delay);
-  }
-
-  connect();
-  return () => {
-    closed = true;
-    if (hb) clearInterval(hb);
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    try { ws?.close(); } catch { /* noop */ }
-  };
-}
-
 /* ================= top bar ============================================== */
 
 function TopBar({ onReconnect }: { onReconnect: () => void }) {
@@ -404,8 +326,8 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
         </span>
       ) : feed === "connecting" ? (
         <Chip tone="warn" className="pulse-soft">CONNECTING TO FEED…</Chip>
-      ) : settings.dataSource === "delta" ? (
-        <Chip tone="up"><StatusDot tone="ok" /> DELTA LIVE</Chip>
+      ) : settings.dataSource === "live" ? (
+        <Chip tone="up"><StatusDot tone="ok" /> COINDCX LIVE</Chip>
       ) : (
         <Chip tone="warn"><StatusDot tone="warn" /> DEMO FEED</Chip>
       )}
@@ -447,9 +369,9 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
         <Chip className="hidden sm:inline-flex">
           {settings.dataSource === "demo"
             ? "DEMO ACCOUNT"
-            : system?.deltaAccount === "configured"
-              ? "DELTA · ACCOUNT UNVERIFIED"
-              : "DELTA · NOT CONFIGURED"}
+            : system?.exchangeAccount === "configured"
+              ? "COINDCX · ACCOUNT UNVERIFIED"
+              : "COINDCX · NOT CONFIGURED"}
         </Chip>
         {modeBadge}
         <NotifBell />
@@ -573,8 +495,8 @@ function StatusBar() {
   return (
     <footer className="h-6 border-t border-edge bg-panel2 flex items-center gap-4 px-3 text-[9.5px] text-dim flex-none overflow-hidden whitespace-nowrap">
       <span className="flex items-center gap-1.5">
-        <StatusDot tone={settings.dataSource === "delta" ? (system?.deltaMarket === "online" ? "ok" : "err") : "warn"} />
-        REST {settings.dataSource === "delta" ? (system?.deltaMarket ?? "…") : "DEMO SIM"}
+        <StatusDot tone={settings.dataSource === "live" ? (system?.exchangeMarket === "online" ? "ok" : "err") : "warn"} />
+        REST {settings.dataSource === "live" ? (system?.exchangeMarket ?? "…") : "DEMO SIM"}
       </span>
       <span className="hidden sm:flex items-center gap-1.5">
         <StatusDot tone={feed === "live" ? "ok" : feed === "connecting" ? "warn" : "err"} />

@@ -135,8 +135,12 @@ export const liveOrdersTable = pgTable("live_orders", {
   type: text("type").notNull(),
   size: real("size").notNull(),
   price: real("price"),
-  status: text("status").notNull().default("pending"), // pending | submitted | failed
-  deltaOrderId: text("delta_order_id"),
+  status: text("status").notNull().default("pending"), // pending | submitted | unknown | failed
+  /** Venue this row was submitted to. Exchange-neutral since the CoinDCX migration. */
+  exchange: text("exchange").notNull().default("coindcx"),
+  /** Canonical app symbol (e.g. "BTCUSD") and the venue's own pair (e.g. "B-BTC_USDT"). */
+  exchangeSymbol: text("exchange_symbol"),
+  exchangeOrderId: text("exchange_order_id"),
   response: jsonb("response"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),

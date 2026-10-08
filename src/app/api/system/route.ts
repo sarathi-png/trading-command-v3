@@ -1,16 +1,25 @@
+/**
+ * System status for the header and the STATUS panel.
+ *
+ * Everything reported here is verified, not assumed:
+ *   - `exchangeMarket` is a live public probe (active instruments endpoint)
+ *     cached for 30 s;
+ *   - `exchangeAccount` reports whether the credentials are present on THIS
+ *     deployment, because this process is what signs CoinDCX requests;
+ *   - the `exchange` block carries variable NAMES that are unset and whether
+ *     live execution is enabled — never a key, a secret or a signature.
+ */
 import { getRepo } from "@/lib/repo";
-import { deltaAccountConfigured } from "@/lib/credentials";
+import { exchangeAccountConfigured } from "@/lib/credentials";
 import { flags, APP_VERSION } from "@/lib/flags";
-import { deltaPing } from "@/lib/market/delta";
+import { exchangeCapabilities, exchangeConfigState, exchangePing } from "@/lib/exchange/service";
 import { getSettings } from "@/lib/settings";
-import { gatewayHealth } from "@/lib/tradingGateway";
 import type { SystemStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-let pingCache: { at: number; ok: boolean } | null = null;
-let gatewayCache: { at: number; value: Awaited<ReturnType<typeof gatewayHealth>> } | null = null;
+let pingCache: { at: number; ok: boolean; error?: string } | null = null;
 
 export async function GET() {
   const settings = await getSettings();
@@ -18,12 +27,17 @@ export async function GET() {
   const repo = await getRepo();
   const dbOk = await repo.probe();
 
-  let deltaMarket: SystemStatus["deltaMarket"] = "disabled";
-  if (flags.deltaMarket()) {
+  let exchangeMarket: SystemStatus["exchangeMarket"] = "disabled";
+  if (flags.exchangeMarket()) {
     if (!pingCache || Date.now() - pingCache.at > 30000) {
-      pingCache = { at: Date.now(), ok: await deltaPing() };
+      try {
+        await exchangePing();
+        pingCache = { at: Date.now(), ok: true };
+      } catch (e) {
+        pingCache = { at: Date.now(), ok: false, error: e instanceof Error ? e.message : "probe failed" };
+      }
     }
-    deltaMarket = pingCache.ok ? "online" : "offline";
+    exchangeMarket = pingCache.ok ? "online" : "offline";
   }
 
   const execution =
@@ -35,19 +49,15 @@ export async function GET() {
         ? "PAPER MODE"
         : "READ ONLY";
 
-  // "Configured" now means the static-IP trading gateway is reachable and has
-  // its own Delta credentials — Vercel holds none. See lib/credentials.ts.
-  const deltaCreds = await deltaAccountConfigured();
-  if (!gatewayCache || Date.now() - gatewayCache.at > 30000) {
-    gatewayCache = { at: Date.now(), value: await gatewayHealth() };
-  }
-  const gateway = gatewayCache.value;
+  const credsConfigured = await exchangeAccountConfigured();
+  const config = exchangeConfigState();
+  const capabilities = exchangeCapabilities();
 
   const status: SystemStatus = {
     db: dbOk,
-    deltaMarket,
-    deltaAccount: deltaCreds
-      ? settings.dataSource === "delta"
+    exchangeMarket,
+    exchangeAccount: credsConfigured
+      ? settings.dataSource === "live"
         ? "configured"
         : "disconnected"
       : "disabled",
@@ -57,18 +67,20 @@ export async function GET() {
     demoMode: settings.dataSource === "demo",
     latencyMs: null,
     version: APP_VERSION,
-    gateway: {
-      configured: gateway.configured,
-      reachable: gateway.reachable,
-      ready: gateway.ready,
-      host: gateway.host,
-      liveExecutionEnabled: gateway.liveExecutionEnabled ?? false,
-      ...(gateway.missing ? { missing: gateway.missing } : {}),
-      ...(gateway.error ? { error: gateway.error } : {}),
+    exchange: {
+      configured: credsConfigured,
+      exchange: config.exchange,
+      baseUrl: config.baseUrl,
+      missing: config.missing,
+      reachable: pingCache?.ok ?? false,
+      liveExecutionEnabled: flags.liveExecution(),
+      clientOrderIds: capabilities.clientOrderIds,
+      orderReconciliation: capabilities.orderReconciliation,
+      ...(pingCache?.error ? { error: pingCache.error } : {}),
     },
     flags: {
-      DELTA_MARKET: flags.deltaMarket(),
-      DELTA_ACCOUNT: deltaCreds,
+      EXCHANGE_MARKET: flags.exchangeMarket(),
+      EXCHANGE_ACCOUNT: credsConfigured,
       PAPER_TRADING: flags.paperTrading(),
       LIVE_EXECUTION: flags.liveExecution(),
       ORDERBOOK: flags.orderbook(),

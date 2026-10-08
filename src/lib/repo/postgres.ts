@@ -226,7 +226,12 @@ function toLiveOrder(r: typeof liveOrdersTable.$inferSelect): LiveOrderRow {
     size: r.size,
     price: r.price ?? null,
     status: r.status,
-    deltaOrderId: r.deltaOrderId ?? null,
+    exchange: r.exchange,
+    // Rows written before the exchange-neutral migration keep their original
+    // symbol; only new rows carry the canonical form.
+    symbolCanonical: r.symbol,
+    exchangeSymbol: r.exchangeSymbol ?? null,
+    exchangeOrderId: r.exchangeOrderId ?? null,
     response: (r.response as Record<string, unknown> | null) ?? null,
     createdAt: iso(r.createdAt, EPOCH),
     updatedAt: iso(r.updatedAt, EPOCH),
@@ -671,6 +676,9 @@ export const postgresRepo: Repo = {
       size: value.size,
       price: value.price ?? null,
       status: value.status ?? "pending",
+      exchange: value.exchange ?? "coindcx",
+      exchangeSymbol: value.exchangeSymbol ?? null,
+      exchangeOrderId: value.exchangeOrderId ?? null,
     });
   },
   async updateLiveOrderByClientId(clientOrderId, patch) {
@@ -679,7 +687,8 @@ export const postgresRepo: Repo = {
       .update(liveOrdersTable)
       .set({
         status: patch.status,
-        deltaOrderId: patch.deltaOrderId,
+        exchangeSymbol: patch.exchangeSymbol,
+        exchangeOrderId: patch.exchangeOrderId,
         response: patch.response,
         updatedAt: patch.updatedAt ? toDate(patch.updatedAt) : new Date(),
       })

@@ -1,5 +1,15 @@
 # Trading Gateway deployment (static-IP Delta access)
 
+> **NOT REQUIRED BY THIS APPLICATION.** The static-IP trading gateway existed
+> only because Delta Exchange India requires an allowlisted IP for trading keys.
+> CoinDCX does not, so the application signs its own requests and never calls
+> this service (the end-to-end test asserts it receives zero requests). The
+> service remains in `trading-gateway/` as a standalone, self-contained
+> deployment for a Delta-era setup, and this document is kept for that case.
+> Deploying Trading Command on Vercel needs **no gateway**: see
+> **`docs/VERCEL_DEPLOYMENT.md`**.
+
+
 This is the runbook for the split architecture:
 
 ```

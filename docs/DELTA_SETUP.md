@@ -1,5 +1,13 @@
 # Delta Exchange India setup
 
+> **SUPERSEDED (Delta Exchange India).** This application now trades on
+> **CoinDCX Futures** and no longer calls Delta. This file is kept as history:
+> it documents the venue-specific details (contracts vs base units, the
+> `client_order_id` field, the IP allowlist requirement) that explain why the
+> architecture looked the way it did. For current setup read
+> **`docs/COINDCX_SETUP.md`** and **`docs/EXCHANGE_MIGRATION.md`**.
+
+
 ## 1. Create API keys
 
 Delta India app → Profile → **API Management** → Create API Key.

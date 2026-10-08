@@ -218,7 +218,7 @@ export default function OrdersPage() {
           {target && <KV k="TARGET" v={fmtPrice(parseFloat(target))} />}
           <KV k="EST. NOTIONAL" v={fmtUsd(notional)} />
           <p className="text-[10px] text-warn leading-snug">
-            This submits a real order to Delta Exchange if live execution is armed. Review every field.
+            This submits a real order to CoinDCX Futures if live execution is armed. Review every field.
           </p>
           <div className="flex justify-end gap-2">
             <Btn variant="ghost" onClick={() => setLiveModal(false)}>CANCEL</Btn>

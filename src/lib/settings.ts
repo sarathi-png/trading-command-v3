@@ -72,8 +72,12 @@ export async function getSettings(): Promise<AppSettings> {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.value;
   // A failed database read must not masquerade as first-run defaults: doing so
   // can make onboarding reappear and conceal an unapplied database schema.
-  const stored = (await (await getRepo()).getSetting(KEY)) as Partial<AppSettings> | null;
+  const stored = (await (await getRepo()).getSetting(KEY)) as (Partial<AppSettings> & { dataSource?: string }) | null;
   const value = stored ? merge(DEFAULT_SETTINGS, stored) : { ...DEFAULT_SETTINGS };
+  // Pre-migration rows stored the venue as the data source ("delta"). The value
+  // now means "a real venue", so map it forward instead of silently dropping a
+  // user back to demo data.
+  if ((value.dataSource as string) === "delta") value.dataSource = "live";
   cache = { at: Date.now(), value };
   return value;
 }

@@ -34,7 +34,7 @@ export interface Ticker {
   bid: number | null;
   ask: number | null;
   ts: number; // ms epoch
-  source: "demo" | "delta";
+  source: "demo" | "live";
   stale?: boolean;
 }
 
@@ -44,7 +44,7 @@ export interface OrderBook {
   bids: OrderBookLevel[];
   asks: OrderBookLevel[];
   ts: number;
-  source: "demo" | "delta";
+  source: "demo" | "live";
 }
 export interface RecentTrade { price: number; size: number; side: "buy" | "sell"; ts: number }
 
@@ -177,7 +177,7 @@ export interface AppSettings {
   mode: ExecMode;
   liveArmed: boolean; // master trading switch, OFF by default
   layout: LayoutPreset;
-  dataSource: "demo" | "delta";
+  dataSource: "demo" | "live";
   accent: "teal" | "blue" | "purple" | "amber";
   density: "comfortable" | "compact";
   reduceMotion: boolean;
@@ -219,27 +219,31 @@ export interface AlertRule {
 
 export interface SystemStatus {
   db: boolean;
-  deltaMarket: "online" | "offline" | "disabled";
-  /**
-   * Private Delta account access. After the static-IP gateway migration this
-   * reflects the GATEWAY's configuration, not any credential on Vercel.
-   */
-  deltaAccount: "configured" | "disconnected" | "disabled";
+  /** Public CoinDCX market data reachability. */
+  exchangeMarket: "online" | "offline" | "disabled";
+  /** Private account access on this deployment (credentials present). */
+  exchangeAccount: "configured" | "disconnected" | "disabled";
   strategy: boolean;
   execution: string; // READ ONLY | PAPER | LIVE DISABLED | LIVE ARMED
   webhook: boolean;
   demoMode: boolean;
   latencyMs: number | null;
   version: string;
-  /** Static-IP trading gateway: the only path to private Delta endpoints. */
-  gateway?: {
+  /**
+   * Exchange connectivity, as much of it as can be verified without placing an
+   * order: credentials present, public endpoints reachable, live flag.
+   */
+  exchange?: {
     configured: boolean;
+    exchange: string;
+    baseUrl: string;
+    /** Environment variable NAMES that are unset (never values). */
+    missing: string[];
+    /** Public market-data probe result. */
     reachable: boolean;
-    ready: boolean;
-    host: string | null;
     liveExecutionEnabled: boolean;
-    /** Environment variable NAMES the gateway reports as unset (never values). */
-    missing?: string[];
+    clientOrderIds: boolean;
+    orderReconciliation: boolean;
     error?: string;
   };
   flags: Record<string, boolean>;
@@ -253,7 +257,7 @@ export interface AccountState {
   todayPnl: number;
   realizedTotal: number;
   startingBalance: number;
-  source: "demo" | "delta";
+  source: "demo" | "live";
   positions: {
     symbol: string;
     side: "long" | "short";
@@ -261,6 +265,6 @@ export interface AccountState {
     entry: number;
     upl: number;
     mark: number;
-    source: "paper" | "delta";
+    source: "paper" | "live";
   }[];
 }

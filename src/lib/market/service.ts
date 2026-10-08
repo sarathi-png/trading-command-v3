@@ -2,8 +2,9 @@
  * Unified market data facade.
  *
  * Demo mode: served by the deterministic simulator (always available).
- * Delta mode: proxied through the Delta REST adapter with short TTL caches
- * so the UI can poll without hammering the exchange.
+ * Live mode: served by the exchange adapter (CoinDCX public REST), with the
+ * same shape the UI, charts, strategy engine and paper simulator already
+ * consume — the venue change is invisible above this file.
  *
  * Errors are surfaced — we never silently substitute stale/demo data for live.
  */
@@ -11,14 +12,20 @@ import { flags } from "../flags";
 import { getSettings } from "../settings";
 import type { Candle, OrderBook, RecentTrade, Ticker, Timeframe } from "../types";
 import { TF_MINUTES } from "../types";
-import { deltaCandles, deltaOrderbook, deltaTickers } from "./delta";
+import {
+  marketCandles,
+  marketOrderBook,
+  marketRecentTrades,
+  marketTickers,
+} from "../exchange/service";
+import type { ExchangeTicker } from "../exchange/types";
 import { demoCandles, demoOrderbook, demoTicker, demoTrades, DEMO_SYMBOLS } from "./demo";
 
 export class MarketError extends Error {}
 
-export async function activeDataSource(): Promise<"demo" | "delta"> {
+export async function activeDataSource(): Promise<"demo" | "live"> {
   const s = await getSettings();
-  if (s.dataSource === "delta" && flags.deltaMarket()) return "delta";
+  if (s.dataSource === "live" && flags.exchangeMarket()) return "live";
   return "demo";
 }
 
@@ -26,15 +33,34 @@ export function knownSymbols(): string[] {
   return DEMO_SYMBOLS.map((s) => s.symbol);
 }
 
+/** Exchange ticker → the app's Ticker model (nulls become neutral zeros). */
+function toAppTicker(t: ExchangeTicker): Ticker {
+  return {
+    symbol: t.symbol,
+    price: t.price,
+    markPrice: t.markPrice,
+    change24hPct: t.change24hPct ?? 0,
+    volume24hUsd: t.volume24hUsd ?? 0,
+    fundingRate: t.fundingRate,
+    openInterest: null, // not published on the endpoint this adapter uses
+    high24h: t.high24h,
+    low24h: t.low24h,
+    bid: t.bid,
+    ask: t.ask,
+    ts: t.ts,
+    source: "live",
+  };
+}
+
 export async function getTickers(symbols?: string[]): Promise<Ticker[]> {
   const src = await activeDataSource();
-  if (src === "delta") {
+  if (src === "live") {
     try {
-      const all = await deltaTickers();
-      return symbols ? all.filter((t) => symbols.includes(t.symbol)) : all.slice(0, 30);
+      const all = await marketTickers(symbols);
+      return all.map(toAppTicker);
     } catch (e) {
       throw new MarketError(
-        e instanceof Error ? e.message : "Delta market data unavailable"
+        e instanceof Error ? e.message : "Exchange market data unavailable"
       );
     }
   }
@@ -52,16 +78,16 @@ export async function getCandles(
   symbol: string,
   timeframe: Timeframe,
   limit = 300
-): Promise<{ candles: Candle[]; source: "demo" | "delta" }> {
+): Promise<{ candles: Candle[]; source: "demo" | "live" }> {
   const src = await activeDataSource();
-  if (src === "delta") {
+  if (src === "live") {
     try {
-      const candles = await deltaCandles(symbol, timeframe, limit, TF_MINUTES[timeframe]);
-      if (candles.length > 0) return { candles, source: "delta" };
+      const candles = await marketCandles(symbol, TF_MINUTES[timeframe] * 60, limit);
+      if (candles.length > 0) return { candles, source: "live" };
     } catch {
       /* fall through to demo — flagged below */
     }
-    // Delta returned nothing for this symbol/resolution: fall back to demo,
+    // The venue returned nothing for this symbol/resolution: fall back to demo,
     // but the response is explicitly labelled so the UI can show it.
   }
   return { candles: demoCandles(symbol, timeframe, limit), source: "demo" };
@@ -69,9 +95,16 @@ export async function getCandles(
 
 export async function getOrderbook(symbol: string): Promise<OrderBook> {
   const src = await activeDataSource();
-  if (src === "delta" && flags.orderbook()) {
+  if (src === "live" && flags.orderbook()) {
     try {
-      return await deltaOrderbook(symbol);
+      const book = await marketOrderBook(symbol, 20);
+      return {
+        symbol: book.symbol,
+        bids: book.bids,
+        asks: book.asks,
+        ts: book.ts,
+        source: "live",
+      };
     } catch {
       /* labelled fallback */
     }
@@ -81,19 +114,11 @@ export async function getOrderbook(symbol: string): Promise<OrderBook> {
 
 export async function getRecentTrades(symbol: string): Promise<RecentTrade[]> {
   const src = await activeDataSource();
-  if (src === "delta") {
-    // Public trades endpoint is best-effort; demo feed keeps UX consistent.
+  if (src === "live") {
+    // Public trades endpoint is best-effort; the demo tape keeps UX consistent
+    // and is labelled demo by the caller's data source, not silently.
     try {
-      const { http } = await import("./delta");
-      const data = (await http("GET", "/v2/trades", { symbol, count: 22 }, null, false)) as {
-        result?: { price: string; size: number; side: string; timestamp: number }[];
-      };
-      return (data.result ?? []).map((t) => ({
-        price: parseFloat(t.price),
-        size: t.size,
-        side: t.side === "buy" ? ("buy" as const) : ("sell" as const),
-        ts: t.timestamp * 1000,
-      }));
+      return await marketRecentTrades(symbol);
     } catch {
       return demoTrades(symbol);
     }
