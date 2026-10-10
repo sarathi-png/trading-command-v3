@@ -38,3 +38,21 @@ export const api = {
   patch: <T>(url: string, body?: unknown) => request<T>("PATCH", url, body ?? {}),
   del: <T>(url: string) => request<T>("DELETE", url),
 };
+
+/**
+ * Clear the session cookie and lock the UI behind the login gate.
+ *
+ * The logout route is unauthenticated and must always succeed from the
+ * operator's point of view: even if the network call fails, we still fire
+ * `auth:unauthorized` so the shell does not stay on a logged-in screen.
+ */
+export async function logout(): Promise<void> {
+  try {
+    await fetch("/api/auth/logout", { method: "POST", cache: "no-store" });
+  } catch {
+    // Cookie clear is best-effort; the gate still comes up.
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("auth:unauthorized"));
+  }
+}

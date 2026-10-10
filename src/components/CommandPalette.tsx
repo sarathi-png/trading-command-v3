@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { useApp, useMarket } from "@/stores";
+import { logout } from "@/lib/api";
 import { TIMEFRAMES, type Timeframe } from "@/lib/types";
 import { cx } from "@/lib/format";
 
@@ -71,6 +72,10 @@ export default function CommandPalette() {
       {
         id: "reset-layout", label: "Reset layout to Trading default", group: "Actions",
         perform: () => { void applyLayoutPreset("trading"); setPalette(false); },
+      },
+      {
+        id: "logout", label: "Log out", group: "Session",
+        perform: () => { setPalette(false); void logout(); },
       },
     ];
     return [...nav, ...symbols, ...tfs, ...layouts, ...actions];
