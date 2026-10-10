@@ -1,8 +1,8 @@
 "use client";
 import { useState, useSyncExternalStore } from "react";
-import { KeyRound, ShieldAlert } from "lucide-react";
+import { KeyRound, LogOut, ShieldAlert } from "lucide-react";
 import { Btn, Chip, Input, KV, Panel, Select, StatusDot, Toggle, useConfirm } from "@/components/ui";
-import { api } from "@/lib/api";
+import { api, logout } from "@/lib/api";
 import { cx, fmtDateTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
 import { LAYOUT_PRESETS, useApp } from "@/stores";
@@ -433,6 +433,20 @@ export default function SettingsPage() {
               <Chip tone={v ? "up" : "default"}>{v ? "ON" : "OFF"}</Chip>
             </div>
           ))}
+        </div>
+      </Panel>
+
+      <Panel title="SESSION">
+        <div className="p-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[12px]">Dashboard session</p>
+            <p className="text-[10.5px] text-dim mt-0.5">
+              Clears the signed cookie and returns you to the password gate. Sessions last 12 hours.
+            </p>
+          </div>
+          <Btn type="button" variant="danger" onClick={() => void logout()} className="flex-none">
+            <LogOut size={12} /> LOG OUT
+          </Btn>
         </div>
       </Panel>
 

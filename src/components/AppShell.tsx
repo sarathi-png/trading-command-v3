@@ -5,11 +5,11 @@ import {
 } from "react";
 import {
   BarChart3, Bell, BookOpen, CandlestickChart, ChevronLeft, ChevronRight,
-  Command, LayoutDashboard, Layers, LineChart, ListFilter, Search, Settings,
+  Command, LayoutDashboard, Layers, LineChart, ListFilter, LogOut, Search, Settings,
   Target, ArrowUpDown, Bot, Wifi, X, Zap,
 } from "lucide-react";
 import { useAlerts, useApp, useMarket } from "@/stores";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, logout } from "@/lib/api";
 import { cx, fmtPct, fmtPrice, fmtTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
 import type { AlertRule, SystemStatus, Ticker } from "@/lib/types";
@@ -382,6 +382,15 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
         >
           <Command size={11} /> K
         </button>
+        <button
+          type="button"
+          onClick={() => void logout()}
+          className="flex items-center gap-1.5 text-[10px] tracking-wide text-dim border border-edge rounded h-7 px-2 hover:text-dn hover:border-dn/40"
+          aria-label="Log out"
+        >
+          <LogOut size={11} />
+          <span className="hidden sm:inline">LOG OUT</span>
+        </button>
       </div>
     </header>
   );
@@ -469,6 +478,19 @@ function Sidebar() {
             MODE: {settings.mode.toUpperCase()}{settings.dataSource === "demo" ? " · DEMO" : ""}
           </p>
         )}
+        <button
+          type="button"
+          onClick={() => void logout()}
+          title="Log out"
+          aria-label="Log out"
+          className={cx(
+            "w-full flex items-center h-7 rounded text-[9px] tracking-wide text-dim hover:text-dn hover:bg-panel mb-0.5",
+            sidebarCollapsed ? "justify-center" : "justify-center gap-1.5"
+          )}
+        >
+          <LogOut size={12} />
+          {!sidebarCollapsed && "LOG OUT"}
+        </button>
         <button
           onClick={toggleSidebar}
           className="w-full flex items-center justify-center gap-1 text-[9px] text-dim hover:text-mut h-6 rounded hover:bg-panel"
@@ -562,6 +584,13 @@ function MobileNav() {
                 </a>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() => { setMore(false); void logout(); }}
+              className="mt-2 w-full panel-2 p-2.5 text-[10px] tracking-wide text-dn hover:text-dn flex items-center justify-center gap-1.5"
+            >
+              <LogOut size={13} /> LOG OUT
+            </button>
           </div>
         </div>
       )}
