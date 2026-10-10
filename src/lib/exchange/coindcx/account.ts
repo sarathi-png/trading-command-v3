@@ -1,10 +1,15 @@
 /**
  * CoinDCX futures — private account reads.
  *
- *   POST /exchange/v1/derivatives/futures/wallets               wallet balances
- *   GET  /exchange/v1/derivatives/futures/wallets/transactions  ledger
+ *   GET  /exchange/v1/derivatives/futures/wallets               wallet balances
+ *   GET  /exchange/v1/derivatives/futures/wallets/transactions  ledger (?page&size)
  *   POST /exchange/v1/derivatives/futures/trades                fills
  *   POST /exchange/v1/derivatives/futures/positions/transactions realised P&L per trade
+ *
+ * Method matters: docs.coindcx.com routes the two wallet reads as GET (with a
+ * signed `{"timestamp": …}` body, exactly like the official samples) — a POST
+ * reaches no route and CoinDCX answers 404. Pagination on the ledger travels
+ * in the QUERY string (`?page=1&size=1000`), never in the body.
  *
  * Parsing note (honest limitation): the official reference documents the
  * request bodies for these endpoints in full, but does not print the *wallet*
@@ -44,13 +49,18 @@ interface WalletRow {
  * Wallet balances, normalised to `{ asset, balance, available }`.
  *
  * CoinDCX futures wallets are per margin currency (USDT for USDT-margined
- * futures, INR for INR-margined). The response has been seen both as a bare
- * array of currency rows and as a single object keyed by currency, so both are
- * accepted; anything else is reported rather than guessed at.
+ * futures, INR for INR-margined). The documented row shape is
+ * `{ currency_short_name, balance, locked_balance, cross_order_margin,
+ * cross_user_margin }` with string numbers; the venue's own note says
+ * "Total wallet balance = balance + locked_balance" (balance is the free
+ * collateral — cross margin stays inside it and is tracked in the cross_*
+ * fields). Other shapes CoinDCX uses for wallet payloads are accepted too;
+ * anything else is reported rather than guessed at.
  */
 export async function walletBalances(client: CoinDcxClient): Promise<ExchangeBalance[]> {
-  // The signer stamps a fresh millisecond timestamp into the body.
-  const raw = await client.read<unknown>("/exchange/v1/derivatives/futures/wallets");
+  // GET with a signed timestamp body — see the module header. The signer
+  // stamps a fresh millisecond timestamp into the body.
+  const raw = await client.read<unknown>("/exchange/v1/derivatives/futures/wallets", {}, "GET");
 
   const rows: WalletRow[] = [];
   if (Array.isArray(raw)) {
@@ -83,40 +93,93 @@ export async function walletBalances(client: CoinDcxClient): Promise<ExchangeBal
     const nested = (row.wallet ?? {}) as Record<string, unknown>;
     const asset = String(row.currency_short_name ?? nested.currency_short_name ?? "").toUpperCase();
     if (!asset) continue;
-    const balance = num(row.total_balance ?? row.balance ?? nested.balance);
-    const available = num(row.available_balance ?? nested.available_balance ?? row.balance ?? balance, balance);
-    balances.push({ asset, balance, available });
+    // "Total wallet balance = balance + locked_balance" (docs.coindcx.com,
+    // Wallet Transfer response definitions). An explicit total_balance, when
+    // a payload carries one, wins over the derived sum.
+    const free = num(row.balance ?? nested.balance);
+    const locked = num(row.locked_balance ?? nested.locked_balance);
+    const total = num(row.total_balance ?? nested.total_balance, free + locked);
+    const available = num(row.available_balance ?? nested.available_balance ?? row.balance ?? nested.balance, total);
+    balances.push({ asset, balance: total, available });
   }
 
   if (balances.length === 0) {
+    const emptyList = Array.isArray(raw) && raw.length === 0;
     throw new ExchangeError(
-      "CoinDCX returned a wallet payload this build does not recognise. Refusing to report a balance rather than guess one.",
+      emptyList
+        ? "CoinDCX returned an empty futures wallet list for this account. Refusing to report a zero balance — check that futures trading is enabled for this account and API key."
+        : "CoinDCX returned a wallet payload this build does not recognise. Refusing to report a balance rather than guess one.",
       "EXCHANGE_API_ERROR",
       502,
-      { exchange: "coindcx", path: "/exchange/v1/derivatives/futures/wallets", responseShape: Array.isArray(raw) ? "array" : typeof raw }
+      {
+        exchange: "coindcx",
+        path: "/exchange/v1/derivatives/futures/wallets",
+        responseShape: Array.isArray(raw) ? (raw.length === 0 ? "empty array" : "array") : typeof raw,
+      }
     );
   }
   return balances;
 }
 
-/** Ledger entries (deposits, withdrawals, fees, funding, transfers). */
+/**
+ * Ledger entries (transfers, fees, funding) for the futures wallets.
+ *
+ * The documented rows carry `transaction_type` (credit/debit — DIRECTION
+ * only) and `reason` (by_universal_wallet = spot↔futures transfer,
+ * by_futures_funding = funding, by_futures_order = flows from a futures
+ * order). Classification uses both, and the amount is signed by direction:
+ * a bare "credit"/"debit" label must never be summed as if it were a deposit
+ * or a withdrawal. Order-driven rows (fees, realised P&L) stay unclassified
+ * here — the panel books those from the positions/transactions stream.
+ */
 export async function walletTransactions(
   client: CoinDcxClient,
   options: { page?: number; size?: number } = {}
 ): Promise<{ type: string; amount: number; asset: string; ts: number }[]> {
+  // GET, with pagination in the QUERY string and only the timestamp signed
+  // into the body — exactly the shape docs.coindcx.com documents.
   const rows = await client.read<
-    { transaction_type?: string; type?: string; amount?: number | string; currency_short_name?: string; balance_currency_short_name?: string; created_at?: number | string }[]
-  >("/exchange/v1/derivatives/futures/wallets/transactions", {
-    page: options.page ?? 1,
-    size: options.size ?? 100,
-  }, "GET");
+    {
+      transaction_type?: string;
+      type?: string;
+      reason?: string;
+      amount?: number | string;
+      currency_short_name?: string;
+      balance_currency_short_name?: string;
+      created_at?: number | string;
+    }[]
+  >(
+    "/exchange/v1/derivatives/futures/wallets/transactions",
+    {},
+    "GET",
+    {
+      page: options.page ?? 1,
+      size: options.size ?? 100,
+    }
+  );
 
-  return expectArray<(typeof rows)[number]>(rows, "/exchange/v1/derivatives/futures/wallets/transactions").map((row) => ({
-    type: String(row.transaction_type ?? row.type ?? "unknown"),
-    amount: num(row.amount),
-    asset: String(row.currency_short_name ?? row.balance_currency_short_name ?? "USDT").toUpperCase(),
-    ts: num(row.created_at, Date.now()),
-  }));
+  return expectArray<(typeof rows)[number]>(rows, "/exchange/v1/derivatives/futures/wallets/transactions").map((row) => {
+    const direction = String(row.transaction_type ?? "").toLowerCase();
+    const reason = String(row.reason ?? "").toLowerCase();
+    const isDebit = direction.startsWith("debit");
+    const magnitude = Math.abs(num(row.amount));
+    const type = reason.includes("universal_wallet")
+      ? isDebit
+        ? "withdraw"
+        : "deposit"
+      : reason.includes("funding")
+        ? "funding"
+        : // Unknown reason: keep whatever semantic label the row carries, and
+          // let direction-only labels ("credit"/"debit") fall through as
+          // unclassified rather than inventing a deposit.
+          String(row.transaction_type ?? row.type ?? "unknown").toLowerCase();
+    return {
+      type,
+      amount: isDebit ? -magnitude : magnitude,
+      asset: String(row.currency_short_name ?? row.balance_currency_short_name ?? "USDT").toUpperCase(),
+      ts: num(row.created_at, Date.now()),
+    };
+  });
 }
 
 /**

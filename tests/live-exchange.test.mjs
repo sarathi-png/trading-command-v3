@@ -105,11 +105,22 @@ async function startFakeVenue() {
       const p = url.pathname;
 
       // ---- private reads -------------------------------------------------
+      // The wallet reads are GET routes on the real venue (docs.coindcx.com);
+      // anything else reaches no route and answers 404 "no record for …".
+      // Mirrored here so a method regression cannot hide behind a mock.
       if (p === "/exchange/v1/derivatives/futures/wallets") {
+        if (req.method !== "GET") {
+          send(404, { message: "no record" });
+          return;
+        }
         send(200, [{ currency_short_name: "USDT", balance: 2500.5, available_balance: 2500.5 }]);
         return;
       }
       if (p === "/exchange/v1/derivatives/futures/wallets/transactions") {
+        if (req.method !== "GET") {
+          send(404, { message: "no record" });
+          return;
+        }
         send(200, [
           { transaction_type: "deposit", amount: 2000, currency_short_name: "USDT", created_at: 1767225600000 },
         ]);
@@ -343,6 +354,10 @@ test("Vercel ↔ CoinDCX boundary, paper isolation and live-order safety", { tim
 
     const walletCalls = venue.calls.filter((call) => call.path.endsWith("/wallets"));
     assert.ok(walletCalls.length >= 1, "the wallet endpoint must be called directly on CoinDCX");
+    assert.ok(
+      walletCalls.every((call) => call.method === "GET"),
+      "the wallet read is a GET on docs.coindcx.com — a POST 404s on the real venue"
+    );
     for (const call of venue.calls) {
       assert.equal(call.apiKey, COINDCX_API_KEY, `${call.path} must present the API key header`);
       assert.equal(call.signatureValid, true, `${call.path} must carry a signature over the exact body sent`);
