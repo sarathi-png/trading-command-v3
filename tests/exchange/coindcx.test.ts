@@ -26,7 +26,7 @@ import type { AddressInfo } from "node:net";
 import { CoinDcxClient } from "../../src/lib/exchange/coindcx/client";
 import { authHeaders, serializeBody, signBody, signPayload, signaturesMatch } from "../../src/lib/exchange/coindcx/auth";
 import { activeInstruments, candles, orderBook, tickers } from "../../src/lib/exchange/coindcx/market";
-import { fills, positionTransactions, walletBalances } from "../../src/lib/exchange/coindcx/account";
+import { fills, positionTransactions, walletBalances, walletTransactions } from "../../src/lib/exchange/coindcx/account";
 import { normalisePosition, positions, exitPosition } from "../../src/lib/exchange/coindcx/positions";
 import {
   cancelOrder,
@@ -218,9 +218,16 @@ describe("transport: status mapping and retry discipline", () => {
     });
     await walletBalances(clientFor(venue));
     assert.equal(venue.requests.length, 1);
+    // docs.coindcx.com routes the wallet read as GET; a POST reaches no route
+    // on the real venue (404 "no record for …") — pin the method.
+    assert.equal(venue.requests[0]!.method, "GET");
     assert.equal(venue.requests[0]!.signatureValid, true);
     assert.equal(venue.requests[0]!.timestampIsMillis, true);
     assert.equal(venue.requests[0]!.headers["x-auth-apikey"], API_KEY);
+    // CoinDCX's GET reads carry a signed JSON body (every official sample
+    // sends one) — the exact bytes must reach the venue, not just the headers.
+    const sent = JSON.parse(venue.requests[0]!.body) as Record<string, unknown>;
+    assert.deepEqual(Object.keys(sent), ["timestamp"], "the signed body is the timestamp payload");
   });
 
   it("maps 401 to EXCHANGE_AUTH_ERROR", async () => {
@@ -400,6 +407,77 @@ describe("account parsing (never invent a zero)", () => {
       assert.equal(error.code, "EXCHANGE_API_ERROR");
       return true;
     });
+  });
+
+  it("parses the documented wallet rows (string numbers, locked_balance)", async () => {
+    venue.reset();
+    // The exact response shape docs.coindcx.com prints for Wallet Details.
+    venue.behaviour.set("/exchange/v1/derivatives/futures/wallets", {
+      status: 200,
+      body: [
+        {
+          id: "c5f039dd-4e11-4304-8f91-e9c1f62d754d",
+          currency_short_name: "USDT",
+          balance: "6.1693226",
+          locked_balance: "0.0",
+          cross_order_margin: "0.0",
+          cross_user_margin: "0.68534648",
+        },
+      ],
+    });
+    assert.deepEqual(await walletBalances(clientFor(venue)), [{ asset: "USDT", balance: 6.1693226, available: 6.1693226 }]);
+
+    // docs.coindcx.com: "Total wallet balance = balance + locked_balance",
+    // with `balance` the free collateral.
+    venue.behaviour.set("/exchange/v1/derivatives/futures/wallets", {
+      status: 200,
+      body: [{ currency_short_name: "USDT", balance: "100", locked_balance: "25" }],
+    });
+    assert.deepEqual(await walletBalances(clientFor(venue)), [{ asset: "USDT", balance: 125, available: 100 }]);
+  });
+
+  it("refuses to report zero for an empty wallet list", async () => {
+    venue.reset();
+    venue.behaviour.set("/exchange/v1/derivatives/futures/wallets", { status: 200, body: [] });
+    await assert.rejects(walletBalances(clientFor(venue)), (error: unknown) => {
+      assert.ok(error instanceof ExchangeError);
+      assert.equal(error.code, "EXCHANGE_API_ERROR");
+      assert.match(error.message, /empty futures wallet list/);
+      return true;
+    });
+  });
+
+  it("reads the wallet ledger as GET with pagination in the query string", async () => {
+    venue.reset();
+    venue.behaviour.set("/exchange/v1/derivatives/futures/wallets/transactions", {
+      status: 200,
+      body: [
+        { transaction_type: "credit", reason: "by_universal_wallet", amount: "2000.5", currency_short_name: "USDT", created_at: 1767225600000 },
+        { transaction_type: "debit", reason: "by_universal_wallet", amount: "10", currency_short_name: "USDT", created_at: 1767225700000 },
+        { transaction_type: "debit", reason: "by_futures_funding", amount: "0.25", currency_short_name: "USDT", created_at: 1767225800000 },
+        { transaction_type: "debit", reason: "by_futures_order", amount: "0.4", currency_short_name: "USDT", created_at: 1767225900000 },
+      ],
+    });
+    const rows = await walletTransactions(clientFor(venue), { page: 2, size: 50 });
+
+    const request = venue.requests[0]!;
+    assert.equal(request.method, "GET", "the ledger read is a GET (docs.coindcx.com)");
+    assert.equal(request.url, "/exchange/v1/derivatives/futures/wallets/transactions?page=2&size=50");
+    assert.equal(request.signatureValid, true, "the signed body must reach the venue even on GET");
+    const sent = JSON.parse(request.body) as Record<string, unknown>;
+    assert.deepEqual(Object.keys(sent), ["timestamp"], "pagination travels in the query, not the signed body");
+
+    // Direction labels must classify by `reason`, and amounts must be signed
+    // by direction — never summed as if "credit"/"debit" were deposits.
+    assert.deepEqual(
+      rows.map((r) => ({ type: r.type, amount: r.amount })),
+      [
+        { type: "deposit", amount: 2000.5 },
+        { type: "withdraw", amount: -10 },
+        { type: "funding", amount: -0.25 },
+        { type: "debit", amount: -0.4 },
+      ]
+    );
   });
 
   it("normalises positions, treating a negative size as short", () => {

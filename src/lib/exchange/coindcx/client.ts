@@ -17,6 +17,9 @@
  *     to branch on and a message that is safe to display.
  *   - Secrets never enter a message, a log line or an error detail.
  */
+import http from "node:http";
+import https from "node:https";
+
 import { ExchangeError } from "../errors";
 import { authHeaders, hasCredentials, signPayload } from "./auth";
 
@@ -91,6 +94,60 @@ export class CoinDcxClient {
   }
 
   /**
+   * Send one request over node:http(s).
+   *
+   * This exists because `fetch` cannot express every request CoinDCX needs:
+   * the venue's signed GET reads (e.g. /exchange/v1/derivatives/futures/wallets)
+   * carry a JSON body — every official sample signs `{"timestamp": …}` and
+   * sends it as the GET body — and the Fetch spec (enforced by undici) throws
+   * "Request with GET/HEAD method cannot have body" before anything leaves the
+   * process. node:http has no such restriction, so the exact signed bytes
+   * reach the venue regardless of method.
+   */
+  private sendViaNodeHttp(input: {
+    url: string;
+    method: "GET" | "POST";
+    headers: Record<string, string>;
+    body?: string;
+    signal: AbortSignal;
+  }): Promise<{ status: number; text: string }> {
+    return new Promise((resolve, reject) => {
+      const url = new URL(input.url);
+      const transport = url.protocol === "http:" ? http : https;
+      const headers = { ...input.headers };
+      // Same framing the official `request`/`requests` samples produce: a
+      // fixed-length body, never chunked.
+      if (input.body !== undefined) headers["Content-Length"] = String(Buffer.byteLength(input.body));
+
+      const req = transport.request(
+        {
+          protocol: url.protocol,
+          hostname: url.hostname,
+          port: url.port ? Number(url.port) : undefined,
+          path: `${url.pathname}${url.search}`,
+          method: input.method,
+          headers,
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk: Buffer) => chunks.push(chunk));
+          res.on("end", () => {
+            resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8") });
+          });
+        }
+      );
+      req.on("error", reject);
+      input.signal.addEventListener("abort", () => {
+        const aborted = new Error("The operation was aborted");
+        aborted.name = "AbortError";
+        req.destroy(aborted);
+      });
+      if (input.body !== undefined) req.write(input.body);
+      req.end();
+    });
+  }
+
+  /**
    * One HTTP attempt. Returns the parsed response for ANY status the venue
    * sends — interpreting the status is the caller's job, because a 400 on an
    * order means something very different from a 500.
@@ -115,16 +172,36 @@ export class CoinDcxClient {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     const startedAt = Date.now();
     try {
-      const response = await fetch(input.url, {
-        method: input.method,
-        headers: input.headers,
-        // CoinDCX private endpoints are POST (even for reads) and reject a
-        // request whose signature does not cover the exact body bytes.
-        ...(input.body === undefined ? {} : { body: input.body }),
-        signal: controller.signal,
-        cache: "no-store",
-      });
-      const text = await response.text();
+      // A signed body riding on GET is exactly what CoinDCX's wallet reads
+      // require, and exactly what fetch refuses to send — see sendViaNodeHttp.
+      const nodeTransport = input.method === "GET" && input.body !== undefined;
+
+      let status: number;
+      let text: string;
+      if (nodeTransport) {
+        const res = await this.sendViaNodeHttp({
+          url: input.url,
+          method: input.method,
+          headers: input.headers,
+          body: input.body,
+          signal: controller.signal,
+        });
+        status = res.status;
+        text = res.text;
+      } else {
+        const response = await fetch(input.url, {
+          method: input.method,
+          headers: input.headers,
+          // CoinDCX private endpoints reject a request whose signature does
+          // not cover the exact body bytes.
+          ...(input.body === undefined ? {} : { body: input.body }),
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        status = response.status;
+        text = await response.text();
+      }
+
       let json: unknown = null;
       if (text) {
         try {
@@ -133,7 +210,7 @@ export class CoinDcxClient {
           json = null;
         }
       }
-      return { status: response.status, json, text, durationMs: Date.now() - startedAt };
+      return { status, json, text, durationMs: Date.now() - startedAt };
     } finally {
       clearTimeout(timer);
     }
@@ -223,12 +300,21 @@ export class CoinDcxClient {
     method: "GET" | "POST";
     path: string;
     payload?: Record<string, unknown>;
+    /** Query-string parameters (GET reads that paginate in the URL, per docs). */
+    query?: Record<string, string | number | undefined>;
     /** Absolute URL override (public.coindcx.com endpoints). */
     absoluteUrl?: string;
     authenticated: boolean;
     mutation: boolean;
   }): Promise<T> {
-    const credentials = input.authenticated ? this.credentialsOrFail(input.path) : null;
+    const search = Object.entries(input.query ?? {})
+      .filter(([, value]) => value !== undefined && value !== "")
+      .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`)
+      .join("&");
+    // The full path (query included) is what appears in diagnostics and in
+    // every normalised error message.
+    const path = search ? `${input.path}${input.path.includes("?") ? "&" : "?"}${search}` : input.path;
+    const credentials = input.authenticated ? this.credentialsOrFail(path) : null;
     const attempts = input.mutation ? 1 : 1 + this.maxReadRetries;
     let lastError: unknown;
 
@@ -244,14 +330,14 @@ export class CoinDcxClient {
         headers = { ...headers, ...authHeaders(credentials.apiKey, signed.signature) };
       }
 
-      const url = input.absoluteUrl ?? `${this.options.baseUrl.replace(/\/+$/, "")}${input.path}`;
+      const url = input.absoluteUrl ?? `${this.options.baseUrl.replace(/\/+$/, "")}${path}`;
 
       let result: RawResult;
       try {
         result = await this.attempt({
           method: input.method,
           url,
-          path: input.path,
+          path,
           ...(body === undefined ? {} : { body }),
           headers,
           attempt: attempt + 1,
@@ -261,18 +347,18 @@ export class CoinDcxClient {
         const aborted = error instanceof Error && error.name === "AbortError";
         lastError = input.mutation
           ? new ExchangeError(
-              `CoinDCX did not answer ${input.path} within ${this.timeoutMs} ms; the order outcome is unknown — reconcile before retrying.`,
+              `CoinDCX did not answer ${path} within ${this.timeoutMs} ms; the order outcome is unknown — reconcile before retrying.`,
               "EXCHANGE_UNKNOWN_RESULT",
               504,
-              { exchange: this.options.exchange ?? "coindcx", path: input.path, reconcilable: true }
+              { exchange: this.options.exchange ?? "coindcx", path, reconcilable: true }
             )
           : new ExchangeError(
               aborted
-                ? `CoinDCX did not answer ${input.path} within ${this.timeoutMs} ms.`
-                : `Could not reach CoinDCX for ${input.path}.`,
+                ? `CoinDCX did not answer ${path} within ${this.timeoutMs} ms.`
+                : `Could not reach CoinDCX for ${path}.`,
               aborted ? "EXCHANGE_TIMEOUT" : "EXCHANGE_UNAVAILABLE",
               aborted ? 504 : 502,
-              { exchange: this.options.exchange ?? "coindcx", path: input.path }
+              { exchange: this.options.exchange ?? "coindcx", path }
             );
         // Retry only safe reads; a mutation stops here.
         if (!input.mutation && attempt < attempts - 1) continue;
@@ -285,7 +371,7 @@ export class CoinDcxClient {
         attempt < attempts - 1;
       if (retryableRead) {
         lastError = this.failure({
-          path: input.path,
+          path,
           status: result.status,
           json: result.json,
           text: result.text,
@@ -296,7 +382,7 @@ export class CoinDcxClient {
 
       if (result.status >= 400) {
         throw this.failure({
-          path: input.path,
+          path,
           status: result.status,
           json: result.json,
           text: result.text,
@@ -305,10 +391,10 @@ export class CoinDcxClient {
       }
       if (result.json === null) {
         throw new ExchangeError(
-          `CoinDCX returned a response that could not be parsed for ${input.path}.`,
+          `CoinDCX returned a response that could not be parsed for ${path}.`,
           "EXCHANGE_API_ERROR",
           502,
-          { exchange: this.options.exchange ?? "coindcx", path: input.path, response: snippet(result.text) }
+          { exchange: this.options.exchange ?? "coindcx", path, response: snippet(result.text) }
         );
       }
       return result.json as T;
@@ -316,16 +402,22 @@ export class CoinDcxClient {
 
     throw lastError instanceof ExchangeError
       ? lastError
-      : new ExchangeError(`CoinDCX request failed for ${input.path}.`, "EXCHANGE_UNAVAILABLE", 502);
+      : new ExchangeError(`CoinDCX request failed for ${path}.`, "EXCHANGE_UNAVAILABLE", 502);
   }
 
   /**
-   * Authenticated read. CoinDCX serves most private reads over POST with a
-   * signed JSON body; retrying is safe because the operation has no side
-   * effect.
+   * Authenticated read. CoinDCX serves many private reads over POST with a
+   * signed JSON body; some (the wallet endpoints) are GET with a signed body
+   * and pagination in the query string — pass `method: "GET"` and `query` for
+   * those. Retrying is safe because a read has no side effect.
    */
-  async read<T = unknown>(path: string, payload: Record<string, unknown> = {}, method: "GET" | "POST" = "POST"): Promise<T> {
-    return this.request<T>({ method, path, payload, authenticated: true, mutation: false });
+  async read<T = unknown>(
+    path: string,
+    payload: Record<string, unknown> = {},
+    method: "GET" | "POST" = "POST",
+    query: Record<string, string | number | undefined> = {}
+  ): Promise<T> {
+    return this.request<T>({ method, path, payload, query, authenticated: true, mutation: false });
   }
 
   /** Authenticated mutation. Exactly one attempt — never auto-retried. */

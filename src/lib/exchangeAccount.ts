@@ -14,8 +14,8 @@
  * `available: false` summary so the dashboard still renders.
  *
  * Endpoint notes (verified against docs.coindcx.com):
- *   POST /exchange/v1/derivatives/futures/wallets
- *   POST /exchange/v1/derivatives/futures/wallets/transactions
+ *   GET  /exchange/v1/derivatives/futures/wallets            (signed body)
+ *   GET  /exchange/v1/derivatives/futures/wallets/transactions  (?page&size)
  *   POST /exchange/v1/derivatives/futures/trades            (per pair, dated)
  *   POST /exchange/v1/derivatives/futures/positions/transactions  (venue P&L)
  *
@@ -226,7 +226,7 @@ export async function getExchangeSummary(options: { windowDays?: number } = {}):
         .reduce((s, t) => s + Math.max(0, t.amount), 0)
     );
     const withdrawalsUsd = Math.abs(sumType("withdraw"));
-    const commissionUsd = Math.abs(sumType("commission") || sumType("fee"));
+    const walletFeesUsd = Math.abs(sumType("commission") || sumType("fee"));
     const fundingUsd = Math.abs(sumType("funding"));
     const liquidationFeesUsd = Math.abs(sumType("liquidation"));
     const unclassifiedTxCount = txs.filter((t) => {
@@ -249,6 +249,16 @@ export async function getExchangeSummary(options: { windowDays?: number } = {}):
         .filter((t) => t.stage !== "funding")
         .reduce((s, t) => s + t.amount, 0);
     }
+
+    // Commission actually paid. docs.coindcx.com: every trade books a
+    // `fee_amount` on the positions/transactions stream ("a transaction is
+    // created for every trade of the order"), so that stream is the fee
+    // ledger. The wallet ledger's fee-named rows are a legacy fallback used
+    // only when the venue stream cannot be read — never both, so a fee can
+    // never be counted twice.
+    const commissionUsd = Array.isArray(posTxs)
+      ? Math.abs(posTxs.reduce((s, t) => s + t.feeAmount, 0))
+      : walletFeesUsd;
 
     const perSymbol = new Map<string, { pnlUsd: number; trades: number }>();
     for (const t of trades) {
