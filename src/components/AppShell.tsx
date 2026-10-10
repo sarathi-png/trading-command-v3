@@ -4,9 +4,9 @@ import {
   useCallback, useEffect, useMemo, useRef, useState, type ReactNode,
 } from "react";
 import {
-  BarChart3, Bell, BookOpen, CandlestickChart, ChevronLeft, ChevronRight,
-  Command, LayoutDashboard, Layers, LineChart, ListFilter, LogOut, Search, Settings,
-  Target, ArrowUpDown, Bot, Wifi, X, Zap,
+  BarChart2, BarChart3, Bell, BookOpen, Bot, Briefcase, CandlestickChart, ChevronLeft, ChevronRight,
+  Command, LayoutDashboard, Layers, LineChart, List, ListFilter, LogOut, Menu, Search, Settings,
+  Target, ArrowUpDown, Wifi, X, Zap,
 } from "lucide-react";
 import { useAlerts, useApp, useMarket } from "@/stores";
 import { api, ApiError, logout } from "@/lib/api";
@@ -79,7 +79,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
     el.dataset.accent = settings.accent;
     el.dataset.motion = settings.reduceMotion ? "off" : "on";
     el.dataset.density = settings.density;
-  }, [settings.accent, settings.reduceMotion, settings.density]);
+    el.dataset.theme = settings.theme;
+    // Dispatch custom event for chart and other components to react to theme change
+    window.dispatchEvent(new CustomEvent('themechange', { detail: { theme: settings.theme } }));
+  }, [settings.accent, settings.reduceMotion, settings.density, settings.theme]);
 
   /* ---- market feed: REST polling (the venue socket is server-side only) -- */
   const symbolsKey = useMemo(() => {
@@ -298,7 +301,9 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
   const { activeSymbol, setSymbol, timeframe, setTimeframe, settings, system } = useApp();
   const feed = useMarket((s) => s.feed);
   const latency = useMarket((s) => s.latencyMs);
-  const { setPalette } = useApp();
+  const { setPalette, sidebarCollapsed, toggleSidebar } = useApp();
+  const pathname = usePathname();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const symbols = settings.watchlist.includes(activeSymbol)
     ? settings.watchlist
     : [activeSymbol, ...settings.watchlist];
@@ -317,82 +322,135 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
     );
 
   return (
-    <header className="h-11 border-b border-edge bg-panel flex items-center gap-3 px-3 flex-none z-20">
-      {/* feed status */}
-      {feed === "lost" ? (
-        <span className="flex items-center gap-2">
-          <Chip tone="danger">⚠ DATA CONNECTION LOST</Chip>
-          <Btn size="sm" onClick={onReconnect}>RECONNECT</Btn>
-        </span>
-      ) : feed === "connecting" ? (
-        <Chip tone="warn" className="pulse-soft">CONNECTING TO FEED…</Chip>
-      ) : settings.dataSource === "live" ? (
-        <Chip tone="up"><StatusDot tone="ok" /> COINDCX LIVE</Chip>
-      ) : (
-        <Chip tone="warn"><StatusDot tone="warn" /> DEMO FEED</Chip>
-      )}
-
-      {/* symbol + live price */}
-      <div className="flex items-center gap-2.5 min-w-0">
-        <select
-          value={activeSymbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          aria-label="Active symbol"
-          className="bg-bg2 border border-edge rounded h-7 px-1.5 text-[12px] num outline-none"
+    <>
+      <header className="h-11 border-b border-edge bg-panel flex items-center gap-3 px-3 flex-none z-20">
+        {/* Mobile hamburger menu */}
+        <button
+          onClick={() => setMobileMenuOpen(true)}
+          className="md:hidden p-1.5 text-mut hover:text-ink rounded border border-edge h-7 w-7 flex items-center justify-center"
+          aria-label="Open menu"
         >
-          {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <PriceFlash symbol={activeSymbol} />
-      </div>
-
-      {/* timeframe */}
-      <select
-        value={timeframe}
-        onChange={(e) => setTimeframe(e.target.value as typeof timeframe)}
-        aria-label="Timeframe"
-        className="bg-bg2 border border-edge rounded h-7 px-1.5 text-[12px] num outline-none hidden sm:block"
-      >
-        {["1m", "3m", "5m", "15m", "30m", "1H", "2H", "4H", "1D", "1W"].map((tf) => (
-          <option key={tf} value={tf}>{tf}</option>
-        ))}
-      </select>
-
-      <div className="ml-auto flex items-center gap-2.5">
-        {settings.modules.latency && latency !== null && (
-          <span className="num text-[10px] text-dim hidden lg:block">{latency} ms</span>
-        )}
-        {settings.modules.systemStatus && (
-          <span className="hidden md:flex items-center gap-1.5 text-[10px] text-mut">
-            <StatusDot tone={system?.db ? "ok" : "err"} /> SYSTEM {system?.db ? "ONLINE" : "DEGRADED"}
+          <Menu size={18} />
+        </button>
+        
+        {/* feed status */}
+        {feed === "lost" ? (
+          <span className="flex items-center gap-2">
+            <Chip tone="danger">⚠ DATA CONNECTION LOST</Chip>
+            <Btn size="sm" onClick={onReconnect}>RECONNECT</Btn>
           </span>
+        ) : feed === "connecting" ? (
+          <Chip tone="warn" className="pulse-soft">CONNECTING TO FEED…</Chip>
+        ) : settings.dataSource === "live" ? (
+          <Chip tone="up"><StatusDot tone="ok" /> COINDCX LIVE</Chip>
+        ) : (
+          <Chip tone="warn"><StatusDot tone="warn" /> DEMO FEED</Chip>
         )}
-        <Chip className="hidden sm:inline-flex">
-          {settings.dataSource === "demo"
-            ? "DEMO ACCOUNT"
-            : system?.exchangeAccount === "configured"
-              ? "COINDCX · ACCOUNT UNVERIFIED"
-              : "COINDCX · NOT CONFIGURED"}
-        </Chip>
-        {modeBadge}
-        <NotifBell />
-        <button
-          onClick={() => setPalette(true)}
-          className="hidden md:flex items-center gap-1.5 text-[10px] text-dim border border-edge rounded h-7 px-2 hover:text-mut hover:border-edge2"
-          aria-label="Open command palette"
+
+        {/* symbol + live price */}
+        <div className="flex items-center gap-2.5 min-w-0">
+          <select
+            value={activeSymbol}
+            onChange={(e) => setSymbol(e.target.value)}
+            aria-label="Active symbol"
+            className="bg-bg2 border border-edge rounded h-7 px-1.5 text-[12px] num outline-none"
+          >
+            {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <PriceFlash symbol={activeSymbol} />
+        </div>
+
+        {/* timeframe */}
+        <select
+          value={timeframe}
+          onChange={(e) => setTimeframe(e.target.value as typeof timeframe)}
+          aria-label="Timeframe"
+          className="bg-bg2 border border-edge rounded h-7 px-1.5 text-[12px] num outline-none hidden sm:block"
         >
-          <Command size={11} /> K
-        </button>
-        <button
-          type="button"
-          onClick={() => void logout()}
-          className="flex items-center gap-1.5 text-[10px] tracking-wide text-dim border border-edge rounded h-7 px-2 hover:text-dn hover:border-dn/40"
-          aria-label="Log out"
-        >
-          <LogOut size={11} />
-          <span className="hidden sm:inline">LOG OUT</span>
-        </button>
-      </div>
-    </header>
+          {["1m", "3m", "5m", "15m", "30m", "1H", "2H", "4H", "1D", "1W"].map((tf) => (
+            <option key={tf} value={tf}>{tf}</option>
+          ))}
+        </select>
+
+        <div className="ml-auto flex items-center gap-2.5">
+          {settings.modules.latency && latency !== null && (
+            <span className="num text-[10px] text-dim hidden lg:block">{latency} ms</span>
+          )}
+          {settings.modules.systemStatus && (
+            <span className="hidden md:flex items-center gap-1.5 text-[10px] text-mut">
+              <StatusDot tone={system?.db ? "ok" : "err"} /> SYSTEM {system?.db ? "ONLINE" : "DEGRADED"}
+            </span>
+          )}
+          <Chip className="hidden sm:inline-flex">
+            {settings.dataSource === "live"
+              ? system?.exchangeAccount === "configured"
+                ? "COINDCX · ACCOUNT UNVERIFIED"
+                : "COINDCX · NOT CONFIGURED"
+              : "DEMO ACCOUNT"}
+          </Chip>
+          {modeBadge}
+          <NotifBell />
+          <button
+            onClick={() => setPalette(true)}
+            className="hidden md:flex items-center gap-1.5 text-[10px] text-dim border border-edge rounded h-7 px-2 hover:text-mut hover:border-edge2"
+            aria-label="Open command palette"
+          >
+            <Command size={11} /> K
+          </button>
+          <button
+            type="button"
+            onClick={() => void logout()}
+            className="flex items-center gap-1.5 text-[10px] tracking-wide text-dim border border-edge rounded h-7 px-2 hover:text-dn hover:border-dn/40"
+            aria-label="Log out"
+          >
+            <LogOut size={11} />
+            <span className="hidden sm:inline">LOG OUT</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Mobile drawer */}
+      {mobileMenuOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex flex-col">
+          <div className="absolute inset-0 bg-black/70" onClick={() => setMobileMenuOpen(false)} />
+          <div className="relative panel w-full max-w-sm flex flex-col h-full slide-in shadow-2xl">
+            <header className="flex items-center justify-between px-3 h-11 border-b border-edge">
+              <p className="microlabel">MENU</p>
+              <button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="text-dim hover:text-mut">
+                <X size={18} />
+              </button>
+            </header>
+            <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+              {[
+                { href: "/", label: "Overview", icon: LayoutDashboard },
+                { href: "/chart", label: "Chart", icon: CandlestickChart },
+                { href: "/positions", label: "Positions", icon: Briefcase },
+                { href: "/orders", label: "Orders", icon: List },
+                { href: "/journal", label: "Journal", icon: BookOpen },
+                { href: "/analytics", label: "Analytics", icon: BarChart2 },
+                { href: "/strategy", label: "Strategy", icon: Zap },
+                { href: "/automation", label: "Automation", icon: Bot },
+                { href: "/alerts", label: "Alerts", icon: Bell },
+                { href: "/settings", label: "Settings", icon: Settings },
+              ].map((item) => (
+                <a key={item.href} href={item.href} onClick={() => setMobileMenuOpen(false)}
+                  className={cx("flex items-center gap-3 px-3 py-2.5 rounded text-[11px] text-mut hover:text-ink hover:bg-panel2/50 transition-colors",
+                    pathname === item.href ? "text-accent bg-accent-dim" : "")}>
+                  <item.icon size={16} />
+                  {item.label}
+                </a>
+              ))}
+              <div className="border-t border-edge pt-3 mt-3">
+                <button onClick={() => void logout()} className="flex items-center gap-3 px-3 py-2.5 rounded text-[11px] text-dn hover:bg-dn/10 transition-colors w-full">
+                  <LogOut size={16} />
+                  LOG OUT
+                </button>
+              </div>
+            </nav>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -475,7 +533,7 @@ function Sidebar() {
       <div className="border-t border-edge p-2 flex-none">
         {!sidebarCollapsed && (
           <p className="text-[9px] text-dim px-1 pb-1.5 num">
-            MODE: {settings.mode.toUpperCase()}{settings.dataSource === "demo" ? " · DEMO" : ""}
+            MODE: {settings.mode.toUpperCase()}
           </p>
         )}
         <button

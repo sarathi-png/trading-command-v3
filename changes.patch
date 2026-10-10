@@ -1,0 +1,934 @@
+diff -ruN project/trading-command-v3-master/src/lib/strategy/engine.ts patched/src/lib/strategy/engine.ts
+--- project/trading-command-v3-master/src/lib/strategy/engine.ts	2026-10-10 09:31:21.822982449 +0530
++++ patched/src/lib/strategy/engine.ts	2026-10-10 11:14:55.414412340 +0530
+@@ -11,6 +11,8 @@
+   Timeframe, TrendState,
+ } from "../types";
+ 
++export interface Cluster { price: number; touches: number; strength: number; lastTouch: number }
++
+ export interface StrategyContext {
+   symbol: string;
+   timeframe: Timeframe;
+@@ -18,6 +20,7 @@
+   trend: TrendState;
+   structure: StructurePoint[];
+   levels: SRLevel[];
++  clusters: Cluster[]; // side-agnostic price clusters (needed for breakout crossing checks)
+   emaFast: number;
+   emaSlow: number;
+   lastClose: number;
+@@ -152,10 +155,11 @@
+   else if (bear >= 2 && bull === 0 && emaFast < emaSlow) trend = "BEARISH";
+   else if (bull >= 1 && bear >= 1) trend = "RANGE";
+ 
+-  const levels = findLevels(window, swingsRaw, lastClose, opts);
++  const clusters = clusterLevels(window, swingsRaw, opts);
++  const levels = classifyLevels(clusters, lastClose);
+ 
+   const ctx: StrategyContext = {
+-    symbol, timeframe, candles, trend, structure, levels,
++    symbol, timeframe, candles, trend, structure, levels, clusters,
+     emaFast, emaSlow, lastClose, lastTime: last?.time ?? Math.floor(Date.now() / 1000),
+   };
+ 
+@@ -175,13 +179,14 @@
+   };
+ }
+ 
+-export function findLevels(
++/** Side-agnostic price clusters from confirmed swings. */
++export function clusterLevels(
+   window: Candle[],
+   swings: Swing[],
+-  price: number,
+   opts: StructureOptions
+-): SRLevel[] {
+-  const tol = price * opts.sensitivity;
++): Cluster[] {
++  const ref = window[window.length - 1]?.close ?? 0;
++  const tol = ref * opts.sensitivity;
+   const clusters: { sum: number; n: number; last: number }[] = [];
+   for (const s of swings) {
+     let hit = false;
+@@ -197,30 +202,40 @@
+     if (!hit) clusters.push({ sum: s.price, n: 1, last: s.time });
+   }
+   const lastTime = window[window.length - 1]?.time ?? 0;
+-  const levels: SRLevel[] = clusters
++  return clusters
+     .filter((c) => c.n >= opts.minTouches)
+-    .map((c) => {
+-      const lvl = c.sum / c.n;
+-      const recency = Math.max(0.35, 1 - (lastTime - c.last) / (40 * 3600));
+-      return {
+-        price: lvl,
+-        kind: lvl < price ? ("support" as const) : ("resistance" as const),
+-        touches: c.n,
+-        strength: Math.min(1, (c.n / 4) * 0.6 + recency * 0.4),
+-        lastTouch: c.last,
+-      };
+-    });
+-  const support = levels
+-    .filter((l) => l.kind === "support")
+-    .sort((a, b) => b.strength - a.strength)
+-    .slice(0, 3);
+-  const resistance = levels
+-    .filter((l) => l.kind === "resistance")
+-    .sort((a, b) => b.strength - a.strength)
+-    .slice(0, 3);
++    .map((c) => ({
++      price: c.sum / c.n,
++      touches: c.n,
++      strength: Math.min(1, (c.n / 4) * 0.6 + Math.max(0.35, 1 - (lastTime - c.last) / (40 * 3600)) * 0.4),
++      lastTouch: c.last,
++    }));
++}
++
++/** Classify clusters as support/resistance relative to a reference price; keep the 3 strongest per side. */
++export function classifyLevels(clusters: Cluster[], price: number): SRLevel[] {
++  const toLevel = (c: Cluster): SRLevel => ({
++    price: c.price,
++    kind: c.price < price ? "support" : "resistance",
++    touches: c.touches,
++    strength: c.strength,
++    lastTouch: c.lastTouch,
++  });
++  const all = clusters.map(toLevel);
++  const support = all.filter((l) => l.kind === "support").sort((a, b) => b.strength - a.strength).slice(0, 3);
++  const resistance = all.filter((l) => l.kind === "resistance").sort((a, b) => b.strength - a.strength).slice(0, 3);
+   return [...support, ...resistance].sort((a, b) => b.price - a.price);
+ }
+ 
++export function findLevels(
++  window: Candle[],
++  swings: Swing[],
++  price: number,
++  opts: StructureOptions
++): SRLevel[] {
++  return classifyLevels(clusterLevels(window, swings, opts), price);
++}
++
+ /* ---------------- strategies ---------------- */
+ 
+ const near = (a: number, b: number, frac: number) => Math.abs(a - b) <= b * frac;
+@@ -281,39 +296,60 @@
+ export const breakoutStrategy: StrategyDef = {
+   id: "breakout",
+   name: "Level Breakout",
+-  description: "Detects closes beyond the strongest detected support/resistance clusters.",
++  description: "Fires when a closed candle crosses a detected cluster (prev close on one side, last close on the other). Rejects chases beyond 0.5%.",
+   evaluate(ctx) {
+     const c = ctx.lastClose;
+-    const res = ctx.levels.filter((l) => l.kind === "resistance").sort((a, b) => a.price - b.price)[0];
+-    const sup = ctx.levels.filter((l) => l.kind === "support").sort((a, b) => b.price - a.price)[0];
+-    if (res && c > res.price) {
+-      const stop = res.price * 0.998;
++    const n = ctx.candles.length;
++    const prev = n >= 2 ? ctx.candles[n - 2].close : c;
++    const maxChase = 0.005;
++
++    // Upward cross: prev <= level < last close. Strongest qualifying cluster wins.
++    const up = ctx.clusters
++      .filter((l) => prev <= l.price && l.price < c)
++      .sort((a, b) => b.strength - a.strength)[0];
++    if (up) {
++      if ((c - up.price) / up.price > maxChase) {
++        return sig(ctx, "breakout", "WATCH", [
++          `Crossed ${up.price.toFixed(2)} but price already ${(((c - up.price) / up.price) * 100).toFixed(2)}% beyond it — chase rejected`,
++        ]);
++      }
++      const stop = up.price * 0.998;
+       const entry = c;
+-      const target = entry + 1.5 * (entry - stop);
++      const target = entry + 2 * (entry - stop);
+       return sig(ctx, "breakout", "LONG_SETUP", [
+-        `Close above resistance ${res.price.toFixed(2)} (${res.touches} touches)`,
+-        "Breakout condition met on a closed candle",
++        `Closed above resistance ${up.price.toFixed(2)} (${up.touches} touches) — crossed on the last bar`,
+       ], { entry, stop, target });
+     }
+-    if (res && near(c, res.price, 0.0035) && c <= res.price) {
+-      return sig(ctx, "breakout", "WATCH", [
+-        `Price is pressing resistance ${res.price.toFixed(2)} (${res.touches} touches)`,
+-        "Breakout not confirmed — no close above the level yet",
+-      ]);
+-    }
+-    if (sup && c < sup.price) {
+-      const stop = sup.price * 1.002;
++
++    // Downward cross: prev >= level > last close.
++    const down = ctx.clusters
++      .filter((l) => prev >= l.price && l.price > c)
++      .sort((a, b) => b.strength - a.strength)[0];
++    if (down) {
++      if ((down.price - c) / down.price > maxChase) {
++        return sig(ctx, "breakout", "WATCH", [
++          `Crossed ${down.price.toFixed(2)} downward but price already beyond it — chase rejected`,
++        ]);
++      }
++      const stop = down.price * 1.002;
+       const entry = c;
+-      const target = entry - 1.5 * (stop - entry);
++      const target = entry - 2 * (stop - entry);
+       return sig(ctx, "breakout", "SHORT_SETUP", [
+-        `Close below support ${sup.price.toFixed(2)} (${sup.touches} touches)`,
+-        "Breakdown condition met on a closed candle",
++        `Closed below support ${down.price.toFixed(2)} (${down.touches} touches) — crossed on the last bar`,
+       ], { entry, stop, target });
+     }
+-    if (sup && near(c, sup.price, 0.0035) && c >= sup.price) {
++
++    // Pressing a level without crossing yet.
++    const nearAbove = ctx.clusters.filter((l) => l.price >= c && near(c, l.price, 0.0035)).sort((a, b) => a.price - b.price)[0];
++    if (nearAbove) {
++      return sig(ctx, "breakout", "WATCH", [
++        `Pressing resistance ${nearAbove.price.toFixed(2)} (${nearAbove.touches} touches) — no close through it yet`,
++      ]);
++    }
++    const nearBelow = ctx.clusters.filter((l) => l.price <= c && near(c, l.price, 0.0035)).sort((a, b) => b.price - a.price)[0];
++    if (nearBelow) {
+       return sig(ctx, "breakout", "WATCH", [
+-        `Price is testing support ${sup.price.toFixed(2)} (${sup.touches} touches)`,
+-        "Breakdown not confirmed — no close below the level yet",
++        `Testing support ${nearBelow.price.toFixed(2)} (${nearBelow.touches} touches) — no close through it yet`,
+       ]);
+     }
+     return sig(ctx, "breakout", "WAIT", ["Price is inside the detected range"]);
+diff -ruN project/trading-command-v3-master/src/lib/strategy/quant/backtest.test.ts patched/src/lib/strategy/quant/backtest.test.ts
+--- project/trading-command-v3-master/src/lib/strategy/quant/backtest.test.ts	1970-01-01 05:30:00.000000000 +0530
++++ patched/src/lib/strategy/quant/backtest.test.ts	2026-10-10 11:16:27.280285930 +0530
+@@ -0,0 +1,154 @@
++/**
++ * Reconciliation + validation tests for the trend core, the simulator and the statistics.
++ * Run: npx tsc -p tsconfig.quant.json && node --test output/quant-js/lib/strategy/quant/backtest.test.js
++ */
++import { describe, it } from "node:test";
++import assert from "node:assert/strict";
++import type { Candle } from "@/lib/types";
++import { prepareTrend, trendSignalAt, DEFAULT_TREND } from "./trend";
++import { runTrend, runRandomControl, manageTrade, report, type BacktestConfig } from "./walkForward";
++import { DEFAULT_COSTS, feesPrice, fundingPrice } from "./costs";
++import { normCdf, normInv, deflatedSharpe, walkForwardPurged, paramGrid, sliceWindow } from "./validation";
++import { atr } from "./indicators";
++
++const LTF = 14400, HTF = 86400; // 4h execution, 1D context
++const cfg: BacktestConfig = { params: { ...DEFAULT_TREND, regimeSma: 20 }, costs: DEFAULT_COSTS, ltfSec: LTF, htfSec: HTF };
++
++/** Deterministic trending series: piecewise drift so regimes and breakouts exist. */
++function series(n: number, drifts: number[], seedAmp = 0.012): Candle[] {
++  const out: Candle[] = []; let p = 100; let s = 12345;
++  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff - 0.5; };
++  for (let i = 0; i < n; i++) {
++    const d = drifts[Math.floor((i / n) * drifts.length)];
++    const o = p, c = o * (1 + d + seedAmp * rnd() * 2);
++    const hi = Math.max(o, c) * (1 + Math.abs(rnd()) * 0.006);
++    const lo = Math.min(o, c) * (1 - Math.abs(rnd()) * 0.006);
++    out.push({ time: 1_700_000_000 + i * LTF, open: o, high: hi, low: lo, close: c, volume: 1000 });
++    p = c;
++  }
++  return out;
++}
++/** Aggregate execution bars into HTF bars (6 x 4h = 1D), closed bars only. */
++function toHtf(ltf: Candle[]): Candle[] {
++  const out: Candle[] = [];
++  for (let k = 0; k + 6 <= ltf.length; k += 6) {
++    const s = ltf.slice(k, k + 6);
++    out.push({ time: s[0].time, open: s[0].open, high: Math.max(...s.map((x) => x.high)),
++      low: Math.min(...s.map((x) => x.low)), close: s[5].close, volume: 1 });
++  }
++  return out;
++}
++
++describe("reconciliation: signal is causal", () => {
++  it("decision at bar i is identical when computed on data truncated after bar i", () => {
++    const ltf = series(1200, [0.002, -0.002, 0.003]);
++    const htf = toHtf(ltf);
++    const full = prepareTrend(ltf, htf, cfg.params, LTF, HTF);
++    for (const i of [300, 555, 900, 1100]) {
++      const pre = ltf.slice(0, i + 1);
++      const htfPre = htf.filter((c) => c.time + HTF <= pre[pre.length - 1].time + LTF);
++      const part = prepareTrend(pre, htfPre, cfg.params, LTF, HTF);
++      assert.deepEqual(trendSignalAt(part, i, cfg.params), trendSignalAt(full, i, cfg.params), `bar ${i}`);
++    }
++  });
++
++  it("HTF bars are used only after they close (no partially formed daily bar)", () => {
++    const ltf = series(200, [0.001]);
++    const htf = toHtf(ltf);
++    const ctx = prepareTrend(ltf, htf, cfg.params, LTF, HTF);
++    for (let i = 0; i < ltf.length; i++) {
++      const h = ctx.htfCloseIdx[i];
++      if (h >= 0) assert.ok(htf[h].time + HTF <= ltf[i].time + LTF);
++    }
++  });
++});
++
++describe("reconciliation: both sides, real HTF context", () => {
++  it("produces SHORT trades in a downtrend and LONG trades in an uptrend", () => {
++    const down = runTrend(series(3000, [-0.004]), toHtf(series(3000, [-0.004])), cfg);
++    const up = runTrend(series(3000, [0.004]), toHtf(series(3000, [0.004])), cfg);
++    assert.ok(down.some((t) => t.side === -1), "no shorts in downtrend");
++    assert.ok(up.some((t) => t.side === 1), "no longs in uptrend");
++  });
++});
++
++describe("execution model", () => {
++  it("a gap through the stop fills at the open, not at the stop", () => {
++    const base = series(300, [0]);
++    const ltf = base.map((c) => ({ ...c }));
++    const atrArr = atr(ltf, 14);
++    const i = 200;
++    const a = atrArr[i] as number;
++    const entry = ltf[i + 1].open * (1 + DEFAULT_COSTS.slippage);
++    const stop = entry - 2 * a;
++    // gap far below the stop on the next bar
++    ltf[i + 2] = { ...ltf[i + 2], open: stop * 0.9, high: stop * 0.92, low: stop * 0.88, close: stop * 0.91 };
++    const t = manageTrade(ltf, atrArr, i, 1, a, cfg);
++    assert.ok(t);
++    assert.equal(t!.reason, "STOP");
++    assert.ok(t!.exit < stop, "gap fill should be worse than the stop");
++    assert.ok(t!.netR < -1, "gap loss should exceed 1R");
++  });
++
++  it("net R equals gross R minus fees minus signed funding (accounting identity)", () => {
++    const tr = runTrend(series(3000, [0.002, -0.002]), toHtf(series(3000, [0.002, -0.002])), cfg);
++    assert.ok(tr.length > 5);
++    for (const t of tr) {
++      const pnl = t.side * (t.exit - t.entry);
++      const costs = feesPrice(t.entry, t.exit, DEFAULT_COSTS) + fundingPrice(t.side, t.entry, t.bars, DEFAULT_COSTS);
++      assert.ok(Math.abs(t.netR - (pnl - costs) / t.riskPrice) < 1e-9);
++    }
++  });
++
++  it("the trailing stop only ratchets in the trade's favour", () => {
++    const ltf = series(600, [0.004]);
++    const atrArr = atr(ltf, 14);
++    const t = manageTrade(ltf, atrArr, 100, 1, atrArr[100] as number, cfg);
++    assert.ok(t && t.exitIdx >= t.entryIdx);
++    assert.ok(t!.exit >= 0);
++  });
++});
++
++describe("statistics", () => {
++  it("normal CDF and inverse agree with reference points", () => {
++    assert.ok(Math.abs(normCdf(1.96) - 0.975) < 1e-4);
++    assert.ok(Math.abs(normCdf(0) - 0.5) < 1e-7);
++    assert.ok(Math.abs(normInv(0.975) - 1.95996) < 1e-4);
++    assert.ok(Math.abs(normInv(normCdf(-2.3)) + 2.3) < 1e-4);
++  });
++
++  it("DSR falls as the number of trials grows, for the same observed Sharpe", () => {
++    const r: number[] = [];
++    let s = 7; for (let i = 0; i < 300; i++) { s = (s * 16807) % 2147483647; r.push((s / 2147483647 - 0.45) * 2); }
++    const trials1 = [0.1];
++    const trialsMany = Array.from({ length: 50 }, (_, k) => 0.05 * Math.sin(k));
++    const a = deflatedSharpe(r, trials1).dsr;
++    const b = deflatedSharpe(r, trialsMany).dsr;
++    assert.ok(b < a, `DSR should drop with more trials (${a} vs ${b})`);
++  });
++
++  it("report() does not expose a hit rate", () => {
++    const rep = report([]) as unknown as Record<string, unknown>;
++    assert.equal("hitRate" in rep, false);
++  });
++});
++
++describe("validation", () => {
++  it("out-of-sample trades start inside their test block and after the purge boundary", () => {
++    const ltf = series(6000, [0.002, -0.002, 0.003, -0.003]);
++    const htf = toHtf(ltf);
++    const res = walkForwardPurged(ltf, htf, cfg, paramGrid(cfg.params).slice(0, 4), { folds: 3, controlSeeds: 5 });
++    for (const f of res.folds) {
++      for (const t of f.oosTrades) assert.ok(t.entryTime >= ltf[f.testStart].time);
++    }
++    assert.ok(res.controlPValue > 0 && res.controlPValue <= 1);
++  });
++
++  it("sliceWindow includes only HTF bars that were closed by the window end", () => {
++    const ltf = series(1000, [0.001]);
++    const htf = toHtf(ltf);
++    const w = sliceWindow(ltf, htf, 100, 500, cfg);
++    const end = w.ltf[w.ltf.length - 1].time + LTF;
++    for (const c of w.htf) assert.ok(c.time + HTF <= end);
++  });
++});
+diff -ruN project/trading-command-v3-master/src/lib/strategy/quant/costs.ts patched/src/lib/strategy/quant/costs.ts
+--- project/trading-command-v3-master/src/lib/strategy/quant/costs.ts	1970-01-01 05:30:00.000000000 +0530
++++ patched/src/lib/strategy/quant/costs.ts	2026-10-10 11:15:04.972997451 +0530
+@@ -0,0 +1,34 @@
++/**
++ * Cost model shared by the backtest and paper accounting.
++ *
++ * All rates are FRACTIONS (0.00059 = 0.059%). Defaults are placeholders taken from
++ * the repo (taker 0.059%, paper 0.05%) and a conventional funding assumption; verify
++ * against the current CoinDCX fee schedule and funding history before relying on them.
++ */
++export interface CostModel {
++  takerFee: number;      // per fill, on notional
++  makerFee: number;      // per fill, on notional (used only when entryMaker = true)
++  slippage: number;      // adverse, per market fill (entries and exits)
++  fundingPer8h: number;  // longs pay / shorts receive when positive
++  barMinutes: number;    // execution timeframe in minutes
++}
++
++export const DEFAULT_COSTS: CostModel = {
++  takerFee: 0.00059,
++  makerFee: 0.0004,
++  slippage: 0.0002,
++  fundingPer8h: 0.0001,
++  barMinutes: 240,
++};
++
++/** Funding paid (positive) or received (negative) by a position, in price units per unit of qty. */
++export function fundingPrice(side: 1 | -1, avgPrice: number, bars: number, c: CostModel): number {
++  const periods = (bars * c.barMinutes) / (8 * 60);
++  return side * c.fundingPer8h * periods * avgPrice;
++}
++
++/** Fees in price units per unit of qty for one round trip. */
++export function feesPrice(entryFill: number, exitFill: number, c: CostModel, entryMaker = false): number {
++  const entryRate = entryMaker ? c.makerFee : c.takerFee;
++  return entryRate * entryFill + c.takerFee * exitFill;
++}
+diff -ruN project/trading-command-v3-master/src/lib/strategy/quant/quant.test.ts patched/src/lib/strategy/quant/quant.test.ts
+--- project/trading-command-v3-master/src/lib/strategy/quant/quant.test.ts	2026-10-10 09:31:21.823910746 +0530
++++ patched/src/lib/strategy/quant/quant.test.ts	2026-10-10 11:17:43.079942984 +0530
+@@ -9,7 +9,6 @@
+ import { buildFeatures, FEATURE_COLUMNS, toArray } from "./features";
+ import { findSwings, clusterZones, nearestZones, supportResZones } from "./zones";
+ import { regime, spearmanIC, neweyWestSE, bhFdr, tToP, purgedSplits } from "./diagnostics";
+-import { simulate, summarize } from "./walkForward";
+ import { predictProba, gateWithMeta, DEMO_WEIGHTS } from "./metaModel";
+ import type { Candle } from "@/lib/types";
+ 
+diff -ruN project/trading-command-v3-master/src/lib/strategy/quant/trend.ts patched/src/lib/strategy/quant/trend.ts
+--- project/trading-command-v3-master/src/lib/strategy/quant/trend.ts	1970-01-01 05:30:00.000000000 +0530
++++ patched/src/lib/strategy/quant/trend.ts	2026-10-10 11:15:04.974201691 +0530
+@@ -0,0 +1,86 @@
++/**
++ * Trend-following core: Donchian breakout on the execution timeframe, filtered by a
++ * regime (SMA) on a HIGHER timeframe. This single function is the decision rule for
++ * BOTH the backtest and the live engine — there must be no second copy of it.
++ *
++ * Causality: every value used at bar i depends only on bars <= i (execution) and
++ * HTF bars whose CLOSE time is <= the close time of bar i.
++ */
++import type { Candle } from "@/lib/types";
++import { atr, sma } from "./indicators";
++
++export interface TrendParams {
++  donchian: number;     // breakout lookback (execution bars)
++  atrPeriod: number;
++  regimeSma: number;    // SMA length on the higher timeframe
++  stopAtr: number;      // initial stop distance, in ATR
++  trailAtr: number;     // chandelier trail distance, in ATR (ratchets only)
++  maxBars: number;      // time stop, execution bars
++}
++
++export const DEFAULT_TREND: TrendParams = {
++  donchian: 20, atrPeriod: 14, regimeSma: 100, stopAtr: 2, trailAtr: 3, maxBars: 300,
++};
++
++export interface TrendContext {
++  ltf: Candle[];
++  atr: (number | null)[];
++  htfCloseIdx: number[];       // for each ltf bar: index of last CLOSED htf bar, or -1
++  htfClose: number[];
++  htfSma: (number | null)[];
++}
++
++/**
++ * Build the causal context. ltfSec / htfSec are candle durations in seconds.
++ * An HTF bar is usable at ltf bar i only if (htf.time + htfSec) <= (ltf[i].time + ltfSec).
++ */
++export function prepareTrend(
++  ltf: Candle[], htf: Candle[], p: TrendParams, ltfSec: number, htfSec: number
++): TrendContext {
++  const htfClose = htf.map((c) => c.close);
++  const htfCloseIdx: number[] = new Array(ltf.length).fill(-1);
++  let k = -1;
++  for (let i = 0; i < ltf.length; i++) {
++    const closeTime = ltf[i].time + ltfSec;
++    while (k + 1 < htf.length && htf[k + 1].time + htfSec <= closeTime) k++;
++    htfCloseIdx[i] = k;
++  }
++  return {
++    ltf,
++    atr: atr(ltf, p.atrPeriod),
++    htfCloseIdx,
++    htfClose,
++    htfSma: sma(htfClose, p.regimeSma),
++  };
++}
++
++export interface TrendSignal {
++  side: 1 | -1 | 0;
++  atr: number | null;
++  regime: "LONG" | "SHORT" | "NONE";
++}
++
++/** Decision at the CLOSE of ltf bar i. Entry is taken at the next bar's open by the caller. */
++export function trendSignalAt(ctx: TrendContext, i: number, p: TrendParams): TrendSignal {
++  const none: TrendSignal = { side: 0, atr: null, regime: "NONE" };
++  if (i < p.donchian || i >= ctx.ltf.length) return none;
++  const a = ctx.atr[i];
++  const h = ctx.htfCloseIdx[i];
++  if (a === null || h < 0) return none;
++  const ma = ctx.htfSma[h];
++  if (ma === null) return none;
++
++  const regime: "LONG" | "SHORT" | "NONE" =
++    ctx.htfClose[h] > ma ? "LONG" : ctx.htfClose[h] < ma ? "SHORT" : "NONE";
++  if (regime === "NONE") return { side: 0, atr: a, regime };
++
++  let hh = -Infinity, ll = Infinity;
++  for (let j = i - p.donchian; j < i; j++) {
++    if (ctx.ltf[j].high > hh) hh = ctx.ltf[j].high;
++    if (ctx.ltf[j].low < ll) ll = ctx.ltf[j].low;
++  }
++  const c = ctx.ltf[i].close;
++  if (regime === "LONG" && c > hh) return { side: 1, atr: a, regime };
++  if (regime === "SHORT" && c < ll) return { side: -1, atr: a, regime };
++  return { side: 0, atr: a, regime };
++}
+diff -ruN project/trading-command-v3-master/src/lib/strategy/quant/validation.ts patched/src/lib/strategy/quant/validation.ts
+--- project/trading-command-v3-master/src/lib/strategy/quant/validation.ts	1970-01-01 05:30:00.000000000 +0530
++++ patched/src/lib/strategy/quant/validation.ts	2026-10-10 11:15:42.154829535 +0530
+@@ -0,0 +1,197 @@
++/**
++ * Out-of-sample validation for the trend-following core.
++ *
++ *  - Purged, expanding-window walk-forward: parameters are chosen on data strictly
++ *    before each test block, with a purge gap so no training trade can overlap the test.
++ *  - Random-entry control: same exit engine and trade frequency, random side, many seeds.
++ *    Reports the share of control runs whose expectancy matches or beats the strategy.
++ *  - Deflated Sharpe Ratio (Bailey & López de Prado, 2014): corrects the observed Sharpe
++ *    for the number of configurations tried and for non-normal returns.
++ */
++import type { Candle } from "@/lib/types";
++import { runTrend, runRandomControl, report, type BacktestConfig, type Trade } from "./walkForward";
++import { DEFAULT_TREND, type TrendParams } from "./trend";
++
++export function paramGrid(base: TrendParams = DEFAULT_TREND): TrendParams[] {
++  const out: TrendParams[] = [];
++  for (const donchian of [20, 55])
++    for (const stopAtr of [2, 3])
++      for (const trailAtr of [3, 4])
++        for (const regimeSma of [100, 200])
++          out.push({ ...base, donchian, stopAtr, trailAtr, regimeSma });
++  return out; // 16 configurations = number of trials for the DSR
++}
++
++/** Slice an LTF range and the HTF candles that are fully closed inside it (plus regime warm-up). */
++export function sliceWindow(
++  ltf: Candle[], htf: Candle[], a: number, b: number, cfg: BacktestConfig
++): { ltf: Candle[]; htf: Candle[] } {
++  const sub = ltf.slice(a, b);
++  const startT = sub[0].time - cfg.htfSec * (cfg.params.regimeSma + 5);
++  const endT = sub[sub.length - 1].time + cfg.ltfSec;
++  return { ltf: sub, htf: htf.filter((c) => c.time >= startT && c.time + cfg.htfSec <= endT) };
++}
++
++export interface FoldResult {
++  fold: number;
++  testStart: number; testEnd: number;
++  chosen: TrendParams;
++  inSampleExpectancyR: number;
++  oosTrades: Trade[];
++}
++
++export interface WFResult {
++  folds: FoldResult[];
++  oos: Trade[];
++  oosReport: ReturnType<typeof report>;
++  controlExpectancies: number[];   // one per random seed, pooled over folds
++  controlPValue: number;           // share of controls >= strategy (add-one smoothed)
++  foldExpectancies: number[];      // strategy OOS expectancy per fold
++  trials: number;
++}
++
++export function walkForwardPurged(
++  ltf: Candle[], htf: Candle[], cfg: BacktestConfig,
++  grid: TrendParams[], opts: { folds?: number; controlSeeds?: number; minTrainTrades?: number } = {}
++): WFResult {
++  const K = opts.folds ?? 4;
++  const seeds = opts.controlSeeds ?? 200;
++  const minTrain = opts.minTrainTrades ?? 30;
++  const n = ltf.length;
++  const purge = cfg.params.maxBars + cfg.params.donchian; // no training trade can reach the test block
++  const blk = Math.floor(n / (K + 1));
++  const folds: FoldResult[] = [];
++  const oos: Trade[] = [];
++  const warm = Math.max(...grid.map((g) => g.regimeSma)) * (cfg.htfSec / cfg.ltfSec) + 300;
++
++  for (let k = 1; k <= K; k++) {
++    const testStart = k * blk;
++    const testEnd = k === K ? n : (k + 1) * blk;
++    const trainEnd = testStart - purge;
++    if (trainEnd < blk) continue;
++
++    // 1) choose parameters on the purged training window only
++    const train = sliceWindow(ltf, htf, 0, trainEnd, cfg);
++    let best: { p: TrendParams; e: number } | null = null;
++    for (const p of grid) {
++      const tr = runTrend(train.ltf, train.htf, { ...cfg, params: p });
++      if (tr.length < minTrain) continue;
++      const e = report(tr).expectancyR;
++      if (!best || e > best.e) best = { p, e };
++    }
++    if (!best) continue;
++
++    // 2) apply frozen parameters to the test block (warm-up bars are inputs only; trades must start inside the block)
++    const a = Math.max(0, testStart - warm);
++    const test = sliceWindow(ltf, htf, a, testEnd, cfg);
++    const startT = ltf[testStart].time;
++    const oosTrades = runTrend(test.ltf, test.htf, { ...cfg, params: best.p })
++      .filter((t) => t.entryTime >= startT);
++    folds.push({ fold: k, testStart, testEnd, chosen: best.p, inSampleExpectancyR: best.e, oosTrades });
++    oos.push(...oosTrades);
++  }
++
++  const oosReport = report(oos);
++
++  // Random-entry control, same frequency per fold, many seeds; pooled over the same folds.
++  const controlExpectancies: number[] = [];
++  for (let s = 1; s <= seeds; s++) {
++    const pooled: Trade[] = [];
++    for (const f of folds) {
++      const a = Math.max(0, f.testStart - warm);
++      const test = sliceWindow(ltf, htf, a, f.testEnd, cfg);
++      const bars = f.testEnd - f.testStart;
++      const rate = f.oosTrades.length / Math.max(1, bars);
++      const startT = ltf[f.testStart].time;
++      const rt = runRandomControl(test.ltf, { ...cfg, params: f.chosen }, rate, 7919 * s + f.fold)
++        .filter((t) => t.entryTime >= startT);
++      pooled.push(...rt);
++    }
++    controlExpectancies.push(pooled.length ? report(pooled).expectancyR : 0);
++  }
++  const ge = controlExpectancies.filter((e) => e >= oosReport.expectancyR).length;
++
++  return {
++    folds, oos, oosReport, controlExpectancies,
++    controlPValue: +((ge + 1) / (seeds + 1)).toFixed(4),
++    foldExpectancies: folds.map((f) => report(f.oosTrades).expectancyR),
++    trials: grid.length,
++  };
++}
++
++/* ---------------- Deflated Sharpe Ratio ---------------- */
++
++const EULER = 0.5772156649;
++
++/** Standard normal CDF (Abramowitz–Stegun 7.1.26 via erf; abs error ~1e-7). */
++export function normCdf(x: number): number {
++  const z = Math.abs(x) / Math.SQRT2;
++  const t = 1 / (1 + 0.3275911 * z);
++  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-z * z);
++  return 0.5 * (x >= 0 ? 1 + y : 1 - y);
++}
++
++/** Inverse standard normal (Acklam's rational approximation, rel. error < 1.2e-9). */
++export function normInv(p: number): number {
++  const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02, 1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
++  const b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02, 6.680131188771972e+01, -1.328068155288572e+01];
++  const c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00, -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
++  const d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00, 3.754408661907416e+00];
++  const pl = 0.02425;
++  if (p < pl) {
++    const q = Math.sqrt(-2 * Math.log(p));
++    return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
++  }
++  if (p <= 1 - pl) {
++    const q = p - 0.5, r = q * q;
++    return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
++  }
++  const q = Math.sqrt(-2 * Math.log(1 - p));
++  return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
++}
++
++export interface DSRResult {
++  sharpePerTrade: number;
++  expectedMaxSharpe: number;   // SR0: what the best of N null trials would show
++  psr: number;                 // probabilistic Sharpe vs 0 (single trial)
++  dsr: number;                 // deflated: probability the true Sharpe exceeds SR0
++  skew: number; kurtosis: number; T: number; N: number;
++}
++
++/** Sharpe is per trade (not annualised), consistent with the R series. */
++export function deflatedSharpe(returnsR: number[], trialSharpes: number[]): DSRResult {
++  const T = returnsR.length;
++  const N = trialSharpes.length;
++  const m = returnsR.reduce((a, b) => a + b, 0) / T;
++  const sd = Math.sqrt(returnsR.reduce((a, b) => a + (b - m) ** 2, 0) / (T - 1));
++  const sr = m / sd;
++  const z = returnsR.map((r) => (r - m) / sd);
++  const g3 = z.reduce((a, b) => a + b ** 3, 0) / T;
++  const g4 = z.reduce((a, b) => a + b ** 4, 0) / T; // raw kurtosis (3 for normal)
++
++  const mu = trialSharpes.reduce((a, b) => a + b, 0) / N;
++  const varSR = trialSharpes.reduce((a, b) => a + (b - mu) ** 2, 0) / Math.max(1, N - 1);
++  const sr0 = N > 1
++    ? Math.sqrt(varSR) * ((1 - EULER) * normInv(1 - 1 / N) + EULER * normInv(1 - 1 / (N * Math.E)))
++    : 0;
++
++  const denom = Math.sqrt(1 - g3 * sr + ((g4 - 1) / 4) * sr * sr);
++  const psr = normCdf((sr * Math.sqrt(T - 1)) / denom);
++  const dsr = normCdf(((sr - sr0) * Math.sqrt(T - 1)) / denom);
++  return {
++    sharpePerTrade: +sr.toFixed(4), expectedMaxSharpe: +sr0.toFixed(4),
++    psr: +psr.toFixed(4), dsr: +dsr.toFixed(4),
++    skew: +g3.toFixed(3), kurtosis: +g4.toFixed(3), T, N,
++  };
++}
++
++/** In-sample Sharpe per trade for every grid configuration (the trial population for DSR). */
++export function gridSharpes(ltf: Candle[], htf: Candle[], cfg: BacktestConfig, grid: TrendParams[]): number[] {
++  return grid.map((p) => {
++    const r = report(runTrend(ltf, htf, { ...cfg, params: p })).netR;
++    if (r.length < 3) return 0;
++    const m = r.reduce((a, b) => a + b, 0) / r.length;
++    const sd = Math.sqrt(r.reduce((a, b) => a + (b - m) ** 2, 0) / (r.length - 1));
++    return sd > 0 ? m / sd : 0;
++  });
++}
+diff -ruN project/trading-command-v3-master/src/lib/strategy/quant/walkForward.ts patched/src/lib/strategy/quant/walkForward.ts
+--- project/trading-command-v3-master/src/lib/strategy/quant/walkForward.ts	2026-10-10 09:31:21.824026655 +0530
++++ patched/src/lib/strategy/quant/walkForward.ts	2026-10-10 11:15:19.226966208 +0530
+@@ -1,59 +1,192 @@
+ /**
+- * Walk-forward simulator — port of trader_bot_v2/backtest/walk_forward.py.
+- * Entry next-bar open, stop-first intrabar, one position at a time,
+- * time-stop 48 bars, costs 0.059% fee + 0.02% slippage per side.
++ * Event-driven backtester for the trend-following core.
++ *
++ * Reconciliation with the live engine:
++ *   - Entry decisions come from trend.ts `trendSignalAt` (the same function live uses).
++ *   - Both LONG and SHORT are simulated.
++ *   - Higher-timeframe context is real HTF data, aligned by close time (no look-ahead).
++ *
++ * Execution model (documented assumptions):
++ *   - Signal at the close of bar i; market entry at the open of bar i+1 with adverse slippage.
++ *   - Stop-market exits. Gap-through fills at the open (adverse), not at the stop.
++ *   - Within a bar, if the stop is touched it is assumed hit before any ratchet from that bar.
++ *   - Trailing stop ratchets using bars that have CLOSED (bar j's extreme moves the stop from j+1).
++ *   - One position at a time. Time stop closes at the close of the final bar.
++ *
++ * All results are in R (multiples of the initial risk), net of fees and funding.
+  */
+ import type { Candle } from "@/lib/types";
+-import { analyzeConfluence } from "./confluence";
++import { atr as atrSeries } from "./indicators";
++import { DEFAULT_COSTS, feesPrice, fundingPrice, type CostModel } from "./costs";
++import { prepareTrend, trendSignalAt, type TrendParams, type TrendContext } from "./trend";
+ 
+-export interface SimTrade {
+-  side: "LONG" | "SHORT"; entry: number; exit: number;
+-  score: number; reason: string; pnlPct: number;
++export interface Trade {
++  side: 1 | -1;
++  entryIdx: number;
++  exitIdx: number;
++  entryTime: number;
++  exitTime: number;
++  entry: number;        // filled price (includes slippage)
++  exit: number;
++  initialStop: number;
++  riskPrice: number;    // |entry - initialStop|
++  grossR: number;       // price P&L after slippage, before fees/funding
++  netR: number;         // after fees and funding
++  bars: number;
++  reason: "STOP" | "TIME";
+ }
+ 
+-const FEE = 0.059 / 100, SLIP = 0.02 / 100;
++export interface BacktestConfig {
++  params: TrendParams;
++  costs: CostModel;
++  ltfSec: number;
++  htfSec: number;
++  entryMaker?: boolean; // default false; maker entries assume a fill at the open, which is optimistic
++}
++
++const slipUp = (p: number, c: CostModel) => p * (1 + c.slippage);
++const slipDown = (p: number, c: CostModel) => p * (1 - c.slippage);
++
++/** Exit engine shared by the strategy and the random-entry control. */
++export function manageTrade(
++  ltf: Candle[], atrArr: (number | null)[], signalIdx: number, side: 1 | -1,
++  atrAtSignal: number, cfg: BacktestConfig
++): Trade | null {
++  const n = ltf.length;
++  const entryIdx = signalIdx + 1;
++  if (entryIdx >= n) return null;
++  const { params: p, costs: c } = cfg;
++  const rawOpen = ltf[entryIdx].open;
++  const entry = side === 1 ? slipUp(rawOpen, c) : slipDown(rawOpen, c);
++  let stop = entry - side * p.stopAtr * atrAtSignal;
++  const initialStop = stop;
++  const riskPrice = Math.abs(entry - initialStop);
++  if (!(riskPrice > 0)) return null;
++
++  let extreme = entry;
++  let exitRaw = 0;
++  let exitIdx = -1;
++  let reason: "STOP" | "TIME" = "TIME";
++  const last = Math.min(n - 1, entryIdx + p.maxBars - 1);
++
++  for (let j = entryIdx; j <= last; j++) {
++    const b = ltf[j];
++    // 1) stop check against the stop known BEFORE this bar
++    if (side === 1) {
++      if (b.open <= stop) { exitRaw = b.open; exitIdx = j; reason = "STOP"; break; }
++      if (b.low <= stop) { exitRaw = stop; exitIdx = j; reason = "STOP"; break; }
++    } else {
++      if (b.open >= stop) { exitRaw = b.open; exitIdx = j; reason = "STOP"; break; }
++      if (b.high >= stop) { exitRaw = stop; exitIdx = j; reason = "STOP"; break; }
++    }
++    // 2) ratchet the trailing stop with this (now closed) bar; applies from the next bar
++    extreme = side === 1 ? Math.max(extreme, b.high) : Math.min(extreme, b.low);
++    const a = atrArr[j];
++    if (a !== null) {
++      const cand = side === 1 ? extreme - p.trailAtr * a : extreme + p.trailAtr * a;
++      stop = side === 1 ? Math.max(stop, cand) : Math.min(stop, cand);
++    }
++  }
++  if (exitIdx < 0) {
++    exitIdx = last;
++    exitRaw = ltf[last].close;
++    reason = "TIME";
++  }
++  const exit = side === 1 ? slipDown(exitRaw, c) : slipUp(exitRaw, c);
++  const bars = exitIdx - entryIdx + 1;
++  const grossPnl = side * (exit - entry);
++  const costs = feesPrice(entry, exit, c, !!cfg.entryMaker) + fundingPrice(side, entry, bars, c);
++  return {
++    side, entryIdx, exitIdx, entryTime: ltf[entryIdx].time, exitTime: ltf[exitIdx].time,
++    entry, exit, initialStop, riskPrice, grossR: grossPnl / riskPrice,
++    netR: (grossPnl - costs) / riskPrice, bars, reason,
++  };
++}
+ 
+-export function simulate(ltf: Candle[], warmup = 120, maxHold = 48): SimTrade[] {
+-  const trades: SimTrade[] = [];
+-  let i = warmup;
++/** Strategy backtest: decisions from the shared trend core, LONG and SHORT. */
++export function runTrend(ltf: Candle[], htf: Candle[], cfg: BacktestConfig): Trade[] {
++  const ctx = prepareTrend(ltf, htf, cfg.params, cfg.ltfSec, cfg.htfSec);
++  const trades: Trade[] = [];
++  let i = cfg.params.donchian + cfg.params.atrPeriod;
+   while (i < ltf.length - 1) {
+-    const win = ltf.slice(Math.max(0, i - 199), i + 1);
+-    const htfProxy = ltf.slice(Math.max(0, i - 199), i + 1);
+-    const rep = analyzeConfluence(win, htfProxy);
+-    if (rep.direction === "NEUTRAL" || rep.score < 55) { i++; continue; }
+-    const entry = ltf[i + 1].open * (rep.direction === "LONG" ? 1 + SLIP : 1 - SLIP);
+-    const atrV = rep.atr ?? (entry * 0.003);
+-    const sl = rep.direction === "LONG" ? entry - 1.5 * atrV : entry + 1.5 * atrV;
+-    const tp = rep.direction === "LONG"
+-      ? entry + 2 * (entry - sl) : entry - 2 * (sl - entry);
+-    let exit = ltf[Math.min(ltf.length - 1, i + maxHold)].close;
+-    let reason = "TIME_STOP";
+-    const end = Math.min(ltf.length - 1, i + maxHold);
+-    for (let j = i + 1; j <= end; j++) {
+-      const hitSL = rep.direction === "LONG" ? ltf[j].low <= sl : ltf[j].high >= sl;
+-      const hitTP = rep.direction === "LONG" ? ltf[j].high >= tp : ltf[j].low <= tp;
+-      if (hitSL && hitTP) { // stop-first worst case
+-        exit = sl * (rep.direction === "LONG" ? 1 - SLIP : 1 + SLIP); reason = "STOP_LOSS"; break;
+-      }
+-      if (hitSL) { exit = sl * (rep.direction === "LONG" ? 1 - SLIP : 1 + SLIP); reason = "STOP_LOSS"; break; }
+-      if (hitTP) { exit = tp * (rep.direction === "LONG" ? 1 - SLIP : 1 + SLIP); reason = "TAKE_PROFIT"; break; }
++    const sig = trendSignalAt(ctx, i, cfg.params);
++    if (sig.side === 0 || sig.atr === null) { i++; continue; }
++    const t = manageTrade(ltf, ctx.atr, i, sig.side, sig.atr, cfg);
++    if (!t) break;
++    trades.push(t);
++    i = t.exitIdx + 1; // flat after exit; decide again on the following bar's close
++  }
++  return trades;
++}
++
++/**
++ * Random-entry control: same exit engine and stop distance, same expected trade
++ * frequency as the strategy, random side. Any real edge must beat this distribution.
++ */
++export function runRandomControl(
++  ltf: Candle[], cfg: BacktestConfig, entryRate: number, seed: number
++): Trade[] {
++  let s = seed >>> 0;
++  const rnd = () => { s = (s + 0x6d2b79f5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
++  const atrArr = atrSeries(ltf, cfg.params.atrPeriod);
++  const trades: Trade[] = [];
++  let i = cfg.params.donchian + cfg.params.atrPeriod;
++  while (i < ltf.length - 1) {
++    const a = atrArr[i];
++    if (a !== null && rnd() < entryRate) {
++      const side: 1 | -1 = rnd() < 0.5 ? 1 : -1;
++      const t = manageTrade(ltf, atrArr, i, side, a, cfg);
++      if (!t) break;
++      trades.push(t);
++      i = t.exitIdx + 1;
++      continue;
+     }
+-    const gross = rep.direction === "LONG" ? (exit - entry) / entry : (entry - exit) / entry;
+-    const pnlPct = (gross - 2 * (FEE + SLIP)) * 100;
+-    trades.push({ side: rep.direction, entry, exit, score: rep.score, reason, pnlPct });
+-    // resume after exit bar
+-    const exitIdx = ltf.findIndex((c, k) => k > i && (c.high >= tp || c.low <= sl));
+-    i = (exitIdx > i ? exitIdx : i) + 1;
++    i++;
+   }
+   return trades;
+ }
+ 
+-export function summarize(trades: SimTrade[]) {
+-  if (!trades.length) return { trades: 0, hitRate: null, avgPnl: null };
+-  const wins = trades.filter((t) => t.pnlPct > 0);
++/* ---------------- reporting (R-based; hit rate deliberately NOT reported) ---------------- */
++
++export interface Report {
++  trades: number;
++  expectancyR: number;        // mean net R per trade
++  profitFactor: number;       // sum(+R) / sum(|-R|), net
++  maxDrawdownPct: number;     // on a fixed-fractional equity curve
++  totalReturnPct: number;
++  avgBars: number;
++  longExpectancyR: number | null;
++  shortExpectancyR: number | null;
++  grossExpectancyR: number;   // before fees and funding (diagnostic)
++  netR: number[];             // raw series, for statistics
++}
++
++export function report(trades: Trade[], riskPct = 0.01): Report {
++  const R = trades.map((t) => t.netR);
++  const n = R.length;
++  const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
++  const gw = R.filter((r) => r > 0).reduce((a, b) => a + b, 0);
++  const gl = -R.filter((r) => r < 0).reduce((a, b) => a + b, 0);
++  let eq = 1, peak = 1, mdd = 0;
++  for (const r of R) {
++    eq *= 1 + riskPct * r;
++    peak = Math.max(peak, eq);
++    mdd = Math.max(mdd, (peak - eq) / peak);
++  }
++  const longs = trades.filter((t) => t.side === 1).map((t) => t.netR);
++  const shorts = trades.filter((t) => t.side === -1).map((t) => t.netR);
+   return {
+-    trades: trades.length,
+-    hitRate: Math.round((wins.length / trades.length) * 1000) / 10,
+-    avgPnl: Math.round((trades.reduce((a, t) => a + t.pnlPct, 0) / trades.length) * 1000) / 1000,
++    trades: n,
++    expectancyR: +mean(R).toFixed(4),
++    profitFactor: +(gw / (gl || 1e-12)).toFixed(3),
++    maxDrawdownPct: +(100 * mdd).toFixed(2),
++    totalReturnPct: +(100 * (eq - 1)).toFixed(2),
++    avgBars: +mean(trades.map((t) => t.bars)).toFixed(1),
++    longExpectancyR: longs.length ? +mean(longs).toFixed(4) : null,
++    shortExpectancyR: shorts.length ? +mean(shorts).toFixed(4) : null,
++    grossExpectancyR: +mean(trades.map((t) => t.grossR)).toFixed(4),
++    netR: R,
+   };
+ }
++
++export type { TrendContext };

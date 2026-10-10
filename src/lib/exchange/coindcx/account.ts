@@ -60,7 +60,13 @@ interface WalletRow {
 export async function walletBalances(client: CoinDcxClient): Promise<ExchangeBalance[]> {
   // GET with a signed timestamp body — see the module header. The signer
   // stamps a fresh millisecond timestamp into the body.
-  const raw = await client.read<unknown>("/exchange/v1/derivatives/futures/wallets", {}, "GET");
+  // CoinDCX requires margin_currency_short_name query param (e.g. USDT, INR).
+  const raw = await client.read<unknown>(
+    "/exchange/v1/derivatives/futures/wallets",
+    {},
+    "GET",
+    { margin_currency_short_name: "USDT,INR" }
+  );
 
   const rows: WalletRow[] = [];
   if (Array.isArray(raw)) {

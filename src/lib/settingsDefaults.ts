@@ -9,7 +9,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   mode: "read_only",
   liveArmed: false,
   layout: "trading",
-  dataSource: "demo",
+  dataSource: "live",
   accent: "teal",
   density: "comfortable",
   reduceMotion: false,
@@ -35,4 +35,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   usdInrRate: 88,
   tradingviewEnabled: false,
   tradingviewSecret: "",
+  theme: "dark",
 };

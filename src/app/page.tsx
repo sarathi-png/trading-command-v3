@@ -1,5 +1,5 @@
 "use client";
-import { useMemo } from "react";
+import { useMemo, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Activity } from "lucide-react";
 import ChartPanel from "@/components/chart/ChartPanel";
@@ -9,7 +9,7 @@ import { Chip, EmptyState, MetricCard, Panel, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDateTime, fmtPct, fmtUsd, pnlTone } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
-import { useApp } from "@/stores";
+import { useApp, useAlerts } from "@/stores";
 import type { AccountState, Analysis } from "@/lib/types";
 
 interface AccountRes {
@@ -30,13 +30,57 @@ export default function OverviewPage() {
     20000, { deps: [activeSymbol, timeframe] }
   );
   const { data: signalsRes } = usePoll(
-    () => api.get<{ signals: { id: string; symbol: string; timeframe: string; strategy: string; status: string; price: number; createdAt: string }[] }>("/api/signals?limit=10"),
+    () => api.get<{ signals: { id: string; symbol: string; timeframe: string; strategy: string; status: string; price: number; entry: number | null; stop: number | null; target: number | null; rr: number | null; createdAt: string }[] }>("/api/signals?limit=10"),
     25000
   );
 
   const account = accountRes?.account ?? null;
   const analysis = analysisRes?.analysis ?? null;
   const m = settings.modules;
+  const { rules: alertRules } = useAlerts();
+  const notify = useApp((s) => s.notify);
+
+  // Track previous signals to detect new LONG/SHORT setups
+  const prevSignalsRef = useRef<Record<string, string>>({});
+  
+  useEffect(() => {
+    if (!signalsRes || !alertRules.length) return;
+    
+    const strategySignalRules = alertRules.filter((r) => r.kind === "strategy_signal" && r.enabled && !r.triggeredAt);
+    if (strategySignalRules.length === 0) return;
+    
+    for (const signal of signalsRes.signals) {
+      const key = `${signal.symbol}-${signal.timeframe}-${signal.strategy}-${signal.status}`;
+      const wasSeen = prevSignalsRef.current[key];
+      
+      if (!wasSeen && (signal.status === "LONG_SETUP" || signal.status === "SHORT_SETUP")) {
+        // Check if this signal matches any alert rule
+        for (const rule of strategySignalRules) {
+          if (rule.symbol === "ANY" || rule.symbol === signal.symbol) {
+            const side = signal.status === "LONG_SETUP" ? "LONG" : "SHORT";
+            const entry = signal.entry ? `Entry: ${signal.entry.toLocaleString()}` : "Entry: market";
+            const stop = signal.stop ? `SL: ${signal.stop.toLocaleString()}` : "SL: —";
+            const target = signal.target ? `TP: ${signal.target.toLocaleString()}` : "TP: —";
+            const rr = signal.rr ? `RR: 1:${signal.rr.toFixed(1)}` : "RR: —";
+            
+            notify({
+              title: `Strategy Signal: ${side} ${signal.symbol}`,
+              body: `${signal.strategy} | ${entry} | ${stop} | ${target} | ${rr} | ${signal.timeframe}`,
+              tone: side === "LONG" ? "success" : "warn",
+            });
+          }
+        }
+        prevSignalsRef.current[key] = "seen";
+      }
+    }
+    
+    // Clean up old entries (keep last 50)
+    const keys = Object.keys(prevSignalsRef.current);
+    if (keys.length > 50) {
+      const toDelete = keys.slice(0, keys.length - 50);
+      for (const k of toDelete) delete prevSignalsRef.current[k];
+    }
+  }, [signalsRes, alertRules, notify]);
   const marginUsedPct = useMemo(() => {
     if (!account || account.equity <= 0) return 0;
     return (account.marginUsed / account.equity) * 100;
@@ -48,11 +92,11 @@ export default function OverviewPage() {
   return (
     <div className="p-3 space-y-3 max-w-[1700px] mx-auto">
       {/* metric strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
         {m.balance && (
           <MetricCard label="ACCOUNT EQUITY" tooltip="Starting balance + realized + unrealized P&L"
             value={accLoading ? <Skeleton className="h-6 w-24" /> : fmtUsd(account?.equity)}
-            sub={account?.source === "demo" ? "DEMO / PAPER WALLET" : "COINDCX FUTURES"}
+            sub="COINDCX FUTURES"
             onHide={hide("balance")} />
         )}
         {m.margin && (
@@ -84,10 +128,9 @@ export default function OverviewPage() {
       <ExchangeAccountPanel />
 
       {/* chart + strategy intelligence */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_310px] gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_310px] gap-3">
         <Panel title={`${activeSymbol} · ${timeframe}`} right={
           <div className="flex items-center gap-1.5">
-            {settings.dataSource === "demo" && <Chip tone="warn">DEMO DATA</Chip>}
             <button onClick={() => router.push("/chart")} className="text-[10px] text-accent hover:underline tracking-wide">
               FULL CHART →
             </button>
@@ -101,7 +144,7 @@ export default function OverviewPage() {
       </div>
 
       {/* bottom row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {m.positions && (
           <PositionsTable
             account={account}

@@ -21,10 +21,8 @@ function envBoolAny(names: string[], fallback: boolean): boolean {
 export const flags = {
   /**
    * Public exchange market data via REST (no credentials required).
-   * EXCHANGE_MARKET_ENABLED is the current name; DELTA_MARKET_ENABLED is still
-   * honoured so an existing deployment's environment keeps working.
    */
-  exchangeMarket: () => envBoolAny(["EXCHANGE_MARKET_ENABLED", "DELTA_MARKET_ENABLED"], true),
+  exchangeMarket: () => envBool("EXCHANGE_MARKET_ENABLED", true),
   // NOTE: there is deliberately no `accountEnabled` flag here. Configuration is
   // decided by whether COINDCX_API_KEY/COINDCX_API_SECRET are present — use
   // `exchangeAccountConfigured()` from "@/lib/credentials".

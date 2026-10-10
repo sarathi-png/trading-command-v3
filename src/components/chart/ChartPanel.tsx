@@ -55,7 +55,7 @@ export default function ChartPanel({
   const [treeOpen, setTreeOpen] = useState(showObjectTree);
 
   // refs mirroring state for event handlers
-  const chartRef = useRef<never | null>(null);
+  const chartRef = useRef<import("lightweight-charts").IChartApi | null>(null);
   const seriesRef = useRef<never | null>(null);
   const volRef = useRef<never | null>(null);
   const markersRef = useRef<{ setMarkers: (m: SeriesMarker<LTime>[]) => void } | null>(null);
@@ -101,33 +101,77 @@ export default function ChartPanel({
   /* ---------------- chart init ---------------- */
   useEffect(() => {
     let disposed = false;
+    
+    // Theme change listener - defined outside IIFE so cleanup can access it
+    const handleThemeChange = () => {
+      const rootStyles = getComputedStyle(document.documentElement);
+      const textColor = rootStyles.getPropertyValue('--mut').trim();
+      const gridColor = rootStyles.getPropertyValue('--edge').trim();
+      const panelColor = rootStyles.getPropertyValue('--panel').trim();
+      const upColor = rootStyles.getPropertyValue('--up').trim();
+      const dnColor = rootStyles.getPropertyValue('--dn').trim();
+      
+      chartRef.current?.applyOptions?.({
+        layout: { textColor: textColor || "#8B98A9" },
+        grid: {
+          vertLines: { color: gridColor || "rgba(148,163,184,0.05)" },
+          horzLines: { color: gridColor || "rgba(148,163,184,0.05)" },
+        },
+        crosshair: {
+          vertLine: { labelBackgroundColor: panelColor || "#151B24" },
+          horzLine: { labelBackgroundColor: panelColor || "#151B24" },
+        },
+        rightPriceScale: { borderColor: gridColor || "rgba(148,163,184,0.12)" },
+        timeScale: { borderColor: gridColor || "rgba(148,163,184,0.12)" },
+      });
+      const series = seriesRef.current as unknown as import("lightweight-charts").ISeriesApi<"Candlestick"> | null;
+      if (series) {
+        series.applyOptions({
+          upColor: upColor || "#2FD388",
+          downColor: dnColor || "#F0524F",
+          wickUpColor: upColor || "#2FD388",
+          wickDownColor: dnColor || "#F0524F",
+        });
+      }
+    };
+    
     (async () => {
       const LWC = await import("lightweight-charts");
       if (disposed || !containerRef.current) return;
       lwcRef.current = LWC;
+      
+      // Read CSS variables for theme-aware colors
+      const rootStyles = getComputedStyle(document.documentElement);
+      const bgColor = rootStyles.getPropertyValue('--bg').trim();
+      const textColor = rootStyles.getPropertyValue('--mut').trim();
+      const gridColor = rootStyles.getPropertyValue('--edge').trim();
+      const panelColor = rootStyles.getPropertyValue('--panel').trim();
+      const upColor = rootStyles.getPropertyValue('--up').trim();
+      const dnColor = rootStyles.getPropertyValue('--dn').trim();
+      
       const chart = LWC.createChart(containerRef.current, {
         autoSize: true,
         layout: {
           background: { type: LWC.ColorType.Solid, color: "transparent" },
-          textColor: "#8B98A9",
+          textColor: textColor || "#8B98A9",
           fontFamily: "'JetBrains Mono', monospace",
           fontSize: 10,
         },
         grid: {
-          vertLines: { color: "rgba(148,163,184,0.05)" },
-          horzLines: { color: "rgba(148,163,184,0.05)" },
+          vertLines: { color: gridColor || "rgba(148,163,184,0.05)" },
+          horzLines: { color: gridColor || "rgba(148,163,184,0.05)" },
         },
         crosshair: {
           mode: LWC.CrosshairMode.Normal,
-          vertLine: { labelBackgroundColor: "#151B24" },
-          horzLine: { labelBackgroundColor: "#151B24" },
+          vertLine: { labelBackgroundColor: panelColor || "#151B24" },
+          horzLine: { labelBackgroundColor: panelColor || "#151B24" },
         },
-        rightPriceScale: { borderColor: "rgba(148,163,184,0.12)", scaleMargins: { top: 0.08, bottom: 0.24 } },
-        timeScale: { borderColor: "rgba(148,163,184,0.12)", timeVisible: true, secondsVisible: false, rightOffset: 5 },
+        rightPriceScale: { borderColor: gridColor || "rgba(148,163,184,0.12)", scaleMargins: { top: 0.08, bottom: 0.24 } },
+        timeScale: { borderColor: gridColor || "rgba(148,163,184,0.12)", timeVisible: true, secondsVisible: false, rightOffset: 5 },
       });
       const series = chart.addSeries(LWC.CandlestickSeries, {
-        upColor: "#2FD388", downColor: "#F0524F",
-        wickUpColor: "#2FD388", wickDownColor: "#F0524F",
+        upColor: upColor || "#2FD388", downColor: dnColor || "#F0524F",
+        wickUpColor: upColor || "#2FD388", wickDownColor: dnColor || "#F0524F",
         borderVisible: false,
       });
       const vol = chart.addSeries(LWC.HistogramSeries, {
@@ -148,12 +192,19 @@ export default function ChartPanel({
         const d = param.seriesData.get(series) as Candle | undefined;
         setHover(d && d.close ? d : null);
       });
+      
+      // Listen for theme changes via storage event (for cross-tab) and custom event
+      window.addEventListener('storage', handleThemeChange);
+      window.addEventListener('themechange', handleThemeChange);
+      
       setReady(true);
     })().catch(() => setError("Chart engine failed to initialise."));
     return () => {
       disposed = true;
       layerRef.current?.destroy();
       layerRef.current = null;
+      window.removeEventListener('storage', handleThemeChange);
+      window.removeEventListener('themechange', handleThemeChange);
       (chartRef.current as unknown as { remove?: () => void } | null)?.remove?.();
       chartRef.current = null;
     };
@@ -165,16 +216,14 @@ export default function ChartPanel({
     let stop = false;
     const load = async () => {
       try {
-        const res = await api.get<{ candles: Candle[]; source: "demo" | "live" }>(
+        const res = await api.get<{ candles: Candle[]; source: "live" }>(
           `/api/market/candles?symbol=${symbol}&timeframe=${timeframe}&limit=300`
         );
         if (stop) return;
         candlesRef.current = res.candles;
         setLastCandle(res.candles.at(-1) ?? null);
         applyCandles(res.candles);
-        setError(res.source === "demo" && settings.dataSource === "live"
-          ? "CoinDCX candles unavailable — showing demo data (labelled)."
-          : null);
+        setError(null);
       } catch (e) {
         if (!stop) setError(e instanceof Error ? e.message : "Candles unavailable");
       }
@@ -536,7 +585,6 @@ export default function ChartPanel({
               C <span className={shown.close >= shown.open ? "text-up" : "text-dn"}>{shown.close}</span>
             </span>
           )}
-          {settings.dataSource === "demo" && <span className="text-warn/80 text-[9px]">DEMO DATA</span>}
         </div>
         {error && (
           <div className="absolute top-1.5 right-2 z-10 text-[10px] text-warn bg-warn/10 border border-warn/30 rounded px-2 py-0.5">

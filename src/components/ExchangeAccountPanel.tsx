@@ -103,7 +103,7 @@ export default function ExchangeAccountPanel() {
               label="REALIZED P&L"
               value={fmtUsd(s.realizedPnlUsd, { sign: true })}
               tone={tone(s.realizedPnlUsd)}
-              sub={`₹${s.realizedPnlInr.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}
+              sub={s.realizedPnlInr === null ? "—" : `₹${s.realizedPnlInr.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}
             />
             <MetricCard
               label="BEST TRADE"

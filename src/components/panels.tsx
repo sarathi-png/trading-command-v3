@@ -277,7 +277,7 @@ export function PositionsTable({
           hint={source === "all" ? "Connect CoinDCX or switch to PAPER mode to open simulated positions." : "Paper positions appear here when you place simulated orders."} />
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-[11px]">
+          <table className="w-full text-[11px] sticky-header table-row-hover">
             <thead>
               <tr className="text-left microlabel border-b border-edge">
                 <th className="px-3 py-1.5 font-medium">SYMBOL</th>

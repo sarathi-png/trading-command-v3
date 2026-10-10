@@ -128,6 +128,7 @@ export const useApp = create<AppState>((set, get) => ({
   setSystem: (s) => set({ system: s }),
 
   notify: (n) => {
+    console.log('[NOTIFY]', n.title, n.body, new Error().stack?.split('\n').slice(0,3).join('\n'));
     const item: UiNotification = { ...n, id: `n${++notifSeq}`, ts: Date.now() };
     set((st) => ({
       notifications: [item, ...st.notifications].slice(0, 60),
@@ -136,7 +137,13 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   dismiss: (id) =>
-    set((st) => ({ notifications: st.notifications.filter((n) => n.id !== id) })),
+    set((st) => {
+      const notification = st.notifications.find((n) => n.id === id);
+      return {
+        notifications: st.notifications.filter((n) => n.id !== id),
+        unread: notification ? Math.max(0, st.unread - 1) : st.unread,
+      };
+    }),
 
   clearNotifications: () => set({ notifications: [], unread: 0 }),
   setPalette: (open) => set({ paletteOpen: open }),

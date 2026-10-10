@@ -4,7 +4,7 @@ import type { AlertRuleRow } from "@/lib/repo";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const KINDS = ["price_above", "price_below", "zone_enter", "signal", "pnl_below"];
+const KINDS = ["price_above", "price_below", "zone_enter", "signal", "pnl_below", "strategy_signal"];
 
 export async function GET() {
   const rows = await (await getRepo()).listAlertRules();
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
   const symbol = String(body.symbol ?? "").toUpperCase();
   if (!symbol) return Response.json({ error: "Symbol required" }, { status: 400 });
   const level = typeof body.level === "number" ? body.level : null;
-  if (kind !== "signal" && level === null) {
+  if (kind !== "signal" && kind !== "strategy_signal" && level === null) {
     return Response.json({ error: "Level required for this alert type" }, { status: 400 });
   }
   const row = await (await getRepo()).insertAlertRule({

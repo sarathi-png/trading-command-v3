@@ -13,7 +13,10 @@
     "test": "npm run test:quant && npm run test:exchange && npm run test:gateway && npm run build && npm run test:paper && npm run test:live-exchange",
     "test:gateway": "npm --prefix trading-gateway test",
     "test:exchange": "tsc -p tsconfig.exchange.json && node --test output/exchange-js/tests/exchange/coindcx.test.js",
-    "test:live-exchange": "node --test tests/live-exchange.test.mjs"
+    "test:live-exchange": "node --test tests/live-exchange.test.mjs",
+    "export:candles": "npm run build && node scripts/validate-real-data.js",
+    "validate:real": "npm run export:candles",
+    "validate:csv": "npm run build && node scripts/validate-from-csv.js"
   },
   "dependencies": {
     "dotenv": "17.3.1",

@@ -1,11 +1,7 @@
 /**
  * Unified market data facade.
  *
- * Demo mode: served by the deterministic simulator (always available).
- * Live mode: served by the exchange adapter (CoinDCX public REST), with the
- * same shape the UI, charts, strategy engine and paper simulator already
- * consume — the venue change is invisible above this file.
- *
+ * Live mode: served by the exchange adapter (CoinDCX public REST).
  * Errors are surfaced — we never silently substitute stale/demo data for live.
  */
 import { flags } from "../flags";
@@ -19,18 +15,17 @@ import {
   marketTickers,
 } from "../exchange/service";
 import type { ExchangeTicker } from "../exchange/types";
-import { demoCandles, demoOrderbook, demoTicker, demoTrades, DEMO_SYMBOLS } from "./demo";
 
 export class MarketError extends Error {}
 
-export async function activeDataSource(): Promise<"demo" | "live"> {
-  const s = await getSettings();
-  if (s.dataSource === "live" && flags.exchangeMarket()) return "live";
-  return "demo";
+export async function activeDataSource(): Promise<"live"> {
+  return "live";
 }
 
 export function knownSymbols(): string[] {
-  return DEMO_SYMBOLS.map((s) => s.symbol);
+  // Use the exchange module's known symbols (all CoinDCX futures pairs)
+  const { knownSymbols: exchangeKnownSymbols } = require("../exchange/symbols");
+  return exchangeKnownSymbols();
 }
 
 /** Exchange ticker → the app's Ticker model (nulls become neutral zeros). */
@@ -53,19 +48,14 @@ function toAppTicker(t: ExchangeTicker): Ticker {
 }
 
 export async function getTickers(symbols?: string[]): Promise<Ticker[]> {
-  const src = await activeDataSource();
-  if (src === "live") {
-    try {
-      const all = await marketTickers(symbols);
-      return all.map(toAppTicker);
-    } catch (e) {
-      throw new MarketError(
-        e instanceof Error ? e.message : "Exchange market data unavailable"
-      );
-    }
+  try {
+    const all = await marketTickers(symbols);
+    return all.map(toAppTicker);
+  } catch (e) {
+    throw new MarketError(
+      e instanceof Error ? e.message : "Exchange market data unavailable"
+    );
   }
-  const list = symbols ?? DEMO_SYMBOLS.map((s) => s.symbol);
-  return list.map((s) => demoTicker(s));
 }
 
 export async function getPrice(symbol: string): Promise<number> {
@@ -78,50 +68,36 @@ export async function getCandles(
   symbol: string,
   timeframe: Timeframe,
   limit = 300
-): Promise<{ candles: Candle[]; source: "demo" | "live" }> {
-  const src = await activeDataSource();
-  if (src === "live") {
-    try {
-      const candles = await marketCandles(symbol, TF_MINUTES[timeframe] * 60, limit);
-      if (candles.length > 0) return { candles, source: "live" };
-    } catch {
-      /* fall through to demo — flagged below */
-    }
-    // The venue returned nothing for this symbol/resolution: fall back to demo,
-    // but the response is explicitly labelled so the UI can show it.
+): Promise<{ candles: Candle[]; source: "live" }> {
+  const candles = await marketCandles(symbol, TF_MINUTES[timeframe] * 60, limit);
+  if (candles.length === 0) {
+    throw new MarketError(`No candles available for ${symbol} ${timeframe}`);
   }
-  return { candles: demoCandles(symbol, timeframe, limit), source: "demo" };
+  return { candles, source: "live" };
 }
 
 export async function getOrderbook(symbol: string): Promise<OrderBook> {
-  const src = await activeDataSource();
-  if (src === "live" && flags.orderbook()) {
-    try {
-      const book = await marketOrderBook(symbol, 20);
-      return {
-        symbol: book.symbol,
-        bids: book.bids,
-        asks: book.asks,
-        ts: book.ts,
-        source: "live",
-      };
-    } catch {
-      /* labelled fallback */
-    }
+  if (!flags.orderbook()) {
+    throw new MarketError("Orderbook feature disabled");
   }
-  return demoOrderbook(symbol);
+  try {
+    const book = await marketOrderBook(symbol, 20);
+    return {
+      symbol: book.symbol,
+      bids: book.bids,
+      asks: book.asks,
+      ts: book.ts,
+      source: "live",
+    };
+  } catch (e) {
+    throw new MarketError(e instanceof Error ? e.message : "Orderbook unavailable");
+  }
 }
 
 export async function getRecentTrades(symbol: string): Promise<RecentTrade[]> {
-  const src = await activeDataSource();
-  if (src === "live") {
-    // Public trades endpoint is best-effort; the demo tape keeps UX consistent
-    // and is labelled demo by the caller's data source, not silently.
-    try {
-      return await marketRecentTrades(symbol);
-    } catch {
-      return demoTrades(symbol);
-    }
+  try {
+    return await marketRecentTrades(symbol);
+  } catch (e) {
+    throw new MarketError(e instanceof Error ? e.message : "Recent trades unavailable");
   }
-  return demoTrades(symbol);
 }

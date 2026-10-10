@@ -198,7 +198,7 @@ export function MetricCard({
   tone?: "flat" | "up" | "dn" | "accent"; onHide?: () => void; tooltip?: string;
 }) {
   return (
-    <div className="panel px-3 py-2.5 relative group min-w-0" title={tooltip}>
+    <div className="panel px-3 py-2.5 relative group min-w-0 metric-card-hover" title={tooltip}>
       <div className="flex items-center justify-between gap-2">
         <p className="microlabel truncate">{label}</p>
         {onHide && (

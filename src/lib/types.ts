@@ -177,7 +177,7 @@ export interface AppSettings {
   mode: ExecMode;
   liveArmed: boolean; // master trading switch, OFF by default
   layout: LayoutPreset;
-  dataSource: "demo" | "live";
+  dataSource: "live";
   accent: "teal" | "blue" | "purple" | "amber";
   density: "comfortable" | "compact";
   reduceMotion: boolean;
@@ -202,12 +202,14 @@ export interface AppSettings {
   tradingviewEnabled: boolean;
   /** Webhook shared secret (used when TRADINGVIEW_WEBHOOK_SECRET env is unset). */
   tradingviewSecret: string;
+  /** UI theme: "dark" or "light" */
+  theme: "dark" | "light";
 }
 
 export interface AlertRule {
   id?: string;
   symbol: string;
-  kind: "price_above" | "price_below" | "zone_enter" | "signal" | "pnl_below";
+  kind: "price_above" | "price_below" | "zone_enter" | "signal" | "pnl_below" | "strategy_signal";
   level: number | null;
   level2: number | null;
   enabled: boolean;

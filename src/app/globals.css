@@ -23,6 +23,21 @@
 [data-accent="purple"] { --accent: #b79cff; --accent-dim: rgba(183, 156, 255, 0.14); }
 [data-accent="amber"] { --accent: #f5b84d; --accent-dim: rgba(245, 184, 77, 0.14); }
 
+[data-theme="light"] {
+  --bg: #f8fafc;
+  --bg-2: #ffffff;
+  --panel: #ffffff;
+  --panel-2: #f1f5f9;
+  --edge: rgba(15, 23, 42, 0.12);
+  --edge-2: rgba(15, 23, 42, 0.18);
+  --ink: #0f172a;
+  --mut: #334155;
+  --dim: #64748b;
+  --up: #15803d;
+  --dn: #dc2626;
+  --warn: #b45309;
+}
+
 @theme inline {
   --color-bg: var(--bg);
   --color-bg2: var(--bg-2);
@@ -154,3 +169,77 @@ input[type="number"]::-webkit-inner-spin-button {
   margin: 0;
 }
 input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+/* ---- Responsive utilities ---- */
+@media (max-width: 639px) {
+  .mobile-full { width: 100%; }
+  .mobile-stack { flex-direction: column; }
+  .mobile-hidden { display: none; }
+  .mobile-text-center { text-align: center; }
+}
+
+@media (min-width: 640px) and (max-width: 1023px) {
+  .tablet-full { width: 100%; }
+  .tablet-stack { flex-direction: column; }
+}
+
+/* ---- Skeleton shimmer ---- */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--panel-2) 25%, var(--edge) 50%, var(--panel-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+/* ---- UI Polish ---- */
+.metric-card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.metric-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.table-row-hover tbody tr {
+  transition: background-color 0.15s ease;
+}
+.table-row-hover tbody tr:hover {
+  background-color: var(--panel-2);
+}
+
+.sticky-header thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--panel);
+}
+
+.input-focus {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.input-focus:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.chart-tooltip {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* Light theme scrollbars */
+[data-theme="light"] * {
+  scrollbar-color: #cbd5e1 transparent;
+}
+[data-theme="light"] *::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}

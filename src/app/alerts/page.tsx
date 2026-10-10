@@ -14,6 +14,7 @@ const KIND_LABEL: Record<AlertRule["kind"], string> = {
   zone_enter: "Price enters zone",
   signal: "Strategy signal (any setup)",
   pnl_below: "Open P&L falls below",
+  strategy_signal: "Strategy signal (LONG/SHORT setup)",
 };
 
 export default function AlertsPage() {
@@ -109,13 +110,14 @@ export default function AlertsPage() {
             <div className="grid grid-cols-2 gap-2">
               <label className="block space-y-1"><span className="microlabel">SYMBOL</span>
                 <Input value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value.toUpperCase() })} /></label>
-              <label className="block space-y-1"><span className="microlabel">CONDITION</span>
+<label className="block space-y-1"><span className="microlabel">CONDITION</span>
                 <Select className="w-full" value={form.kind}
                   onChange={(e) => setForm({ ...form, kind: e.target.value as AlertRule["kind"] })}>
                   <option value="price_above">price crosses above</option>
                   <option value="price_below">price crosses below</option>
                   <option value="zone_enter">price enters zone</option>
-                  <option value="pnl_below">open P&amp;L below</option>
+                  <option value="pnl_below">open P&L below</option>
+                  <option value="strategy_signal">strategy signal (LONG/SHORT)</option>
                 </Select></label>
             </div>
             <label className="block space-y-1"><span className="microlabel">{form.kind === "zone_enter" ? "ZONE LOWER" : "LEVEL"}</span>

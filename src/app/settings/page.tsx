@@ -160,8 +160,13 @@ export default function SettingsPage() {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="microlabel w-28">THEME</span>
-            <Chip>DARK TECHNICAL</Chip>
-            <span className="text-[10px] text-dim">OLED and light variants are intentionally not exposed to keep contrast safe.</span>
+            {(["dark", "light"] as const).map((t) => (
+              <button key={t} onClick={() => void patchSettings({ theme: t })}
+                className={cx("h-7 px-3 rounded border text-[10px] tracking-wider uppercase",
+                  settings.theme === t ? "border-accent/60 text-accent bg-accent-dim" : "border-edge text-mut hover:text-ink")}>
+                {t === "dark" ? "Dark" : "Light"}
+              </button>
+            ))}
           </div>
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-mut">Compact density</span>
@@ -212,30 +217,18 @@ export default function SettingsPage() {
         <div className="p-3 space-y-2.5">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="microlabel w-28">SOURCE</span>
-            {(["demo", "live"] as const).map((src) => (
-              <button key={src} onClick={() => void patchSettings({ dataSource: src })}
-                className={cx("h-7 px-3 rounded border text-[10px] tracking-wider uppercase",
-                  settings.dataSource === src ? "border-accent/60 text-accent bg-accent-dim" : "border-edge text-mut hover:text-ink")}>
-                {src === "demo" ? "Demo simulator" : "CoinDCX Futures"}
-              </button>
-            ))}
+            <button onClick={() => void patchSettings({ dataSource: "live" })}
+              className="h-7 px-3 rounded border text-[10px] tracking-wider uppercase border-accent/60 text-accent bg-accent-dim">
+              CoinDCX Futures
+            </button>
           </div>
           <div className="flex items-center gap-2 text-[11px] text-mut">
             <StatusDot tone={system?.exchangeMarket === "online" ? "ok" : system?.exchangeMarket === "offline" ? "err" : "off"} />
             CoinDCX REST: {system?.exchangeMarket ?? "unknown"}
-            {settings.dataSource === "live" && system?.exchangeMarket !== "online" && (
-              <span className="text-warn text-[10px]">— charts fall back to labelled demo candles if CoinDCX is unreachable</span>
-            )}
           </div>
           <p className="text-[10px] text-dim leading-relaxed">
-            Public market data needs no credentials. Demo mode is a deterministic simulator and is always clearly labelled — it never impersonates live data.
+            Public market data needs no credentials. CoinDCX Futures provides live market data.
           </p>
-          {settings.dataSource === "demo" && creds?.configured && (
-            <p className="text-[10px] text-warn">
-              CoinDCX credentials are configured, but the chart is currently using demo prices. Select{" "}
-              <span className="text-ink">CoinDCX Futures</span> above to switch to its public market feed.
-            </p>
-          )}
         </div>
       </Panel>
 
