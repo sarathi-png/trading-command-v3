@@ -1,12 +1,13 @@
 "use client";
 import { useState } from "react";
-import { Zap } from "lucide-react";
+import { Zap, CandlestickChart } from "lucide-react";
 import { Chip, EmptyState, Input, Panel, Skeleton, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtDateTime, fmtPrice } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
 import { useApp } from "@/stores";
 import type { Analysis } from "@/lib/types";
+import { ChandelierDonchianPanel } from "@/components/strategy/ChandelierDonchianPanel";
 
 interface QuantView {
   confluence: {
@@ -155,6 +156,9 @@ export default function StrategyPage() {
           </div>
         </Panel>
       )}
+
+      {/* Chandelier Exit + Donchian Ribbon strategy */}
+      <ChandelierDonchianPanel />
 
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-3">
         <SignalHistory />

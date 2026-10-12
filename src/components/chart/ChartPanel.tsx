@@ -5,6 +5,7 @@ import {
 import {
   Crosshair, Eye, EyeOff, Lock, LockOpen, Minus, MousePointer2,
   MoveUpRight, MoveVertical, Square, Target, Trash2, TrendingUp, Type,
+  CandlestickChart,
 } from "lucide-react";
 import type {
   IPriceLine, ISeriesApi, SeriesMarker, Time as LTime,
@@ -288,6 +289,72 @@ export default function ChartPanel({
     redraw();
   }, [drawings, analysis, ready, settings.srAuto, settings.modules.supportResistance, redraw]);
 
+  const [showStrategyOverlay, setShowStrategyOverlay] = useState(true);
+  const [strategyOverlay, setStrategyOverlay] = useState<{
+    chandelierLongStop: number | null;
+    chandelierShortStop: number | null;
+    donchianPeriods: Record<number, { upper: number; lower: number; middle: number }>;
+  } | null>(null);
+
+  /* ---------------- strategy overlay (Chandelier + Donchian) ---------------- */
+  const strategyOverlayRef = useRef<typeof strategyOverlay>(null);
+  strategyOverlayRef.current = strategyOverlay;
+
+  useEffect(() => {
+    if (!showStrategyOverlay) return;
+    let stop = false;
+    const load = async () => {
+      try {
+        const res = await api.get<{
+          state: {
+            chandelierLongStop: number | null;
+            chandelierShortStop: number | null;
+            donchianPeriods: Record<number, { upper: number; lower: number; middle: number }>;
+          } | null;
+        }>(`/api/strategy/chandelier-donchian?symbol=${symbol}&timeframe=${timeframe}`);
+        if (!stop && res.state) setStrategyOverlay(res.state);
+      } catch { /* overlay is optional */ }
+    };
+    void load();
+    const id = setInterval(() => void load(), 30000);
+    return () => { stop = true; clearInterval(id); };
+  }, [symbol, timeframe, showStrategyOverlay]);
+
+  useEffect(() => {
+    const series = seriesRef.current as unknown as ISeriesApi<"Candlestick"> | null;
+    if (!series) return;
+    for (const l of linesRef.current) {
+      if ((l as unknown as { title?: string }).title?.startsWith("CD:")) {
+        series.removePriceLine(l);
+      }
+    }
+    linesRef.current = linesRef.current.filter(
+      (l) => !(l as unknown as { title?: string }).title?.startsWith("CD:")
+    );
+
+    if (!showStrategyOverlay || !strategyOverlay) return;
+
+    const addCd = (price: number, colorV: string, style: 0 | 1 | 2, title: string) => {
+      if (!Number.isFinite(price) || price <= 0) return;
+      const line = series.createPriceLine({
+        price, color: colorV, lineWidth: 1, lineStyle: style,
+        axisLabelVisible: true, title,
+      });
+      linesRef.current.push(line);
+    };
+
+    if (strategyOverlay.chandelierLongStop !== null) {
+      addCd(strategyOverlay.chandelierLongStop, "rgba(47,211,136,0.7)", 2, "CD:CH-LONG");
+    }
+    if (strategyOverlay.chandelierShortStop !== null) {
+      addCd(strategyOverlay.chandelierShortStop, "rgba(240,82,79,0.7)", 2, "CD:CH-SHORT");
+    }
+    for (const [period, data] of Object.entries(strategyOverlay.donchianPeriods)) {
+      if (Number.isFinite(data.upper)) addCd(data.upper, "rgba(87,230,210,0.4)", 0, `CD:D${period}-U`);
+      if (Number.isFinite(data.lower)) addCd(data.lower, "rgba(154,178,206,0.4)", 0, `CD:D${period}-L`);
+    }
+  }, [strategyOverlay, showStrategyOverlay, ready]);
+
   /* ---------------- markers (structure + signal) ---------------- */
   useEffect(() => {
     const series = seriesRef.current as unknown as ISeriesApi<"Candlestick"> | null;
@@ -548,6 +615,19 @@ export default function ChartPanel({
               style={{ backgroundColor: c }}
             />
           ))}
+          <div className="hidden md:block border-t border-edge my-1 mx-1" />
+          <button
+            onClick={() => setShowStrategyOverlay((v) => !v)}
+            title="Toggle Chandelier + Donchian overlay"
+            aria-label="Toggle strategy overlay"
+            aria-pressed={showStrategyOverlay}
+            className={cx(
+              "p-1.5 rounded flex-none",
+              showStrategyOverlay ? "bg-accent-dim text-accent" : "text-dim hover:text-ink hover:bg-panel2"
+            )}
+          >
+            <CandlestickChart size={14} />
+          </button>
           <div className="hidden md:block border-t border-edge my-1 mx-1" />
           <button
             onClick={() => selectedId && void deleteDrawing(selectedId)}

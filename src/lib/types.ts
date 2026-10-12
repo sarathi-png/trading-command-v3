@@ -204,6 +204,8 @@ export interface AppSettings {
   tradingviewSecret: string;
   /** UI theme: "dark" or "light" */
   theme: "dark" | "light";
+  /** Chandelier Exit + Donchian Ribbon strategy configuration */
+  chandelierDonchian?: import("./strategy/v2/types").ChandelierDonchianConfig;
 }
 
 export interface AlertRule {

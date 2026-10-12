@@ -243,3 +243,194 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 [data-theme="light"] *::-webkit-scrollbar-thumb {
   background: #cbd5e1;
 }
+
+/* ---- Premium design system ---- */
+:root {
+  --space-xs: 2px;
+  --space-sm: 4px;
+  --space-md: 8px;
+  --space-lg: 12px;
+  --space-xl: 16px;
+  --space-2xl: 24px;
+  --space-3xl: 32px;
+
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --elevation-2: 0 2px 8px rgba(0, 0, 0, 0.12);
+  --elevation-3: 0 4px 16px rgba(0, 0, 0, 0.16);
+  --elevation-4: 0 8px 32px rgba(0, 0, 0, 0.2);
+
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --transition-slow: 350ms ease;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+}
+
+[data-theme="light"] {
+  --elevation-1: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --elevation-2: 0 2px 8px rgba(15, 23, 42, 0.08);
+  --elevation-3: 0 4px 16px rgba(15, 23, 42, 0.1);
+  --elevation-4: 0 8px 32px rgba(15, 23, 42, 0.12);
+}
+
+/* Premium panel with elevation */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-1);
+  transition: box-shadow var(--transition-normal), transform var(--transition-normal);
+}
+
+.panel:hover {
+  box-shadow: var(--elevation-2);
+}
+
+/* Premium metric card */
+.metric-card {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  box-shadow: var(--elevation-1);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--elevation-2);
+}
+
+/* Premium button */
+.btn-premium {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  transition: all var(--transition-fast);
+  cursor: pointer;
+}
+
+.btn-premium:active {
+  transform: scale(0.98);
+}
+
+/* Premium input */
+.input-premium {
+  background: var(--bg-2);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm) var(--space-md);
+  font-size: 12px;
+  color: var(--ink);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.input-premium:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+  outline: none;
+}
+
+/* Section header */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--edge);
+}
+
+.section-title {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 500;
+}
+
+/* Config group */
+.config-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+}
+
+.config-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.config-label {
+  font-size: 11px;
+  color: var(--mut);
+}
+
+/* Loading skeleton with shimmer */
+.skeleton-premium {
+  background: linear-gradient(
+    90deg,
+    var(--panel-2) 25%,
+    var(--edge) 50%,
+    var(--panel-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* Smooth page transitions */
+.page-transition {
+  animation: page-in var(--transition-normal);
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Focus ring for accessibility */
+.focus-ring:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Responsive grid */
+.grid-responsive {
+  display: grid;
+  gap: var(--space-lg);
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .grid-responsive {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .grid-responsive {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1280px) {
+  .grid-responsive {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}

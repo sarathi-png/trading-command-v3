@@ -305,3 +305,97 @@ export function useConfirm(): [
   );
   return [confirm, node];
 }
+
+/* ---------------- premium components ---------------- */
+
+export function PremiumPanel({
+  title, right, children, className, badge, elevation = 1,
+}: {
+  title?: ReactNode; right?: ReactNode; children: ReactNode;
+  className?: string; badge?: ReactNode; elevation?: 1 | 2 | 3 | 4;
+}) {
+  const shadows = {
+    1: "shadow-[0_1px_2px_rgba(0,0,0,0.08)]",
+    2: "shadow-[0_2px_8px_rgba(0,0,0,0.12)]",
+    3: "shadow-[0_4px_16px_rgba(0,0,0,0.16)]",
+    4: "shadow-[0_8px_32px_rgba(0,0,0,0.2)]",
+  };
+  return (
+    <section className={cx("panel flex flex-col min-h-0 transition-shadow duration-200 hover:shadow-[0_2px_8px_rgba(0,0,0,0.12)]", shadows[elevation], className)}>
+      {(title || right || badge) && (
+        <header className="flex items-center gap-2 border-b border-edge px-3 h-9 flex-none">
+          {title && <h3 className="microlabel">{title}</h3>}
+          {badge}
+          <div className="ml-auto flex items-center gap-1.5">{right}</div>
+        </header>
+      )}
+      {children}
+    </section>
+  );
+}
+
+export function SectionHeader({ title, right, className }: {
+  title: ReactNode; right?: ReactNode; className?: string;
+}) {
+  return (
+    <div className={cx("flex items-center justify-between border-b border-edge px-3 h-9 flex-none", className)}>
+      <h3 className="microlabel">{title}</h3>
+      {right && <div className="flex items-center gap-1.5">{right}</div>}
+    </div>
+  );
+}
+
+export function ConfigGroup({ label, children, className }: {
+  label: string; children: ReactNode; className?: string;
+}) {
+  return (
+    <div className={cx("flex flex-col gap-2 p-3", className)}>
+      <p className="microlabel">{label}</p>
+      {children}
+    </div>
+  );
+}
+
+export function MetricRow({ label, value, tone, className }: {
+  label: string; value: ReactNode; tone?: "up" | "dn" | "flat"; className?: string;
+}) {
+  return (
+    <div className={cx("flex items-center justify-between py-1", className)}>
+      <span className="text-[11px] text-dim">{label}</span>
+      <span className={cx(
+        "text-[11px] text-ink num",
+        tone === "up" ? "text-up" : tone === "dn" ? "text-dn" : ""
+      )}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+export function ToggleSwitch({
+  checked, onChange, label, disabled,
+}: {
+  checked: boolean; onChange: (v: boolean) => void; label?: string; disabled?: boolean;
+}) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cx(
+        "relative w-9 h-5 rounded-full transition-colors flex-none border",
+        checked ? "bg-accent/25 border-accent/50" : "bg-bg2 border-edge",
+        disabled && "opacity-40 pointer-events-none"
+      )}
+    >
+      <span
+        className={cx(
+          "absolute top-0.5 w-4 h-4 rounded-full transition-all",
+          checked ? "left-4.5 bg-accent" : "left-0.5 bg-dim"
+        )}
+      />
+    </button>
+  );
+}

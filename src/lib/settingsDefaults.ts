@@ -1,9 +1,18 @@
 import type { AppSettings } from "./types";
+import type { ChandelierDonchianConfig } from "./strategy/v2/types";
 
 /**
  * Client-side mirror of the server defaults (kept separate so the client
  * bundle never imports server modules that touch the database).
  */
+export const DEFAULT_CHANDELIER_DONCHIAN: ChandelierDonchianConfig = {
+  chandelier: { atrLength: 20, multiplier: 3.0 },
+  donchian: { periods: [20, 50, 100, 200] },
+  heikinAshi: true,
+  timeStop: { enabled: true, bars: 48 },
+  risk: { leverage: 10, riskPct: 1.0, lotSize: null, maxPositions: 1, mode: "auto" },
+};
+
 export const DEFAULT_SETTINGS: AppSettings = {
   onboarded: false,
   mode: "read_only",
@@ -36,4 +45,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   tradingviewEnabled: false,
   tradingviewSecret: "",
   theme: "dark",
+  chandelierDonchian: DEFAULT_CHANDELIER_DONCHIAN,
 };
