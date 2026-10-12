@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { ShieldAlert } from "lucide-react";
-import { Btn, Chip, EmptyState, Input, KV, Modal, Panel, Select, Skeleton, Toggle } from "@/components/ui";
+import { Btn, Chip, EmptyState, Input, KV, Modal, PremiumPanel, Select, Skeleton, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtDateTime, fmtPrice, fmtUsd } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -86,7 +86,7 @@ export default function OrdersPage() {
   return (
     <div className="p-3 grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-3 max-w-[1500px] mx-auto">
       {/* order ticket */}
-      <Panel title="ORDER TICKET" badge={
+      <PremiumPanel title="ORDER TICKET" badge={
         settings.mode === "paper" ? <Chip tone="warn">PAPER</Chip>
         : settings.mode === "live" ? <Chip tone="danger">LIVE</Chip>
         : <Chip>READ ONLY</Chip>
@@ -174,11 +174,11 @@ export default function OrdersPage() {
             </p>
           </div>
         )}
-      </Panel>
+      </PremiumPanel>
 
       {/* open orders + history */}
       <div className="space-y-3 min-w-0">
-        <Panel title="OPEN ORDERS" badge={<span className="text-[9px] num text-dim">{openOrders.length}</span>}>
+        <PremiumPanel title="OPEN ORDERS" badge={<span className="text-[9px] num text-dim">{openOrders.length}</span>}>
           {settings.mode === "read_only" ? (
             <EmptyState title="No order entry in read-only mode" hint="Switch to PAPER mode to place simulated orders." />
           ) : !data ? (
@@ -191,9 +191,9 @@ export default function OrdersPage() {
               refresh();
             }} />
           )}
-        </Panel>
+        </PremiumPanel>
 
-        <Panel title="ORDER HISTORY">
+        <PremiumPanel title="ORDER HISTORY">
           {!data ? (
             <div className="p-3 space-y-1.5">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-5" />)}</div>
           ) : history.length === 0 ? (
@@ -201,7 +201,7 @@ export default function OrdersPage() {
           ) : (
             <OrderRows orders={history} />
           )}
-        </Panel>
+        </PremiumPanel>
       </div>
 
       {/* live confirmation */}

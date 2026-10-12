@@ -5,7 +5,7 @@ import { Activity } from "lucide-react";
 import ChartPanel from "@/components/chart/ChartPanel";
 import ExchangeAccountPanel from "@/components/ExchangeAccountPanel";
 import { PositionsTable, RiskCard, SignalPanel } from "@/components/panels";
-import { Chip, EmptyState, MetricCard, Panel, Skeleton } from "@/components/ui";
+import { Chip, EmptyState, MetricCard, PremiumPanel, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDateTime, fmtPct, fmtUsd, pnlTone } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -129,17 +129,17 @@ export default function OverviewPage() {
 
       {/* chart + strategy intelligence */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_310px] gap-3">
-        <Panel title={`${activeSymbol} · ${timeframe}`} right={
+        <PremiumPanel title={`${activeSymbol} · ${timeframe}`} right={
           <div className="flex items-center gap-1.5">
             <button onClick={() => router.push("/chart")} className="text-[10px] text-accent hover:underline tracking-wide">
               FULL CHART →
             </button>
           </div>
-        }>
+        } elevation={1}>
           <div className="h-[380px]">
             <ChartPanel symbol={activeSymbol} timeframe={timeframe} analysis={analysis} interactive />
           </div>
-        </Panel>
+        </PremiumPanel>
         {m.strategyScore && <SignalPanel analysis={analysis} />}
       </div>
 
@@ -166,8 +166,8 @@ export default function OverviewPage() {
             defaultLevels={{ entry: primary?.entry, stop: primary?.stop, target: primary?.target }}
           />
         )}
-        {m.tradeHistory && (
-          <Panel title="RECENT ACTIVITY">
+{m.tradeHistory && (
+            <PremiumPanel title="RECENT ACTIVITY" elevation={1}>
             {!signalsRes ? (
               <div className="p-3 space-y-1.5">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-4" />)}</div>
             ) : signalsRes.signals.length === 0 ? (
@@ -187,7 +187,7 @@ export default function OverviewPage() {
                 ))}
               </div>
             )}
-          </Panel>
+          </PremiumPanel>
         )}
       </div>
     </div>

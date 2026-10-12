@@ -15,8 +15,11 @@ import { cx } from "@/lib/format";
 import { useApp } from "@/stores";
 import type { Analysis, Candle, Drawing, DrawingType, Timeframe } from "@/lib/types";
 import { DrawLayer, type HitResult } from "./drawLayer";
+import { toHeikinAshi } from "@/lib/strategy/v2/heikin-ashi";
 
 type Tool = "cursor" | DrawingType;
+
+type ChartType = "candlestick" | "heikin-ashi";
 
 const TOOL_DEFS: { id: Tool; icon: typeof Minus; label: string }[] = [
   { id: "cursor", icon: MousePointer2, label: "Select / pan" },
@@ -35,6 +38,7 @@ const SINGLE_POINT: DrawingType[] = ["hline", "vline", "text", "entry", "stop", 
 
 export default function ChartPanel({
   symbol, timeframe, analysis, interactive = true, showObjectTree = false, className,
+  chartType: initialChartType = "candlestick",
 }: {
   symbol: string;
   timeframe: Timeframe;
@@ -42,6 +46,7 @@ export default function ChartPanel({
   interactive?: boolean;
   showObjectTree?: boolean;
   className?: string;
+  chartType?: ChartType;
 }) {
   const { settings } = useApp();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -54,6 +59,7 @@ export default function ChartPanel({
   const [color, setColor] = useState(COLORS[0]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(showObjectTree);
+  const [chartType, setChartType] = useState<ChartType>(initialChartType);
 
   // refs mirroring state for event handlers
   const chartRef = useRef<import("lightweight-charts").IChartApi | null>(null);
@@ -223,7 +229,8 @@ export default function ChartPanel({
         if (stop) return;
         candlesRef.current = res.candles;
         setLastCandle(res.candles.at(-1) ?? null);
-        applyCandles(res.candles);
+        const displayCandles = chartType === "heikin-ashi" ? toHeikinAshi(res.candles) : res.candles;
+        applyCandles(displayCandles);
         setError(null);
       } catch (e) {
         if (!stop) setError(e instanceof Error ? e.message : "Candles unavailable");
@@ -232,7 +239,7 @@ export default function ChartPanel({
     void load();
     const id = setInterval(() => void load(), 5000);
     return () => { stop = true; clearInterval(id); };
-  }, [ready, symbol, timeframe, applyCandles, settings.dataSource]);
+  }, [ready, symbol, timeframe, applyCandles, settings.dataSource, chartType]);
 
   /* ---------------- drawings load ---------------- */
   useEffect(() => {
@@ -628,6 +635,31 @@ export default function ChartPanel({
           >
             <CandlestickChart size={14} />
           </button>
+          <div className="hidden md:block border-t border-edge my-1 mx-1" />
+          <button
+            onClick={() => setShowStrategyOverlay((v) => !v)}
+            title="Toggle Chandelier + Donchian overlay"
+            aria-label="Toggle strategy overlay"
+            aria-pressed={showStrategyOverlay}
+            className={cx(
+              "p-1.5 rounded flex-none",
+              showStrategyOverlay ? "bg-accent-dim text-accent" : "text-dim hover:text-ink hover:bg-panel2"
+            )}
+          >
+            <CandlestickChart size={14} />
+          </button>
+          <div className="hidden md:block border-t border-edge my-1 mx-1" />
+          <div className="flex items-center gap-1 p-1">
+            <span className="text-[9px] text-dim">CHART</span>
+            <select
+              value={chartType}
+              onChange={(e) => setChartType(e.target.value as ChartType)}
+              className="bg-bg2 border border-edge rounded px-1.5 h-6 text-[10px] text-ink outline-none focus:border-accent/50"
+            >
+              <option value="candlestick">Candlestick</option>
+              <option value="heikin-ashi">Heikin Ashi</option>
+            </select>
+          </div>
           <div className="hidden md:block border-t border-edge my-1 mx-1" />
           <button
             onClick={() => selectedId && void deleteDrawing(selectedId)}

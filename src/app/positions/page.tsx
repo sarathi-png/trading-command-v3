@@ -1,6 +1,6 @@
 "use client";
 import { PositionsTable, RiskCard } from "@/components/panels";
-import { Chip, KV, MetricCard, Panel } from "@/components/ui";
+import { Chip, KV, MetricCard, PremiumPanel } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtPct, fmtUsd, pnlTone } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -43,7 +43,7 @@ export default function PositionsPage() {
             source="all"
             onClose={(symbol) => void close(symbol)}
           />
-          <Panel title="LIVE EXCHANGE POSITIONS">
+          <PremiumPanel title="LIVE EXCHANGE POSITIONS" elevation={1}>
             <div className="p-4 text-[11px] text-dim leading-relaxed">
               {settings.dataSource === "live" ? (
                 <p className="flex items-center gap-2">
@@ -57,11 +57,11 @@ export default function PositionsPage() {
                 </p>
               )}
             </div>
-          </Panel>
+          </PremiumPanel>
         </div>
 
         <div className="space-y-3">
-          <Panel title="RISK LIMITS">
+          <PremiumPanel title="RISK LIMITS" elevation={1}>
             <div className="p-3">
               <KV k="MAX DAILY LOSS" v={fmtUsd(rl.maxDailyLoss)} />
               <KV k="MAX ORDER VALUE" v={fmtUsd(rl.maxOrderValue)} />
@@ -71,7 +71,7 @@ export default function PositionsPage() {
                 Orders breaching these limits are blocked before submission. Adjust in Settings → Risk.
               </p>
             </div>
-          </Panel>
+          </PremiumPanel>
           <RiskCard account={account} symbol={activeSymbol} />
         </div>
       </div>

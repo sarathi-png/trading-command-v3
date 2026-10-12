@@ -162,6 +162,26 @@ async function executeFill(orderId: string, fillPrice: number): Promise<PaperEve
       await repo.updatePaperPosition(pos.id, {
         qty: remaining, realizedPnl: pos.realizedPnl + gross - fees,
       });
+      // Create journal entry for partial close
+      const partialNet = gross - fees;
+      await repo.insertJournal({
+        mode: "paper",
+        symbol: order.symbol,
+        direction: pos.side,
+        entry: pos.entry,
+        exit: fillPrice,
+        qty: closeQty,
+        fees: 0,
+        pnl: partialNet,
+        strategy: "paper",
+        reason: "Partial position close by paper order",
+        notes: `Partial close: ${closeQty} of ${pos.qty} closed, ${remaining} remaining`,
+        emotion: "",
+        tags: ["paper", "partial"],
+        openedAt: pos.openedAt ?? new Date(),
+        closedAt: new Date(),
+        source: "paper",
+      });
       events.push({ kind: "order_filled", message: `Reduced ${order.symbol} by ${closeQty} @ ${fillPrice.toFixed(2)} (paper)` });
     }
     if (order.qty > closeQty + EPS && !order.reduceOnly) {
