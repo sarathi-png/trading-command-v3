@@ -1,10 +1,11 @@
 "use client";
-import { MoreHorizontal, X } from "lucide-react";
+import { HelpCircle, MoreHorizontal, X } from "lucide-react";
 import {
   useState, type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes,
   type SelectHTMLAttributes,
 } from "react";
 import { cx, pnlTone } from "@/lib/format";
+import { GLOSSARY } from "@/lib/glossary";
 
 /* ---------------- primitives ---------------- */
 
@@ -36,6 +37,44 @@ export function Panel({
       {children}
     </section>
   );
+}
+
+/**
+ * Inline plain-language help. Keyed into src/lib/glossary.ts so every
+ * explanation lives in one reviewable place.
+ */
+export function HelpTip({ topic, align = "left" }: { topic: string; align?: "left" | "right" }) {
+  const entry = GLOSSARY[topic];
+  const [open, setOpen] = useState(false);
+  if (!entry) return null;
+  return (
+    <span className="relative inline-flex flex-none">
+      <button
+        type="button"
+        aria-label={`What is ${entry.term}?`}
+        aria-expanded={open}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((o) => !o); }}
+        onBlur={() => setOpen(false)}
+        className="text-dim hover:text-accent inline-flex items-center justify-center w-4 h-4 rounded focus-ring"
+      >
+        <HelpCircle size={11} />
+      </button>
+      {open && (
+        <span role="tooltip" className={cx("help-pop", align === "right" ? "right-0" : "left-0")}>
+          <span className="block text-[11px] text-ink font-medium mb-1">{entry.term}</span>
+          <span className="block text-[11px] text-mut leading-snug">{entry.plain}</span>
+          {entry.example && <span className="block text-[10px] text-dim mt-1 leading-snug">{entry.example}</span>}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Direction glyph so gain/loss is readable without relying on colour alone. */
+export function DirGlyph({ value, className }: { value: number | null | undefined; className?: string }) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return null;
+  const glyph = value > 0 ? "▲" : value < 0 ? "▼" : "■";
+  return <span aria-hidden className={cx("text-[9px] leading-none", className)}>{glyph}</span>;
 }
 
 export function StatusDot({
@@ -192,15 +231,18 @@ export function PnlValue({ v, className, signed = true }: { v: number | null | u
 }
 
 export function MetricCard({
-  label, value, sub, tone = "flat", onHide, tooltip,
+  label, value, sub, tone = "flat", onHide, tooltip, help,
 }: {
   label: string; value: ReactNode; sub?: ReactNode;
-  tone?: "flat" | "up" | "dn" | "accent"; onHide?: () => void; tooltip?: string;
+  tone?: "flat" | "up" | "dn" | "accent"; onHide?: () => void; tooltip?: string; help?: string;
 }) {
   return (
     <div className="panel px-4 py-4 relative group min-w-0" title={tooltip}>
       <div className="flex items-center justify-between gap-2">
-        <p className="microlabel truncate">{label}</p>
+        <p className="microlabel truncate flex items-center gap-1.5">
+          {label}
+          {help && <HelpTip topic={help} />}
+        </p>
         {onHide && (
           <button
             onClick={onHide}
@@ -212,7 +254,7 @@ export function MetricCard({
           </button>
         )}
       </div>
-      <div className={cx("num text-[23px] leading-8 mt-2 truncate",
+      <div className={cx("num metric-value text-[23px] leading-8 mt-2 truncate",
         tone === "up" ? "text-up" : tone === "dn" ? "text-dn" : tone === "accent" ? "text-accent" : "text-ink")}>
         {value}
       </div>
@@ -237,10 +279,13 @@ export function Spark({ data, tone = "accent", width = 96, height = 26 }: {
   );
 }
 
-export function KV({ k, v, mono = true }: { k: ReactNode; v: ReactNode; mono?: boolean }) {
+export function KV({ k, v, mono = true, help }: { k: ReactNode; v: ReactNode; mono?: boolean; help?: string }) {
   return (
     <div className="flex items-center justify-between gap-3 py-1">
-      <span className="text-[11px] text-dim">{k}</span>
+      <span className="text-[11px] text-dim inline-flex items-center gap-1.5">
+        {k}
+        {help && <HelpTip topic={help} align="right" />}
+      </span>
       <span className={cx("text-[11px] text-ink text-right", mono && "num")}>{v}</span>
     </div>
   );

@@ -4,7 +4,7 @@ import { Zap } from "lucide-react";
 import { api } from "@/lib/api";
 import { usePoll } from "@/lib/hooks";
 import { useApp } from "@/stores";
-import { Chip, PremiumPanel, Skeleton } from "@/components/ui";
+import { Chip, HelpTip, PremiumPanel, Skeleton } from "@/components/ui";
 import { SignalDisplay } from "./SignalDisplay";
 import { ChandelierDonchianConfig } from "./ChandelierDonchianConfig";
 import type { ChandelierDonchianConfig as Config, SignalState } from "@/lib/strategy/v2/types";
@@ -152,11 +152,11 @@ export function ChandelierDonchianPanel({ className }: { className?: string }) {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
                       <Metric label="TRADES" value={String(data.backtest.totalTrades)} />
                       <Metric label="WIN RATE" value={`${data.backtest.winRate.toFixed(1)}%`} />
-                      <Metric label="EXPECTANCY" value={data.backtest.expectancy.toFixed(4)} tone={data.backtest.expectancy > 0 ? "up" : "dn"} />
-                      <Metric label="PROFIT FACTOR" value={data.backtest.profitFactor?.toFixed(2) ?? "N/A (no losses)"} />
+                      <Metric label="EXPECTANCY" help="expectancy" value={data.backtest.expectancy.toFixed(4)} tone={data.backtest.expectancy > 0 ? "up" : "dn"} />
+                      <Metric label="PROFIT FACTOR" help="profitFactor" value={data.backtest.profitFactor?.toFixed(2) ?? "N/A (no losses)"} />
                       <Metric label="MAX DD" value={`${data.backtest.maxDrawdownPct.toFixed(1)}%`} tone="dn" />
-                      <Metric label="RETURN / VOL (TRADE)" value={data.backtest.sharpeRatio.toFixed(2)} />
-                      <Metric label="DSR" value="Not estimated" />
+                      <Metric label="RETURN / VOL (TRADE)" help="returnVol" value={data.backtest.sharpeRatio.toFixed(2)} />
+                      <Metric label="DSR" help="dsr" value="Not estimated" />
                       <Metric label="AVG HOLD" value={`${data.backtest.avgHoldBars.toFixed(0)} bars`} />
                     </div>
                   </div>
@@ -172,10 +172,10 @@ export function ChandelierDonchianPanel({ className }: { className?: string }) {
   );
 }
 
-function Metric({ label, value, tone }: { label: string; value: string; tone?: "up" | "dn" | "flat" }) {
+function Metric({ label, value, tone, help }: { label: string; value: string; tone?: "up" | "dn" | "flat"; help?: string }) {
   return (
     <div className="rounded border border-edge bg-panel2/60 px-2 py-1.5">
-      <p className="microlabel">{label}</p>
+      <p className="microlabel inline-flex items-center gap-1.5">{label}{help && <HelpTip topic={help} />}</p>
       <p className={`num text-[12px] font-semibold mt-0.5 ${
         tone === "up" ? "text-up" : tone === "dn" ? "text-dn" : "text-ink"
       }`}>

@@ -181,6 +181,8 @@ export interface AppSettings {
   accent: "teal" | "blue" | "purple" | "amber";
   density: "comfortable" | "compact";
   reduceMotion: boolean;
+  /** Blue/orange gain-loss palette for colour-vision-deficient users. */
+  colorblindPalette: boolean;
   timezone: "IST" | "UTC" | "local";
   watchlist: string[];
   modules: Record<string, boolean>;

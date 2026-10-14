@@ -30,8 +30,8 @@ export default function PositionsPage() {
         description="Everything currently at risk, paper and live, marked against the latest prices." />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-        <MetricCard label="EQUITY" value={fmtUsd(account?.equity)} sub={account?.source === "demo" ? "DEMO / PAPER" : "COINDCX"} />
-        <MetricCard label="OPEN P&L" value={fmtUsd(account?.openPnl, { sign: true })}
+        <MetricCard label="EQUITY" help="equity" value={fmtUsd(account?.equity)} sub={account?.source === "demo" ? "DEMO / PAPER" : "COINDCX"} />
+        <MetricCard label="OPEN P&L" help="openPnl" value={fmtUsd(account?.openPnl, { sign: true })}
           tone={pnlTone(account?.openPnl ?? 0) === "pos" ? "up" : pnlTone(account?.openPnl ?? 0) === "neg" ? "dn" : "flat"} />
         <MetricCard label="MARGIN USED" value={fmtUsd(account?.marginUsed)}
           sub={account && account.equity > 0 ? fmtPct((account.marginUsed / account.equity) * 100, { sign: false }) : undefined} />

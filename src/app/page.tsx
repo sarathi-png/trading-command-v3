@@ -71,31 +71,31 @@ export default function OverviewPage() {
       {/* metric strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
         {m.balance && (
-          <MetricCard label="ACCOUNT EQUITY" tooltip="Starting balance + realized + unrealized P&L"
+          <MetricCard label="ACCOUNT EQUITY" help="equity"
             value={accLoading ? <Skeleton className="h-6 w-24" /> : fmtUsd(account?.equity)}
             sub={account?.source === "live" ? "EXCHANGE WALLET · SEE DETAILS BELOW" : "SIMULATED ACCOUNT · NOT REAL FUNDS"}
             onHide={hide("balance")} />
         )}
         {m.margin && (
-          <MetricCard label="AVAILABLE MARGIN"
+          <MetricCard label="AVAILABLE MARGIN" help="availableMargin"
             value={accLoading ? <Skeleton className="h-6 w-24" /> : fmtUsd(account?.availableMargin)}
             sub={`USED ${fmtUsd(account?.marginUsed ?? 0)}`}
             onHide={hide("margin")} />
         )}
         {m.pnl && (
-          <MetricCard label="TODAY P&L"
+          <MetricCard label="TODAY P&L" help="todayPnl"
             value={accLoading ? <Skeleton className="h-6 w-20" /> : fmtUsd(account?.todayPnl, { sign: true })}
             tone={pnlTone(account?.todayPnl ?? 0) === "pos" ? "up" : pnlTone(account?.todayPnl ?? 0) === "neg" ? "dn" : "flat"}
             sub="REALIZED TODAY" onHide={hide("pnl")} />
         )}
         {m.pnl && (
-          <MetricCard label="OPEN P&L"
+          <MetricCard label="OPEN P&L" help="openPnl"
             value={accLoading ? <Skeleton className="h-6 w-20" /> : fmtUsd(account?.openPnl, { sign: true })}
             tone={pnlTone(account?.openPnl ?? 0) === "pos" ? "up" : pnlTone(account?.openPnl ?? 0) === "neg" ? "dn" : "flat"}
             sub="UNREALIZED" onHide={hide("pnl")} />
         )}
         {m.margin && (
-          <MetricCard label="MARGIN USED"
+          <MetricCard label="MARGIN USED" help="marginUsedPct"
             value={accLoading ? <Skeleton className="h-6 w-16" /> : fmtPct(marginUsedPct, { sign: false })}
             tone={marginUsedPct > 70 ? "dn" : marginUsedPct > 40 ? "accent" : "flat"}
             sub="OF EQUITY" onHide={hide("margin")} />

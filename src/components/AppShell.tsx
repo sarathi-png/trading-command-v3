@@ -81,9 +81,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
     el.dataset.motion = settings.reduceMotion ? "off" : "on";
     el.dataset.density = settings.density;
     el.dataset.theme = settings.theme;
+    el.dataset.cvd = settings.colorblindPalette ? "on" : "off";
     // Dispatch custom event for chart and other components to react to theme change
     window.dispatchEvent(new CustomEvent('themechange', { detail: { theme: settings.theme } }));
-  }, [settings.accent, settings.reduceMotion, settings.density, settings.theme]);
+  }, [settings.accent, settings.reduceMotion, settings.density, settings.theme, settings.colorblindPalette]);
 
   /* ---- market feed: REST polling (the venue socket is server-side only) -- */
   const symbolsKey = useMemo(() => {

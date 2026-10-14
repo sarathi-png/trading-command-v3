@@ -1,17 +1,24 @@
 "use client";
 import ChartPanel from "@/components/chart/ChartPanel";
 import { OrderBookPanel, SignalPanel } from "@/components/panels";
-import { Chip, KV, Panel, Skeleton } from "@/components/ui";
+import { Chip, DirGlyph, HelpTip, KV, Panel, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtCompactUsd, fmtPct, fmtPrice, fmtUsd } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
 import { useMarket, useApp } from "@/stores";
+import type { Ticker } from "@/lib/types";
 import type { Analysis } from "@/lib/types";
 import { cx } from "@/lib/format";
+import { useMemo } from "react";
 
 export default function ChartPage() {
-  const { activeSymbol, timeframe, settings } = useApp();
+  const { activeSymbol, setSymbol, timeframe, settings } = useApp();
   const ticker = useMarket((s) => s.tickers[activeSymbol]);
+  const tickers = useMarket((s) => s.tickers);
+  const watchlist = useMemo(() => {
+    const set = new Set([...settings.watchlist, activeSymbol]);
+    return [...set];
+  }, [settings.watchlist, activeSymbol]);
 
   const { data } = usePoll(
     () => api.get<{ analysis: Analysis }>(`/api/strategy/evaluate?symbol=${activeSymbol}&timeframe=${timeframe}`),
@@ -27,14 +34,15 @@ export default function ChartPage() {
         {ticker ? (
           <>
             <span className="num text-[13px]">${fmtPrice(ticker.price)}</span>
-            <span className={cx("num text-[11px]", ticker.change24hPct >= 0 ? "text-up" : "text-dn")}>
+            <span className={cx("num text-[11px] inline-flex items-center gap-1", ticker.change24hPct >= 0 ? "text-up" : "text-dn")}>
+              <DirGlyph value={ticker.change24hPct} />
               {fmtPct(ticker.change24hPct)}
             </span>
             <Stat label="24H HIGH" value={ticker.high24h !== null ? fmtPrice(ticker.high24h) : "N/A"} />
             <Stat label="24H LOW" value={ticker.low24h !== null ? fmtPrice(ticker.low24h) : "N/A"} />
-            <Stat label="MARK" value={ticker.markPrice !== null ? fmtPrice(ticker.markPrice) : "N/A"} />
+            <Stat label="MARK" value={ticker.markPrice !== null ? fmtPrice(ticker.markPrice) : "N/A"} help="markPrice" />
             {settings.modules.funding && (
-              <Stat label="FUNDING / 8H" value={ticker.fundingRate !== null ? fmtPct(ticker.fundingRate, { decimals: 4 }) : "N/A"} />
+              <Stat label="FUNDING / 8H" value={ticker.fundingRate !== null ? fmtPct(ticker.fundingRate, { decimals: 4 }) : "N/A"} help="fundingRate" />
             )}
             {settings.modules.funding && (
               <Stat label="OPEN INTEREST" value={ticker.openInterest !== null ? fmtCompactUsd(ticker.openInterest) : "N/A"} />
@@ -62,6 +70,7 @@ export default function ChartPage() {
           />
         </div>
         <div className="hidden lg:flex flex-col w-76 border-l border-edge gap-0 overflow-y-auto flex-none">
+          <WatchlistRail symbols={watchlist} tickers={tickers} active={activeSymbol} onPick={setSymbol} />
           {settings.modules.strategyScore && (
             <SignalPanel analysis={analysis} className="border-0 rounded-none border-b border-edge" />
           )}
@@ -89,11 +98,53 @@ export default function ChartPage() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, help }: { label: string; value: string; help?: string }) {
   return (
-    <span className="flex items-baseline gap-1.5">
+    <span className="flex items-center gap-1.5">
       <span className="text-[9px] text-dim tracking-wider">{label}</span>
       <span className="num text-[11px] text-mut">{value}</span>
+      {help && <HelpTip topic={help} />}
     </span>
+  );
+}
+
+/**
+ * Watchlist rail beside the chart — the layout TradingView and Kraken Pro both
+ * use so a trader can move between instruments without leaving the chart.
+ */
+function WatchlistRail({ symbols, tickers, active, onPick }: {
+  symbols: string[]; tickers: Record<string, Ticker>; active: string; onPick: (symbol: string) => void;
+}) {
+  return (
+    <Panel title="WATCHLIST" className="border-0 rounded-none border-b border-edge">
+      <div className="divide-y divide-edge/60">
+        {symbols.map((symbol) => {
+          const t = tickers[symbol];
+          const change = t?.change24hPct ?? null;
+          return (
+            <button
+              key={symbol}
+              type="button"
+              onClick={() => onPick(symbol)}
+              aria-current={symbol === active ? "true" : undefined}
+              className={cx(
+                "w-full flex items-center justify-between gap-2 px-3 h-9 text-left transition-colors",
+                symbol === active ? "bg-accent-dim text-accent" : "text-mut hover:text-ink hover:bg-panel2/60"
+              )}
+            >
+              <span className="num text-[11px]">{symbol}</span>
+              <span className="flex items-center gap-2 num text-[11px]">
+                <span>{t ? fmtPrice(t.price) : "—"}</span>
+                <span className={cx("inline-flex items-center gap-1 w-16 justify-end",
+                  change === null ? "text-dim" : change >= 0 ? "text-up" : "text-dn")}>
+                  {change !== null && <DirGlyph value={change} />}
+                  {change === null ? "—" : fmtPct(change)}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </Panel>
   );
 }

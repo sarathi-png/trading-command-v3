@@ -1,7 +1,7 @@
 "use client";
 import { useState, useSyncExternalStore } from "react";
 import { KeyRound, LogOut, ShieldAlert } from "lucide-react";
-import { Btn, Chip, Input, KV, Panel, Select, StatusDot, Toggle, useConfirm } from "@/components/ui";
+import { Btn, Chip, HelpTip, Input, KV, Panel, Select, StatusDot, Toggle, useConfirm } from "@/components/ui";
 import { api, logout } from "@/lib/api";
 import { cx, fmtDateTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -172,6 +172,14 @@ export default function SettingsPage() {
             <span className="text-[11px] text-mut">Compact density</span>
             <Toggle checked={settings.density === "compact"} label="Compact density"
               onChange={(v) => void patchSettings({ density: v ? "compact" : "comfortable" })} />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-mut inline-flex items-center gap-1.5">
+              Colour-blind friendly gain/loss
+              <HelpTip topic="colorblind" />
+            </span>
+            <Toggle checked={settings.colorblindPalette} label="Colour-blind friendly palette"
+              onChange={(v) => void patchSettings({ colorblindPalette: v })} />
           </div>
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-mut">Reduce animations</span>

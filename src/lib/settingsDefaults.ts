@@ -16,6 +16,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   accent: "teal",
   density: "comfortable",
   reduceMotion: false,
+  colorblindPalette: false,
   timezone: "IST",
   watchlist: ["BTCUSD", "ETHUSD", "SOLUSD"],
   modules: {

@@ -5,6 +5,7 @@ import { chandelierExit } from "./chandelier";
 import { calculatePositionSize, evaluateChandelierDonchian } from "./chandelier-donchian";
 import { DEFAULT_CHANDELIER_DONCHIAN_CONFIG as defaults, validateStrategyConfig } from "./types";
 import { runBacktest, runWalkForward } from "./backtest";
+import { evaluateSetupOutcome, summariseOutcomes, sideOf } from "./outcomes";
 import { breakoutStrategy, buildAnalysis } from "../engine";
 import { evaluateOrderRisk, normalizeRiskLimits } from "../../risk";
 import type { Candle } from "../../types";
@@ -78,6 +79,69 @@ describe("strategy correctness regressions", () => {
     const a = buildAnalysis("BTCUSD", "5m", rows, { sensitivity: 0.002, minTouches: 2, lookback: 100 }, { breakout: true }, [breakoutStrategy]);
     assert.equal(a.signals[0].status, "LONG_SETUP");
     assert.equal(a.signals[0].entry, rows.at(-2)!.close);
+  });
+});
+
+describe("signal accountability", () => {
+  const signalTs = (i: number) => (1700000000 + i * 300) * 1000;
+  const barAt = (i: number, low: number, high: number, close = (low + high) / 2): Candle =>
+    ({ time: 1700000000 + i * 300, open: close, high, low, close, volume: 1 });
+
+  it("maps only directional setups", () => {
+    assert.equal(sideOf("LONG_SETUP"), "long");
+    assert.equal(sideOf("SHORT_SETUP"), "short");
+    assert.equal(sideOf("WATCH"), null);
+    assert.equal(evaluateSetupOutcome({ status: "WATCH", entry: 100, stop: 99, target: 102, ts: signalTs(0) }, [barAt(1, 99, 103)]).resolution, "unknown");
+  });
+
+  it("scores a target hit at the planned R", () => {
+    const o = evaluateSetupOutcome({ status: "LONG_SETUP", entry: 100, stop: 98, target: 104, ts: signalTs(0) },
+      [barAt(1, 99.5, 101.5), barAt(2, 99.5, 104.5, 104)]);
+    assert.equal(o.resolution, "target");
+    assert.equal(o.barsToResolution, 2);
+    assert.equal(o.currentR, 2);
+    assert.equal(o.maeR, 0.25);
+    assert.equal(o.mfeR, 2.25);
+  });
+
+  it("assumes the stop filled first when one candle touches both levels", () => {
+    const o = evaluateSetupOutcome({ status: "LONG_SETUP", entry: 100, stop: 98, target: 104, ts: signalTs(0) },
+      [barAt(1, 97, 105)]);
+    assert.equal(o.resolution, "stop");
+    assert.equal(o.currentR, -1);
+  });
+
+  it("reports an in-progress setup without inventing a result", () => {
+    const o = evaluateSetupOutcome({ status: "SHORT_SETUP", entry: 100, stop: 102, target: 96, ts: signalTs(0) },
+      [barAt(1, 98, 101, 99), barAt(2, 97.5, 100.5, 98)]);
+    assert.equal(o.resolution, "open");
+    assert.equal(o.currentR, 1);
+    assert.equal(o.barsToResolution, null);
+  });
+
+  it("refuses to score setups with no forward candles or an inverted stop", () => {
+    assert.equal(evaluateSetupOutcome({ status: "LONG_SETUP", entry: 100, stop: 98, target: 104, ts: signalTs(9) },
+      [barAt(1, 99, 101)]).resolution, "unknown");
+    assert.match(evaluateSetupOutcome({ status: "LONG_SETUP", entry: 100, stop: 102, target: 104, ts: signalTs(0) },
+      [barAt(1, 99, 101)]).reason ?? "", /wrong side/);
+  });
+
+  it("rejects a target on the wrong side instead of scoring it as hit", () => {
+    const o = evaluateSetupOutcome({ status: "SHORT_SETUP", entry: 100, stop: 102, target: 104, ts: signalTs(0) }, [barAt(1, 99, 101)]);
+    assert.equal(o.resolution, "unknown");
+    assert.match(o.reason ?? "", /wrong side/);
+  });
+
+  it("aggregates hit rate, average R and excursions", () => {
+    const target = evaluateSetupOutcome({ status: "LONG_SETUP", entry: 100, stop: 98, target: 104, ts: signalTs(0) }, [barAt(1, 99, 104.5)]);
+    const stopped = evaluateSetupOutcome({ status: "SHORT_SETUP", entry: 100, stop: 102, target: 96, ts: signalTs(0) }, [barAt(1, 99, 102.5)]);
+    const agg = summariseOutcomes([target, stopped, { side: null, bars: 0, resolution: "unknown", barsToResolution: null, mfeR: null, maeR: null, currentR: null, lastPrice: null }]);
+    assert.equal(agg.recorded, 3);
+    assert.equal(agg.evaluated, 2);
+    assert.equal(agg.unresolved, 1);
+    assert.equal(agg.hitRate, 50);
+    assert.equal(agg.avgResolvedR, 0.5);
+    assert.equal(summariseOutcomes([]).hitRate, null);
   });
 });
 

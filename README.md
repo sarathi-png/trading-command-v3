@@ -12,7 +12,10 @@ It is **not** a TradingView/CoinDCX/OSIRIS clone. It is a personal command cente
 > `docs/AUDIT_2026-10.md`. Headline items: Donchian windowing, backtest look-ahead and
 > Heikin-Ashi fill bias, position sizing, the `demo`/`live` data-source path, and a
 > readiness-first overview. A short plan (with a status note) lives in
-> `docs/IMPROVEMENT_PLAN.md`.
+> `docs/IMPROVEMENT_PLAN.md`. Interface benchmark (goods/bads from TradingView, Coinbase
+> Advanced, Kraken Pro, Bybit, Binance, Zerodha Kite and Bloomberg Terminal, with an
+> anti-pattern audit of this project): `docs/DESIGN_BENCHMARK.md`. Competitive gap analysis and
+> the futuristic roadmap: `docs/FUTURE_ROADMAP.md`.
 
 ## Quick start
 
@@ -105,6 +108,8 @@ be disabled. Full list in `.env.example`.
 - `docs/STRATEGY_ENGINE.md` — strategies, structure & S/R detection
 - `docs/PAPER_TRADING.md` — paper engine semantics
 - `docs/WEBHOOKS.md` — optional TradingView webhook (disabled by default)
+- `docs/DESIGN_BENCHMARK.md` — premium-interface benchmark, anti-pattern audit, capability matrix
+- `docs/FUTURE_ROADMAP.md` — competitive landscape, gap analysis, unique/futuristic roadmap
 - `docs/DEPLOYMENT.md` — local, Docker, Cloudflare Tunnel
 
 ## Keyboard

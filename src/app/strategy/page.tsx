@@ -1,13 +1,14 @@
 "use client";
 import { useState } from "react";
 import { Zap } from "lucide-react";
-import { Chip, EmptyState, Input, Panel, Skeleton, Toggle } from "@/components/ui";
+import { Chip, EmptyState, Input, PageHeader, Panel, Skeleton, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtDateTime, fmtPrice } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
 import { useApp } from "@/stores";
 import type { Analysis } from "@/lib/types";
 import { ChandelierDonchianPanel } from "@/components/strategy/ChandelierDonchianPanel";
+import { SignalAccountability } from "@/components/strategy/SignalAccountability";
 
 interface QuantView {
   confluence: {
@@ -57,16 +58,10 @@ export default function StrategyPage() {
   const quant = data?.quant ?? null;
 
   return (
-    <div className="p-3 space-y-3 max-w-[1500px] mx-auto">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h1 className="text-[15px] font-semibold">Strategy Engine</h1>
-          <p className="text-[11px] text-dim">
-            Evaluating <span className="num text-mut">{activeSymbol} · {timeframe}</span> on closed candles. Signals are setups, not predictions.
-          </p>
-        </div>
-        <Chip tone="accent"><Zap size={11} /> ENGINE {analysis ? "ONLINE" : "WARMING UP"}</Chip>
-      </div>
+    <div className="p-4 lg:p-6 space-y-4 max-w-[1500px] mx-auto">
+      <PageHeader crumb="RESEARCH / STRATEGY" title="Strategy engine"
+        description={`Evaluating ${activeSymbol} · ${timeframe} on closed candles only. Signals are setups with a published entry, stop and target — never predictions.`}
+        actions={<Chip tone="accent"><Zap size={11} /> ENGINE {analysis ? "ONLINE" : "WARMING UP"}</Chip>} />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {(["trend", "breakout", "sr"] as const).map((id) => {
@@ -173,7 +168,8 @@ export default function StrategyPage() {
           </div>
         </Panel>
       </div>
-    </div>
+          <SignalAccountability />
+</div>
   );
 }
 

@@ -25,6 +25,18 @@
 [data-accent="purple"] { --accent: #b79cff; --accent-dim: rgba(183, 156, 255, 0.14); }
 [data-accent="amber"] { --accent: #f5b84d; --accent-dim: rgba(245, 184, 77, 0.14); }
 
+/* Colour-vision-deficient palette: blue/orange keeps gain/loss readable for
+   deuteranopia/protanopia, where red/green collapses. Glyphs accompany colour
+   everywhere numbers move, so meaning never depends on hue alone. */
+[data-cvd="on"] {
+  --up: #4d9cff;
+  --dn: #ff9f45;
+}
+[data-theme="light"][data-cvd="on"] {
+  --up: #1d4ed8;
+  --dn: #c2410c;
+}
+
 [data-theme="light"] {
   --bg: #f8fafc;
   --bg-2: #ffffff;
@@ -417,6 +429,32 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
     grid-template-columns: repeat(4, 1fr);
   }
 }
+
+/* ---- Plain-language help popovers ---- */
+.help-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 60;
+  width: 15rem;
+  max-width: min(15rem, calc(100vw - 32px));
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--edge-2);
+  border-radius: 8px;
+  box-shadow: var(--elevation-3);
+  text-align: left;
+  white-space: normal;
+}
+
+/* ---- Compact density (the Settings toggle must actually change something) ---- */
+[data-density="compact"] .panel > header {
+  min-height: 34px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+[data-density="compact"] .metric-value { font-size: 19px; line-height: 26px; }
+[data-density="compact"] table td,
+[data-density="compact"] table th { padding-top: 3px; padding-bottom: 3px; }
 
 /* Clear controls and accessible motion, without changing the font families. */
 button:not(:disabled), a, select { -webkit-tap-highlight-color: transparent; }

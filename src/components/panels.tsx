@@ -83,7 +83,7 @@ export function SignalPanel({ analysis, className }: { analysis: Analysis | null
 
           <div className="border-t border-edge pt-2 grid grid-cols-2 gap-x-4">
             <KV k="ENTRY" v={primary?.entry ? fmtPrice(primary.entry) : "—"} />
-            <KV k="R:R" v={primary?.rr ? `1 : ${primary.rr.toFixed(1)}` : "—"} />
+            <KV k="R:R" v={primary?.rr ? `1 : ${primary.rr.toFixed(1)}` : "—"} help="rr" />
             <KV k="STOP" v={primary?.stop ? <span className="text-dn">{fmtPrice(primary.stop)}</span> : "—"} mono />
             <KV k="TARGET" v={primary?.target ? <span className="text-up">{fmtPrice(primary.target)}</span> : "—"} mono />
           </div>
@@ -237,10 +237,10 @@ export function RiskCard({ account, symbol, defaultLevels, className }: {
         <div className="border-t border-edge pt-2">
           {valid ? (
             <>
-              <KV k="RISK AMOUNT" v={<span className="text-dn">{fmtUsd(riskAmt)}</span>} />
+              <KV k="RISK AMOUNT" help="rMultiple" v={<span className="text-dn">{fmtUsd(riskAmt)}</span>} />
               <KV k="RISK % OF EQUITY" v={balance > 0 ? fmtPct((riskAmt / balance) * 100) : "N/A"} />
               <KV k="POTENTIAL PROFIT" v={<span className="text-up">{fmtUsd(rewardAmt)}</span>} />
-              <KV k="R : R" v={`1 : ${rr.toFixed(2)}`} />
+              <KV k="R : R" help="rr" v={`1 : ${rr.toFixed(2)}`} />
               <KV k="EST. FEES (0.05% ×2)" v={fmtUsd(fees)} />
               <KV k="EST. NET RESULT" v={<span className="text-up">{fmtUsd(net)}</span>} />
               <p className="text-[9px] text-dim mt-1.5 leading-snug">
