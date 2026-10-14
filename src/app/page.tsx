@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { fmtDateTime, fmtPct, fmtUsd, pnlTone } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
 import { useApp } from "@/stores";
+import { chartHeightFor, useViewport } from "@/lib/useResponsive";
 import type { AccountState, Analysis } from "@/lib/types";
 
 interface AccountRes {
@@ -23,6 +24,7 @@ interface AccountRes {
 export default function OverviewPage() {
   const { activeSymbol, timeframe, settings, patchSettings } = useApp();
   const router = useRouter();
+  const viewport = useViewport();
 
   const { data: accountRes, loading: accLoading, error: accountError, refresh: refreshAccount } = usePoll(
     () => api.get<AccountRes>("/api/account"), 5000
@@ -57,7 +59,7 @@ export default function OverviewPage() {
   const primary = analysis?.signals.find((s) => s.entry !== null) ?? null;
 
   return (
-    <div className="p-4 lg:p-6 space-y-5 max-w-[1700px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-5 page-shell">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="microlabel mb-2">WORKSPACE / OVERVIEW</p>
@@ -69,7 +71,7 @@ export default function OverviewPage() {
       <DecisionReadiness analysis={analysis} error={analysisError} />
       {accountError && <div role="alert" className="panel p-3 text-warn text-xs flex flex-wrap gap-3">Account refresh failed; previous figures may be stale. {accountError}<button onClick={refreshAccount} className="underline">Retry</button></div>}
       {/* metric strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+      <div className="auto-cells">
         {m.balance && (
           <MetricCard label="ACCOUNT EQUITY" help="equity"
             value={accLoading ? <Skeleton className="h-6 w-24" /> : fmtUsd(account?.equity)}
@@ -103,7 +105,7 @@ export default function OverviewPage() {
       </div>
 
       {/* chart + strategy intelligence */}
-      <div className={`grid grid-cols-1 ${m.strategyScore ? "xl:grid-cols-[minmax(0,1fr)_320px]" : ""} gap-4`}>
+      <div className={`auto-split ${m.strategyScore ? "with-aside" : ""}`}>
         <PremiumPanel title={`${activeSymbol} · ${timeframe}`} right={
           <div className="flex items-center gap-1.5">
             <button onClick={() => router.push("/chart")} className="text-[10px] text-accent hover:underline tracking-wide inline-flex items-center min-h-6">
@@ -111,7 +113,7 @@ export default function OverviewPage() {
             </button>
           </div>
         } elevation={1}>
-          <div className="h-[360px] sm:h-[440px]">
+          <div style={{ height: chartHeightFor(viewport) }}>
             <ChartPanel symbol={activeSymbol} timeframe={timeframe} analysis={analysis} interactive />
           </div>
         </PremiumPanel>
@@ -119,7 +121,7 @@ export default function OverviewPage() {
       </div>
 
       {/* bottom row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="auto-panels">
         {m.positions && (
           <PositionsTable
             account={account}

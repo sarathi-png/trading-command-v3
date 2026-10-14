@@ -8,7 +8,8 @@ function trueRange(candles: Candle[], i: number): number {
   return Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
 }
 
-function wilderAtr(candles: Candle[], period: number): number[] {
+/** Wilder's ATR. Exported so the AI snapshot and the chart read the same value. */
+export function wilderAtr(candles: Candle[], period: number): number[] {
   const atr: number[] = new Array(candles.length).fill(NaN);
   if (candles.length < period + 1) return atr;
 

@@ -456,6 +456,69 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 [data-density="compact"] table td,
 [data-density="compact"] table th { padding-top: 3px; padding-bottom: 3px; }
 
+/* ---- Ratio-aware automatic layout -------------------------------------------
+   Grids reflow from available width (auto-fit) rather than fixed breakpoints, so
+   the same markup works on a phone, a portrait tablet, a laptop and a
+   super-ultrawide monitor. Orientation rules then adapt to the *shape* of the
+   screen: tall/narrow stacks everything, very wide screens relax the content
+   cap and prefer side-by-side panels. */
+:root {
+  --content-max: 1700px;
+  --content-narrow: 1100px;
+}
+.page-shell { width: 100%; max-width: var(--content-max); margin-inline: auto; }
+.page-shell-narrow { max-width: var(--content-narrow); }
+
+/* Two charts (candles + Heikin-Ashi): side by side only when the ratio makes
+   each pane wide enough to read; stacked otherwise. */
+.chart-duo {
+  display: grid;
+  gap: var(--space-lg);
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 1280px) and (min-aspect-ratio: 16/10) {
+  .chart-duo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Metric / stat strips: as many cells as the width truly allows. */
+.auto-cells {
+  display: grid;
+  gap: var(--space-lg);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 165px), 1fr));
+}
+/* Wide side rail (watchlist, order book): only when the screen is landscape
+   AND wide enough that the chart keeps its usable width. */
+.ratio-rail { display: none; }
+@media (min-width: 1024px) and (min-aspect-ratio: 5/4) {
+  .ratio-rail { display: flex; }
+}
+.auto-panels {
+  display: grid;
+  gap: var(--space-xl);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  align-items: start;
+}
+.auto-split {
+  display: grid;
+  gap: var(--space-xl);
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 1024px) and (min-aspect-ratio: 5/4) {
+  .auto-split.with-aside { grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); }
+  .auto-split.with-rail { grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); }
+}
+@media (min-aspect-ratio: 21/9) {
+  :root { --content-max: 2200px; }
+}
+@media (max-aspect-ratio: 4/5) {
+  /* Portrait phones and tall split windows: nothing sits side by side. */
+  .auto-split, .auto-split.with-aside, .auto-split.with-rail { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-height: 720px) and (min-width: 1024px) {
+  /* Short viewport: reclaim vertical chrome so the chart keeps its room. */
+  .app-statusbar { display: none; }
+}
+
 /* Clear controls and accessible motion, without changing the font families. */
 button:not(:disabled), a, select { -webkit-tap-highlight-color: transparent; }
 button:not(:disabled), select { cursor: pointer; }
@@ -475,3 +538,5 @@ button:not(:disabled), select { cursor: pointer; }
   nav[aria-label="Mobile"] { padding-bottom: env(safe-area-inset-bottom); height: calc(56px + env(safe-area-inset-bottom)); }
   #main-content { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 }
+
+/* layout sweep marker */

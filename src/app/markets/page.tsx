@@ -36,10 +36,10 @@ export default function MarketsPage() {
   };
 
   return (
-    <div className="p-4 lg:p-6 space-y-4 max-w-[1700px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-4 page-shell">
       <PageHeader crumb="MARKETS / WATCHLIST" title="Markets"
         description="Your watchlist with live prices, 24h range and depth for the selected instrument." />
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-4">
+      <div className="auto-split with-aside">
       <Panel title="WATCHLIST" right={
         <div className="flex items-center gap-1.5">
           {addable.length > 0 && (

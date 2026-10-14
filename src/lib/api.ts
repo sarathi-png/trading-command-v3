@@ -37,6 +37,8 @@ export const api = {
   post: <T>(url: string, body?: unknown) => request<T>("POST", url, body ?? {}),
   patch: <T>(url: string, body?: unknown) => request<T>("PATCH", url, body ?? {}),
   del: <T>(url: string) => request<T>("DELETE", url),
+  /** DELETE with a JSON body (used by /api/ai/keys to name the provider). */
+  delete: <T>(url: string, body?: unknown) => request<T>("DELETE", url, body ?? {}),
 };
 
 /**

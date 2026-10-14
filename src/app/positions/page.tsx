@@ -25,11 +25,11 @@ export default function PositionsPage() {
   const rl = settings.riskLimits;
 
   return (
-    <div className="p-4 lg:p-6 space-y-4 max-w-[1400px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-4 page-shell">
       <PageHeader crumb="TRADING / POSITIONS" title="Positions & exposure"
         description="Everything currently at risk, paper and live, marked against the latest prices." />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+      <div className="auto-cells">
         <MetricCard label="EQUITY" help="equity" value={fmtUsd(account?.equity)} sub={account?.source === "demo" ? "DEMO / PAPER" : "COINDCX"} />
         <MetricCard label="OPEN P&L" help="openPnl" value={fmtUsd(account?.openPnl, { sign: true })}
           tone={pnlTone(account?.openPnl ?? 0) === "pos" ? "up" : pnlTone(account?.openPnl ?? 0) === "neg" ? "dn" : "flat"} />
@@ -39,7 +39,7 @@ export default function PositionsPage() {
           sub={`LIMIT ${rl.maxOpenPositions}`} tone={(account?.positions.length ?? 0) >= rl.maxOpenPositions ? "dn" : "flat"} />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-3">
+      <div className="auto-split with-aside">
         <div className="space-y-3">
           <PositionsTable
             account={account}

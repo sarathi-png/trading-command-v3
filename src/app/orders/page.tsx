@@ -84,7 +84,7 @@ export default function OrdersPage() {
   const history = orders.filter((o) => o.status !== "open").slice(0, 40);
 
   return (
-    <div className="p-4 lg:p-6 space-y-4 max-w-[1500px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-4 page-shell">
       <PageHeader crumb="TRADING / ORDERS" title="Order desk"
         description="Place paper orders, review the working book and keep the ticket separate from your analysis." />
       <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-4">

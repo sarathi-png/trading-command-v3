@@ -9,6 +9,7 @@ import { useApp } from "@/stores";
 import type { Analysis } from "@/lib/types";
 import { ChandelierDonchianPanel } from "@/components/strategy/ChandelierDonchianPanel";
 import { SignalAccountability } from "@/components/strategy/SignalAccountability";
+import { AiPredictionLog } from "@/components/strategy/AiPredictionLog";
 
 interface QuantView {
   confluence: {
@@ -58,12 +59,12 @@ export default function StrategyPage() {
   const quant = data?.quant ?? null;
 
   return (
-    <div className="p-4 lg:p-6 space-y-4 max-w-[1500px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-4 page-shell">
       <PageHeader crumb="RESEARCH / STRATEGY" title="Strategy engine"
         description={`Evaluating ${activeSymbol} · ${timeframe} on closed candles only. Signals are setups with a published entry, stop and target — never predictions.`}
         actions={<Chip tone="accent"><Zap size={11} /> ENGINE {analysis ? "ONLINE" : "WARMING UP"}</Chip>} />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="auto-panels">
         {(["trend", "breakout", "sr"] as const).map((id) => {
           const sig = analysis?.signals.find((s) => s.strategy === id) ?? null;
           const meta = STRATEGY_META[id];
@@ -139,7 +140,7 @@ export default function StrategyPage() {
       {/* Chandelier Exit + Donchian Ribbon strategy */}
       <ChandelierDonchianPanel />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-3">
+      <div className="auto-split with-aside">
         <SignalHistory />
         <Panel title="DETECTION SETTINGS">
           <div className="p-3 space-y-2.5">
@@ -169,6 +170,7 @@ export default function StrategyPage() {
         </Panel>
       </div>
           <SignalAccountability />
+          <AiPredictionLog />
 </div>
   );
 }

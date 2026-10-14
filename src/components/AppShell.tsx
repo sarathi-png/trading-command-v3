@@ -10,6 +10,7 @@ import {
   Target, ArrowUpDown, X, Zap,
 } from "lucide-react";
 import { useAlerts, useApp, useMarket } from "@/stores";
+import { useViewport } from "@/lib/useResponsive";
 import { api, ApiError, logout } from "@/lib/api";
 import { cx, fmtPct, fmtPrice, fmtTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -35,6 +36,7 @@ const NAV = [
 ];
 
 export default function AppShell({ children }: { children: ReactNode }) {
+  const viewport = useViewport();
   const {
     settings, settingsLoaded, applySettings, setSystem, activeSymbol,
     paletteOpen, setPalette, helpOpen, setHelp, notify,
@@ -60,6 +62,24 @@ export default function AppShell({ children }: { children: ReactNode }) {
         setSettingsLoadError(e instanceof Error ? e.message : "Could not load saved settings.");
       });
   }, [applySettings, settingsNonce]);
+
+  /* ---- sidebar adapts to the device class -------------------------------
+     Narrow laptops and tablets get the collapsed rail automatically; a manual
+     toggle during the session always wins, so the layout never fights the user.
+     ---------------------------------------------------------------------- */
+  const toggleSidebar = useApp((s) => s.toggleSidebar);
+  const sidebarPinned = useRef(false);
+  useEffect(() => {
+    if (!viewport.ready || sidebarPinned.current) return;
+    const shouldCollapse = viewport.device === "tablet" || viewport.device === "laptop";
+    const collapsed = useApp.getState().sidebarCollapsed;
+    if (shouldCollapse !== collapsed) toggleSidebar();
+  }, [viewport.ready, viewport.device, toggleSidebar]);
+  useEffect(() => {
+    const pin = () => { sidebarPinned.current = true; };
+    window.addEventListener("tc:sidebar-pinned", pin);
+    return () => window.removeEventListener("tc:sidebar-pinned", pin);
+  }, []);
 
   /* ---- session expiry can surface on any API call ---------------------- */
   useEffect(() => {
@@ -578,7 +598,7 @@ function StatusBar() {
   }, []);
 
   return (
-    <footer className="h-6 border-t border-edge bg-panel2 flex items-center gap-4 px-3 text-[9.5px] text-dim flex-none overflow-hidden whitespace-nowrap">
+    <footer className="app-statusbar h-6 border-t border-edge bg-panel2 flex items-center gap-4 px-3 text-[9.5px] text-dim flex-none overflow-hidden whitespace-nowrap">
       <span className="flex items-center gap-1.5">
         <StatusDot tone={settings.dataSource === "live" ? (system?.exchangeMarket === "online" ? "ok" : "err") : "warn"} />
         REST {settings.dataSource === "live" ? (system?.exchangeMarket ?? "…") : "DEMO SIM"}

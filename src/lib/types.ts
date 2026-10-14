@@ -183,6 +183,8 @@ export interface AppSettings {
   reduceMotion: boolean;
   /** Blue/orange gain-loss palette for colour-vision-deficient users. */
   colorblindPalette: boolean;
+  /** Price-axis labels: compact tokens or full indicator names. */
+  chartLabelMode: "compact" | "full";
   timezone: "IST" | "UTC" | "local";
   watchlist: string[];
   modules: Record<string, boolean>;
@@ -208,6 +210,17 @@ export interface AppSettings {
   theme: "dark" | "light";
   /** Chandelier Exit + Donchian Ribbon strategy configuration */
   chandelierDonchian?: import("./strategy/v2/types").ChandelierDonchianConfig;
+  /** AI signal prediction preferences. Keys themselves live server-side only. */
+  aiPrediction?: AiPredictionSettings;
+}
+
+export interface AiPredictionSettings {
+  /** Master switch. Off = the UI hides the predictor entirely. */
+  enabled: boolean;
+  /** Which engine to try first. "auto" prefers a configured provider. */
+  provider: "auto" | "openrouter" | "nvidia" | "rules";
+  /** Run the predictor predict-on-view (once per 5m bar) or only on demand. */
+  autoRun: boolean;
 }
 
 export interface AlertRule {

@@ -64,11 +64,11 @@ export default function AnalyticsPage() {
 
   if (loading && !data) {
     return (
-      <div className="p-4 lg:p-6 space-y-4 max-w-[1400px] mx-auto">
+      <div className="p-4 lg:p-6 space-y-4 page-shell">
         <PageHeader crumb="INSIGHTS / ANALYTICS" title="Performance analytics"
           description="Outcome distribution across your recorded trades. Descriptive statistics only, not a forecast." />
 
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
+        <div className="auto-cells">
           {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
         </div>
         <Skeleton className="h-64" />
@@ -78,7 +78,7 @@ export default function AnalyticsPage() {
 
   if (closed.length === 0) {
     return (
-      <div className="p-4 lg:p-6 space-y-4 max-w-[1400px] mx-auto">
+      <div className="p-4 lg:p-6 space-y-4 page-shell">
         <PageHeader crumb="INSIGHTS / ANALYTICS" title="Performance analytics"
           description="Outcome distribution across your recorded trades. Descriptive statistics only, not a forecast." />
 
@@ -94,8 +94,8 @@ export default function AnalyticsPage() {
   }
 
   return (
-    <div className="p-3 space-y-3 max-w-[1400px] mx-auto">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+    <div className="p-3 space-y-3 page-shell">
+      <div className="auto-cells">
         <MetricCard label="TOTAL TRADES" value={String(closed.length)} sub={`${wins.length}W / ${losses.length}L`} />
         <MetricCard label="WIN RATE" value={`${((wins.length / closed.length) * 100).toFixed(1)}%`}
           tone={wins.length >= losses.length ? "up" : "dn"} />
@@ -110,7 +110,7 @@ export default function AnalyticsPage() {
           tone={net >= 0 ? "up" : "dn"} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div className="auto-panels">
         <Panel title="EQUITY CURVE (CUMULATIVE P&L)">
           <div className="p-3">
             <SvgLine data={equity} />

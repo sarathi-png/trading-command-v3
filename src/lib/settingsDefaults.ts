@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   density: "comfortable",
   reduceMotion: false,
   colorblindPalette: false,
+  chartLabelMode: "compact",
   timezone: "IST",
   watchlist: ["BTCUSD", "ETHUSD", "SOLUSD"],
   modules: {
@@ -41,4 +42,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   tradingviewSecret: "",
   theme: "dark",
   chandelierDonchian: DEFAULT_CHANDELIER_DONCHIAN,
+  aiPrediction: { enabled: true, provider: "auto", autoRun: true },
 };

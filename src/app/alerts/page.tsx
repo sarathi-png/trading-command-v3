@@ -50,7 +50,7 @@ export default function AlertsPage() {
   };
 
   return (
-    <div className="p-4 lg:p-6 space-y-4 max-w-[1400px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-4 page-shell">
       <PageHeader crumb="MONITORING / ALERTS" title="Alerts"
         description="Conditions you want to be told about, checked against live prices while the workspace is open." />
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-4">

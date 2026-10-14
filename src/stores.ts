@@ -148,7 +148,11 @@ export const useApp = create<AppState>((set, get) => ({
   clearNotifications: () => set({ notifications: [], unread: 0 }),
   setPalette: (open) => set({ paletteOpen: open }),
   setHelp: (open) => set({ helpOpen: open }),
-  toggleSidebar: () => set((st) => ({ sidebarCollapsed: !st.sidebarCollapsed })),
+  toggleSidebar: () => {
+    // A manual toggle pins the choice for this session (see AppShell).
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("tc:sidebar-pinned"));
+    set((st) => ({ sidebarCollapsed: !st.sidebarCollapsed }));
+  },
 }));
 
 /* ---------------- market store ---------------- */

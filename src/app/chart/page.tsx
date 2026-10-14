@@ -1,5 +1,7 @@
 "use client";
 import ChartPanel from "@/components/chart/ChartPanel";
+import AiPredictionPanel from "@/components/chart/AiPredictionPanel";
+import { chartHeightFor, useViewport } from "@/lib/useResponsive";
 import { OrderBookPanel, SignalPanel } from "@/components/panels";
 import { Chip, DirGlyph, HelpTip, KV, Panel, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -13,6 +15,10 @@ import { useMemo } from "react";
 
 export default function ChartPage() {
   const { activeSymbol, setSymbol, timeframe, settings } = useApp();
+  const viewport = useViewport();
+  // The AI panels and the charts must agree on what is being predicted, so both
+  // panes are pinned: one candlestick chart, one Heikin-Ashi chart.
+  const paneHeight = chartHeightFor(viewport);
   const ticker = useMarket((s) => s.tickers[activeSymbol]);
   const tickers = useMarket((s) => s.tickers);
   const watchlist = useMemo(() => {
@@ -57,19 +63,52 @@ export default function ChartPage() {
         )}
       </div>
 
-      {/* workspace */}
+      {/* workspace: normal chart AND a separate Heikin-Ashi chart, each with its
+          own AI prediction. Side by side when the screen is wide and landscape,
+          stacked when it is tall, narrow or portrait. */}
       <div className="flex flex-1 min-h-0">
-        <div className="flex-1 min-w-0 min-h-[420px]">
-          <ChartPanel
-            symbol={activeSymbol}
-            timeframe={timeframe}
-            analysis={analysis}
-            interactive
-            showObjectTree
-            className="h-full"
-          />
+        <div className="flex-1 min-w-0 min-h-[300px] lg:min-h-[420px] overflow-y-auto">
+          <div className="chart-duo">
+            <section className="panel rounded-none border-x-0 border-t-0 overflow-hidden" aria-label="Candlestick chart">
+              <div className="px-3 py-1.5 border-b border-edge flex items-center justify-between">
+                <span className="microlabel">CANDLESTICK · {timeframe}</span>
+                <span className="text-[9.5px] text-dim">raw traded prices</span>
+              </div>
+              <div style={{ height: paneHeight }}>
+                <ChartPanel
+                  symbol={activeSymbol}
+                  timeframe={timeframe}
+                  analysis={analysis}
+                  interactive
+                  showObjectTree
+                  chartType="candlestick"
+                  lockChartType
+                />
+              </div>
+              <AiPredictionPanel symbol={activeSymbol} timeframe={timeframe} chartType="candles" className="border-t border-edge" />
+            </section>
+
+            <section className="panel rounded-none border-x-0 border-t-0 overflow-hidden" aria-label="Heikin-Ashi chart">
+              <div className="px-3 py-1.5 border-b border-edge flex items-center justify-between">
+                <span className="microlabel">HEIKIN-ASHI · {timeframe}</span>
+                <span className="text-[9.5px] text-dim">smoothed — reads direction, not price</span>
+              </div>
+              <div style={{ height: paneHeight }}>
+                <ChartPanel
+                  symbol={activeSymbol}
+                  timeframe={timeframe}
+                  analysis={analysis}
+                  interactive
+                  showObjectTree
+                  chartType="heikin-ashi"
+                  lockChartType
+                />
+              </div>
+              <AiPredictionPanel symbol={activeSymbol} timeframe={timeframe} chartType="heikin-ashi" className="border-t border-edge" />
+            </section>
+          </div>
         </div>
-        <div className="hidden lg:flex flex-col w-76 border-l border-edge gap-0 overflow-y-auto flex-none">
+        <div className="ratio-rail flex-col w-76 border-l border-edge gap-0 overflow-y-auto flex-none">
           <WatchlistRail symbols={watchlist} tickers={tickers} active={activeSymbol} onPick={setSymbol} />
           {settings.modules.strategyScore && (
             <SignalPanel analysis={analysis} className="border-0 rounded-none border-b border-edge" />

@@ -2,6 +2,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { KeyRound, LogOut, ShieldAlert } from "lucide-react";
 import { Btn, Chip, HelpTip, Input, KV, Panel, Select, StatusDot, Toggle, useConfirm } from "@/components/ui";
+import AiSettingsPanel from "@/components/AiSettingsPanel";
 import { api, logout } from "@/lib/api";
 import { cx, fmtDateTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -142,7 +143,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="p-3 max-w-[1100px] mx-auto space-y-3">
+    <div className="p-3 space-y-3 page-shell-narrow">
       <h1 className="text-[15px] font-semibold">Settings</h1>
 
       {/* appearance */}
@@ -208,7 +209,7 @@ export default function SettingsPage() {
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1.5 border-t border-edge pt-3">
+          <div className="auto-panels gap-x-6 border-t border-edge pt-3">
             {Object.entries(MODULE_LABELS).map(([key, label]) => (
               <div key={key} className="flex items-center justify-between">
                 <span className="text-[11px] text-mut">{label}</span>
@@ -242,6 +243,8 @@ export default function SettingsPage() {
       </Panel>
 
       {/* execution */}
+      <AiSettingsPanel />
+
       <Panel title="EXECUTION" badge={
         settings.mode === "live" && settings.liveArmed ? <Chip tone="danger" className="pulse-soft">LIVE ARMED</Chip>
         : settings.mode === "paper" ? <Chip tone="warn">PAPER</Chip> : <Chip>READ ONLY</Chip>
@@ -302,7 +305,7 @@ export default function SettingsPage() {
               </label>
             )}
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="auto-cells">
             {([
               ["maxDailyLoss", "MAX DAILY LOSS", true],
               ["maxOrderValue", "MAX ORDER VALUE", true],
@@ -428,7 +431,7 @@ export default function SettingsPage() {
 
       {/* feature flags + audit */}
       <Panel title="FEATURE FLAGS (SERVER)">
-        <div className="p-3 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1">
+        <div className="p-3 auto-panels gap-x-6">
           {Object.entries(system?.flags ?? {}).map(([k, v]) => (
             <div key={k} className="flex items-center justify-between">
               <span className="num text-[10px] text-mut">{k}</span>

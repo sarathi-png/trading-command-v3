@@ -46,6 +46,15 @@ COINDCX_API_SECRET=<shown once at creation>
 LIVE_EXECUTION_ENABLED=false             # keep false until you deliberately go live
 PAPER_TRADING_ENABLED=true
 EXCHANGE_MARKET_ENABLED=true
+
+# ---- AI signal prediction (optional; free tier) ---------------------------
+# Either provider, or both. Without a key the predictor falls back to its
+# built-in rule engine and says so — it never invents a model answer.
+OPENROUTER_API_KEY=<sk-or-v1-… from openrouter.ai/keys>
+NVIDIA_API_KEY=<nvapi-… from build.nvidia.com>
+# Optional overrides
+# OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct:free
+# NVIDIA_MODEL=meta/llama-3.1-8b-instruct
 ```
 
 Variables that are **ignored** by this build and can be deleted if present:

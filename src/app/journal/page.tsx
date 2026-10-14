@@ -67,11 +67,11 @@ export default function JournalPage() {
   };
 
   return (
-    <div className="p-4 lg:p-6 space-y-4 max-w-[1500px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-4 page-shell">
       <PageHeader crumb="TRADING / JOURNAL" title="Trading journal"
         description="Every closed trade with its size, reason and outcome. This is the record you review, not a scoreboard to admire." />
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
+      <div className="auto-cells">
         <MetricCard label="TRADES" value={String(closed.length)} />
         <MetricCard label="WIN RATE" value={closed.length ? `${((wins.length / closed.length) * 100).toFixed(0)}%` : "—"}
           tone={wins.length >= losses.length ? "up" : "dn"} />

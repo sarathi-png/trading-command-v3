@@ -6,7 +6,7 @@ import { useApp } from "@/stores";
 export default function AutomationPage() {
   const { system } = useApp();
   return (
-    <div className="p-3 space-y-3 max-w-[900px] mx-auto">
+    <div className="p-3 space-y-3 page-shell-narrow">
       <div>
         <h1 className="text-[15px] font-semibold">Automation</h1>
         <p className="text-[11px] text-dim max-w-xl leading-relaxed">

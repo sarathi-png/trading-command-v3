@@ -7,6 +7,21 @@ paper trading and a trade journal — in one dark, low-clutter workspace.
 It is **not** a TradingView/CoinDCX/OSIRIS clone. It is a personal command center that answers:
 *Where is price? What is the market doing? What is my setup? What is my position? What is my risk?*
 
+Three things it does that most retail terminals do not:
+
+1. **No unexplained abbreviations.** Every overlay drawn on a chart is decoded in
+   full words, both in a "WHAT IS ON THIS CHART" legend and by switching the
+   price-axis labels from short tokens (`CD:D20-U`) to full names
+   (`DONCHIAN 20 · UPPER BOUND`).
+2. **Layouts that adapt to the screen, not just the width.** Grids reflow from
+   the available space, and the shape of the viewport decides what sits side by
+   side: two charts and a watchlist rail on a wide landscape monitor, a stacked
+   single column on a phone or a tall split window.
+3. **Predictions you can hold to account.** The AI panel (5-minute frame,
+   Chandelier Exit + Donchian ribbon) writes a structured call on both the
+   candlestick and Heikin-Ashi charts, and every call is recorded so its outcome
+   can be scored against what price actually did.
+
 > **Latest review (October 2026):** strategy correctness, runtime and interface audit —
 > findings, fixes, design benchmark and the forward roadmap are in
 > `docs/AUDIT_2026-10.md`. Headline items: Donchian windowing, backtest look-ahead and
@@ -108,6 +123,7 @@ be disabled. Full list in `.env.example`.
 - `docs/STRATEGY_ENGINE.md` — strategies, structure & S/R detection
 - `docs/PAPER_TRADING.md` — paper engine semantics
 - `docs/WEBHOOKS.md` — optional TradingView webhook (disabled by default)
+- `docs/AI_PREDICTION.md` — AI signal prediction: 5m Chandelier/Donchian calls on both charts, free-tier keys, guard rails, scoring
 - `docs/DESIGN_BENCHMARK.md` — premium-interface benchmark, anti-pattern audit, capability matrix
 - `docs/FUTURE_ROADMAP.md` — competitive landscape, gap analysis, unique/futuristic roadmap
 - `docs/DEPLOYMENT.md` — local, Docker, Cloudflare Tunnel

@@ -118,6 +118,34 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     term: "INR valuation",
     plain: "The US-dollar balance converted at the rate in your settings for reference. It is an estimate, not an exchange conversion.",
   },
+  supportLevel: {
+    term: "Support",
+    plain: "A price area where buying has previously stopped a fall. The percentage is a confidence score from touch count and recency, not a probability.",
+  },
+  resistanceLevel: {
+    term: "Resistance",
+    plain: "A price area where selling has previously stopped a rise. The percentage is a confidence score from touch count and recency, not a probability.",
+  },
+  entryLevel: {
+    term: "Entry",
+    plain: "The price at which the published plan would open the trade — the last closed candle's price, not a synthetic value.",
+  },
+  stopLevel: {
+    term: "Stop",
+    plain: "The price at which the plan is wrong and exits. Its distance from entry defines one unit of risk (1R).",
+  },
+  targetLevel: {
+    term: "Target",
+    plain: "The planned profit level, usually a multiple of the stop distance. In this workspace it is a planning reference: the backtester exits on the trailing stop or the time stop, not on the target.",
+  },
+  chandelierStops: {
+    term: "Chandelier stops",
+    plain: "Two trailing levels: a long stop below the recent high in an uptrend, a short stop above the recent low in a downtrend.",
+  },
+  donchianBounds: {
+    term: "Donchian bounds",
+    plain: "For each lookback period: the upper bound is the highest high of the previous candles, the lower bound the lowest low. Price outside all bounds is a trend; inside them it is a range.",
+  },
   slippage: {
     term: "Slippage and fees",
     plain: "Backtests charge a fee and a slippage assumption per side. Funding, partial fills and latency are not modelled, so treat results as approximate.",
