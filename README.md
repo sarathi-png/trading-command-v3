@@ -7,6 +7,13 @@ paper trading and a trade journal — in one dark, low-clutter workspace.
 It is **not** a TradingView/CoinDCX/OSIRIS clone. It is a personal command center that answers:
 *Where is price? What is the market doing? What is my setup? What is my position? What is my risk?*
 
+> **Latest review (October 2026):** strategy correctness, runtime and interface audit —
+> findings, fixes, design benchmark and the forward roadmap are in
+> `docs/AUDIT_2026-10.md`. Headline items: Donchian windowing, backtest look-ahead and
+> Heikin-Ashi fill bias, position sizing, the `demo`/`live` data-source path, and a
+> readiness-first overview. A short plan (with a status note) lives in
+> `docs/IMPROVEMENT_PLAN.md`.
+
 ## Quick start
 
 ```bash
@@ -18,10 +25,17 @@ npm run dev
 
 Private account data (balances, positions, orders) additionally needs
 `COINDCX_API_KEY` / `COINDCX_API_SECRET` in the environment — see
-`docs/COINDCX_SETUP.md`. Tests: `npm test` runs the quant suite, the CoinDCX
+`docs/COINDCX_SETUP.md`. Tests: `npm test` runs the quant suite, the v2 strategy/regression suite, the CoinDCX
 adapter suite (signing vectors + a mock venue), the standalone gateway suite, a
 production build, the paper-trading end-to-end test and the Vercel↔CoinDCX
 boundary test.
+
+Fonts (Inter, JetBrains Mono) are bundled via `@fontsource-variable/*`, so no build-time
+font download is required.
+
+Market data follows the **Data source** setting in Settings → Market data: `demo` uses the
+deterministic simulator and `live` reads CoinDCX public REST. There is no silent fallback
+between them — a failed live request surfaces as an error, never as fabricated data.
 
 Open the app, complete the 5-step onboarding, done. Without any credentials the
 workspace runs on a **clearly-labelled deterministic demo simulator** (candles print live

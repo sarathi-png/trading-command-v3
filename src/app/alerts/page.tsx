@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Bell, Plus, RotateCcw, Trash2 } from "lucide-react";
-import { Btn, Chip, EmptyState, Input, Panel, Select, Skeleton, Toggle } from "@/components/ui";
+import { Btn, Chip, EmptyState, Input, PageHeader, Panel, Select, Skeleton, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDateTime, fmtPrice } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -50,7 +50,10 @@ export default function AlertsPage() {
   };
 
   return (
-    <div className="p-3 grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-3 max-w-[1400px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-4 max-w-[1400px] mx-auto">
+      <PageHeader crumb="MONITORING / ALERTS" title="Alerts"
+        description="Conditions you want to be told about, checked against live prices while the workspace is open." />
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-4">
       <Panel title="ALERT RULES" badge={<span className="text-[9px] num text-dim">{rules.filter((r) => r.enabled && !r.triggeredAt).length} ARMED</span>}>
         {loading && rules.length === 0 ? (
           <div className="p-3 space-y-1.5">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8" />)}</div>
@@ -159,6 +162,7 @@ export default function AlertsPage() {
           </div>
         </Panel>
       </div>
+    </div>
     </div>
   );
 }

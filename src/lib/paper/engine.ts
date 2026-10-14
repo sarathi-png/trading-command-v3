@@ -9,7 +9,8 @@
 import { getRepo } from "@/lib/repo";
 import { PAPER_FEE_RATE } from "../flags";
 import { evaluateOrderRisk } from "../risk";
-import { logAudit } from "../settings";
+import { getTickers } from "../market/service";
+import { getSettings, logAudit } from "../settings";
 
 export interface PlaceOrderInput {
   symbol: string;
@@ -58,6 +59,10 @@ export async function placePaperOrder(
   dayStart.setUTCHours(0, 0, 0, 0);
   const todayPnl = await repo.sumJournalPnl({ mode: "paper", closedSince: dayStart });
 
+  const settings = await getSettings();
+  const realized = await repo.sumJournalPnl({ mode: "paper" });
+  const marks = new Map((await getTickers(positions.map(p => p.symbol))).map(t => [t.symbol, t.price]));
+  const openPnl = positions.reduce((sum, p) => sum + ((marks.get(p.symbol) ?? p.entry) - p.entry) * p.qty * (p.side === "long" ? 1 : -1), 0);
   const verdict = evaluateOrderRisk(
     { symbol, qty, price: refPrice, reduceOnly: Boolean(input.reduceOnly) },
     {
@@ -68,8 +73,8 @@ export async function placePaperOrder(
         maxOpenPositions: limits.maxOpenPositions,
       },
       openSymbols: positions.map((p) => p.symbol),
-      currentNotional: positions.reduce((a, p) => a + Math.abs(p.qty) * p.entry, 0),
-      equity: limits.equity ?? 0,
+      currentNotional: positions.reduce((a, p) => a + Math.abs(p.qty) * (marks.get(p.symbol) ?? p.entry), 0),
+      equity: limits.equity ?? settings.startingBalance + realized + openPnl,
       // Paper P&L is fully local, so this is always known — never null here.
       dailyRealizedPnl: todayPnl,
     }

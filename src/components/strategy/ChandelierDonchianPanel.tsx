@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Zap } from "lucide-react";
 import { api } from "@/lib/api";
 import { usePoll } from "@/lib/hooks";
@@ -10,13 +10,7 @@ import { ChandelierDonchianConfig } from "./ChandelierDonchianConfig";
 import type { ChandelierDonchianConfig as Config, SignalState } from "@/lib/strategy/v2/types";
 import type { BacktestResult } from "@/lib/strategy/v2/types";
 
-const DEFAULT_CONFIG: Config = {
-  chandelier: { atrLength: 20, multiplier: 3.0 },
-  donchian: { periods: [20, 50, 100, 200] },
-  heikinAshi: true,
-  timeStop: { enabled: true, bars: 48 },
-  risk: { leverage: 10, riskPct: 1.0, lotSize: null, maxPositions: 1, mode: "auto" },
-};
+import { DEFAULT_CHANDELIER_DONCHIAN_CONFIG as DEFAULT_CONFIG } from "@/lib/strategy/v2/types";
 
 interface ApiResponse {
   symbol: string;
@@ -34,18 +28,19 @@ interface ApiResponse {
   backtest: BacktestResult | null;
   config: Config;
   source: string;
+  sizingSource: string | null;
   evaluatedAt: number;
 }
 
 export function ChandelierDonchianPanel({ className }: { className?: string }) {
   const { activeSymbol, timeframe, settings, patchSettings, notify } = useApp();
-  const [config, setConfig] = useState<Config>(DEFAULT_CONFIG);
+  const config = settings.chandelierDonchian ?? DEFAULT_CONFIG;
   const prevSignalStatusRef = useRef<string | null>(null);
 
   const { data, error } = usePoll<ApiResponse>(
     () => api.get<ApiResponse>(`/api/strategy/chandelier-donchian?symbol=${activeSymbol}&timeframe=${timeframe}&backtest=true`),
-    5000,
-    { deps: [activeSymbol, timeframe] }
+    30000,
+    { deps: [activeSymbol, timeframe, config] }
   );
 
   const signalState: SignalState | null = data?.state
@@ -94,7 +89,6 @@ export function ChandelierDonchianPanel({ className }: { className?: string }) {
   }, [data?.signal?.status, activeSymbol, timeframe, notify]);
 
   const handleConfigChange = useCallback((newConfig: Config) => {
-    setConfig(newConfig);
     void patchSettings({
       chandelierDonchian: newConfig,
     } as Partial<import("@/lib/types").AppSettings>);
@@ -106,11 +100,11 @@ export function ChandelierDonchianPanel({ className }: { className?: string }) {
         <div>
           <h2 className="text-[13px] font-semibold">Chandelier Exit + Donchian Ribbon</h2>
           <p className="text-[10px] text-dim">
-            5m Heikin Ashi · Chandelier ATR-20 ×3.0 · Donchian 20/50/100/200
+            {timeframe} {config.heikinAshi ? "Heikin Ashi" : "Standard candles"} · ATR-{config.chandelier.atrLength} ×{config.chandelier.multiplier} · Donchian {config.donchian.periods.join("/")}
           </p>
         </div>
         <Chip tone="accent">
-          <Zap size={11} /> {data ? "LIVE" : "LOADING"}
+          <Zap size={11} /> {error ? "UNAVAILABLE" : data ? (data.source === "demo" ? "SIMULATED" : "MARKET DATA") : "LOADING"}
         </Chip>
       </div>
 
@@ -159,10 +153,10 @@ export function ChandelierDonchianPanel({ className }: { className?: string }) {
                       <Metric label="TRADES" value={String(data.backtest.totalTrades)} />
                       <Metric label="WIN RATE" value={`${data.backtest.winRate.toFixed(1)}%`} />
                       <Metric label="EXPECTANCY" value={data.backtest.expectancy.toFixed(4)} tone={data.backtest.expectancy > 0 ? "up" : "dn"} />
-                      <Metric label="PROFIT FACTOR" value={data.backtest.profitFactor.toFixed(2)} />
+                      <Metric label="PROFIT FACTOR" value={data.backtest.profitFactor?.toFixed(2) ?? "N/A (no losses)"} />
                       <Metric label="MAX DD" value={`${data.backtest.maxDrawdownPct.toFixed(1)}%`} tone="dn" />
-                      <Metric label="SHARPE" value={data.backtest.sharpeRatio.toFixed(2)} />
-                      <Metric label="DSR" value={data.backtest.dsr.toFixed(2)} tone={data.backtest.dsr > 0.5 ? "up" : "dn"} />
+                      <Metric label="RETURN / VOL (TRADE)" value={data.backtest.sharpeRatio.toFixed(2)} />
+                      <Metric label="DSR" value="Not estimated" />
                       <Metric label="AVG HOLD" value={`${data.backtest.avgHoldBars.toFixed(0)} bars`} />
                     </div>
                   </div>

@@ -1,13 +1,15 @@
 import type { Candle, StrategySignal, Timeframe } from "@/lib/types";
+import { DEFAULT_CHANDELIER_DONCHIAN_CONFIG, validateStrategyConfig } from "./types";
 import type { ChandelierDonchianConfig, SignalState, PositionSizingResult, HeikinAshiCandle } from "./types";
 import { toHeikinAshi, haColor } from "./heikin-ashi";
-import { chandelierExit, getChandelierSignal } from "./chandelier";
-import { donchianRibbon, getDonchianState } from "./donchian";
+import { getChandelierSignal } from "./chandelier";
+import { getDonchianState } from "./donchian";
 
 export function evaluateChandelierDonchian(
   candles: Candle[],
   config: ChandelierDonchianConfig = DEFAULT_CHANDELIER_DONCHIAN_CONFIG
 ): StrategySignal {
+  validateStrategyConfig(config);
   if (candles.length < Math.max(...config.donchian.periods) + 50) {
     return createWaitSignal(candles, "Insufficient data for indicators");
   }
@@ -15,7 +17,7 @@ export function evaluateChandelierDonchian(
   const haCandles: Candle[] = config.heikinAshi ? toHeikinAshi(candles) : candles;
   const lastIdx = haCandles.length - 1;
   const lastCandle = haCandles[lastIdx];
-  const prevCandle = haCandles[lastIdx - 1];
+  const marketClose = candles[lastIdx].close;
 
   const chandelier = getChandelierSignal(
     haCandles,
@@ -26,7 +28,6 @@ export function evaluateChandelierDonchian(
   const donchian = getDonchianState(haCandles, config.donchian.periods);
 
   const haColorLast = config.heikinAshi ? haColor(lastCandle as HeikinAshiCandle) : (lastCandle.close >= lastCandle.open ? "green" : "red");
-  const haColorPrev = prevCandle ? (config.heikinAshi ? haColor(prevCandle as HeikinAshiCandle) : (prevCandle.close >= prevCandle.open ? "green" : "red")) : haColorLast;
 
   const chandelierBuy = chandelier.signal === "buy";
   const chandelierSell = chandelier.signal === "sell";
@@ -43,7 +44,7 @@ export function evaluateChandelierDonchian(
 
   if (chandelierBuy && haGreen && donchianGreen) {
     status = "LONG_SETUP";
-    entry = lastCandle.close;
+    entry = marketClose;
     stop = chandelier.longStop;
     target = entry + 2 * (entry - stop);
     reasons = [
@@ -53,7 +54,7 @@ export function evaluateChandelierDonchian(
     ];
   } else if (chandelierSell && haRed && donchianRed) {
     status = "SHORT_SETUP";
-    entry = lastCandle.close;
+    entry = marketClose;
     stop = chandelier.shortStop;
     target = entry - 2 * (stop - entry);
     reasons = [
@@ -82,6 +83,11 @@ export function evaluateChandelierDonchian(
     }
   }
 
+  if (entry !== null && stop !== null && target !== null &&
+      (!Number.isFinite(stop) || !Number.isFinite(target) || target <= 0 ||
+       (status === "LONG_SETUP" ? stop >= entry : stop <= entry))) {
+    return createWaitSignal(candles, "Invalid stop geometry at the executable market price");
+  }
   let rr: number | null = null;
   if (entry !== null && stop !== null && target !== null && entry !== stop) {
     rr = Math.abs(target - entry) / Math.abs(entry - stop);
@@ -92,7 +98,7 @@ export function evaluateChandelierDonchian(
     timeframe: "5m" as Timeframe,
     strategy: "chandelier_donchian",
     status,
-    price: lastCandle.close,
+    price: marketClose,
     entry,
     stop,
     target,
@@ -123,6 +129,7 @@ export function getSignalState(
   candles: Candle[],
   config: ChandelierDonchianConfig = DEFAULT_CHANDELIER_DONCHIAN_CONFIG
 ): SignalState {
+  validateStrategyConfig(config);
   if (candles.length < Math.max(...config.donchian.periods) + 50) {
     return createEmptySignalState();
   }
@@ -179,51 +186,19 @@ export function calculatePositionSize(
   stop: number,
   config: ChandelierDonchianConfig["risk"]
 ): PositionSizingResult {
-  const riskAmount = equity * (config.riskPct / 100);
+  if (![equity, entry, stop, config.riskPct, config.leverage].every(Number.isFinite) ||
+      equity <= 0 || entry <= 0 || stop <= 0 || entry === stop ||
+      config.riskPct <= 0 || config.riskPct > 100 || config.leverage <= 0 ||
+      (config.mode === "manual" && (config.lotSize === null || !Number.isFinite(config.lotSize) || config.lotSize <= 0))) {
+    return { qty: 0, riskAmount: 0, riskPct: 0, leverage: config.leverage, entry, stop };
+  }
   const riskPerUnit = Math.abs(entry - stop);
-
-  let qty: number;
-  if (config.mode === "manual" && config.lotSize !== null) {
-    qty = config.lotSize;
-  } else {
-    qty = riskAmount / riskPerUnit;
-  }
-
-  const notional = qty * entry;
-  const marginRequired = notional / config.leverage;
-
-  if (marginRequired > equity) {
-    qty = (equity * config.leverage) / entry;
-  }
-
-  return {
-    qty: Number(qty.toFixed(4)),
-    riskAmount: Number(riskAmount.toFixed(2)),
-    riskPct: config.riskPct,
-    leverage: config.leverage,
-    entry,
-    stop,
-  };
+  const requested = config.mode === "manual" ? config.lotSize! : equity * config.riskPct / 100 / riskPerUnit;
+  // Floor rather than round: rounding up can exceed the risk/margin budget.
+  const qty = Math.floor(Math.min(requested, equity * config.leverage / entry) * 10000) / 10000;
+  const riskAmount = qty * riskPerUnit;
+  return { qty, riskAmount: Number(riskAmount.toFixed(2)), riskPct: riskAmount / equity * 100,
+    leverage: config.leverage, entry, stop };
 }
 
-export const DEFAULT_CHANDELIER_DONCHIAN_CONFIG: ChandelierDonchianConfig = {
-  chandelier: {
-    atrLength: 20,
-    multiplier: 3.0,
-  },
-  donchian: {
-    periods: [20, 50, 100, 200],
-  },
-  heikinAshi: true,
-  timeStop: {
-    enabled: true,
-    bars: 48,
-  },
-  risk: {
-    leverage: 10,
-    riskPct: 1.0,
-    lotSize: null,
-    maxPositions: 1,
-    mode: "auto",
-  },
-};
+export { DEFAULT_CHANDELIER_DONCHIAN_CONFIG } from "./types";

@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Settings2 } from "lucide-react";
-import { Btn, Chip, Input, PremiumPanel, Select, ToggleSwitch } from "@/components/ui";
+import { Chip, Input, PremiumPanel, Select, ToggleSwitch } from "@/components/ui";
 import type { ChandelierDonchianConfig } from "@/lib/strategy/v2/types";
 
 interface ChandelierDonchianConfigProps {
@@ -75,13 +75,13 @@ export function ChandelierDonchianConfig({ config, onChange, className }: Chande
               <div className="flex border border-edge overflow-hidden">
                 <button
                   onClick={() => onChange({ ...config, risk: { ...config.risk, mode: "auto" } })}
-                  className={`px-2.5 py-0.5 text-[10px] tracking-wide ${
+                  className={`px-3 min-h-6 text-[10px] tracking-wide ${
                     config.risk.mode === "auto" ? "bg-accent text-bg font-semibold" : "text-dim hover:text-ink"
                   }`}
                 >AUTO</button>
                 <button
                   onClick={() => onChange({ ...config, risk: { ...config.risk, mode: "manual" } })}
-                  className={`px-2.5 py-0.5 text-[10px] tracking-wide ${
+                  className={`px-3 min-h-6 text-[10px] tracking-wide ${
                     config.risk.mode === "manual" ? "bg-accent text-bg font-semibold" : "text-dim hover:text-ink"
                   }`}
                 >MANUAL</button>

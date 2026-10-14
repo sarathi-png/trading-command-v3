@@ -1,21 +1,16 @@
+import { getAccountState } from "@/lib/account";
 import { getCandles } from "@/lib/market/service";
 import { flags } from "@/lib/flags";
 import { getSettings } from "@/lib/settings";
 import { evaluateChandelierDonchian, getSignalState, calculatePositionSize } from "@/lib/strategy/v2/chandelier-donchian";
 import { runBacktest } from "@/lib/strategy/v2/backtest";
 import type { ChandelierDonchianConfig } from "@/lib/strategy/v2/types";
-import { TIMEFRAMES, type Timeframe, type AppSettings } from "@/lib/types";
+import { TIMEFRAMES, TF_MINUTES, type Timeframe, type AppSettings } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const CONFIG_CACHE = new Map<string, { config: ChandelierDonchianConfig; ts: number }>();
-const CONFIG_TTL = 60_000;
-
 function getStrategyConfig(settings: AppSettings): ChandelierDonchianConfig {
-  const cached = CONFIG_CACHE.get("config");
-  if (cached && Date.now() - cached.ts < CONFIG_TTL) return cached.config;
-
   const raw = settings.chandelierDonchian;
   const config: ChandelierDonchianConfig = {
     chandelier: {
@@ -39,7 +34,6 @@ function getStrategyConfig(settings: AppSettings): ChandelierDonchianConfig {
     },
   };
 
-  CONFIG_CACHE.set("config", { config, ts: Date.now() });
   return config;
 }
 
@@ -55,11 +49,12 @@ export async function GET(req: Request) {
     return Response.json({ error: `Unsupported timeframe: ${tf}` }, { status: 400 });
   }
 
+  try {
   const settings = await getSettings();
   const config = getStrategyConfig(settings);
 
   const candleRes = await getCandles(symbol, tf as Timeframe, 500);
-  const candles = candleRes.candles;
+  const candles = candleRes.candles.filter(c => (c.time + TF_MINUTES[tf as Timeframe] * 60) * 1000 <= Date.now());
 
   if (candles.length < Math.max(...config.donchian.periods) + 50) {
     return Response.json({
@@ -71,18 +66,26 @@ export async function GET(req: Request) {
   }
 
   const signal = evaluateChandelierDonchian(candles, config);
+  signal.symbol = symbol;
+  signal.timeframe = tf as Timeframe;
   const state = getSignalState(candles, config);
 
   let sizing = null;
+  let sizingSource: string | null = null;
   if (signal.entry !== null && signal.stop !== null) {
-    const equity = 10000;
-    sizing = calculatePositionSize(equity, signal.entry, signal.stop, config.risk);
+    const account = await getAccountState();
+    // Never size a live order using fallback paper equity.
+    if (settings.mode !== "live" && account.source === "demo") {
+      sizing = calculatePositionSize(account.equity, signal.entry, signal.stop, config.risk);
+      sizingSource = "Simulated account equity; estimate only";
+    }
+
   }
 
   let backtest = null;
   if (url.searchParams.get("backtest") === "true") {
     try {
-      backtest = runBacktest(candles, config);
+      backtest = runBacktest(candles, config, { initialCapital: settings.startingBalance, leverage: config.risk.leverage, riskPct: config.risk.riskPct, feeRate: 0.0005, slippage: 0.0001 });
     } catch {
       backtest = null;
     }
@@ -101,9 +104,13 @@ export async function GET(req: Request) {
       chandelierShortStop: state.chandelierState.shortStop,
     },
     sizing,
+    sizingSource,
     backtest,
     config,
     source: candleRes.source,
     evaluatedAt: Date.now(),
   });
+  } catch (e) {
+    return Response.json({ error: e instanceof Error ? e.message : "Strategy unavailable" }, { status: 502 });
+  }
 }

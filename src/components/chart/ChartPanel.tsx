@@ -1,6 +1,6 @@
 "use client";
 import {
-  useCallback, useEffect, useMemo, useRef, useState,
+  useCallback, useEffect, useRef, useState,
 } from "react";
 import {
   Crosshair, Eye, EyeOff, Lock, LockOpen, Minus, MousePointer2,
@@ -149,7 +149,6 @@ export default function ChartPanel({
       
       // Read CSS variables for theme-aware colors
       const rootStyles = getComputedStyle(document.documentElement);
-      const bgColor = rootStyles.getPropertyValue('--bg').trim();
       const textColor = rootStyles.getPropertyValue('--mut').trim();
       const gridColor = rootStyles.getPropertyValue('--edge').trim();
       const panelColor = rootStyles.getPropertyValue('--panel').trim();
@@ -158,6 +157,10 @@ export default function ChartPanel({
       
       const chart = LWC.createChart(containerRef.current, {
         autoSize: true,
+        // Pin the formatting locale: some browsers report a non-BCP-47
+        // navigator.language (e.g. "en-US@posix"), which makes the default
+        // tick-mark formatter throw and leaves the chart blank.
+        localization: { locale: "en-US" },
         layout: {
           background: { type: LWC.ColorType.Solid, color: "transparent" },
           textColor: textColor || "#8B98A9",
@@ -486,8 +489,8 @@ export default function ChartPanel({
       const orig = drawingsRef.current.find((d) => d.id === hit.id);
       if (!orig) return;
       const points = orig.points.map((p) => ({ ...p }));
-      const startTime = points[0].time;
-      const startPrice = points[0].price;
+      const startTime = L.timeFromX(startPx) ?? points[0].time;
+      const startPrice = L.priceFromY(startPy) ?? points[0].price;
       const moved: { time: number; price: number }[] = points.map((p) => ({ ...p }));
 
       const onMove = (ev: PointerEvent) => {
@@ -618,7 +621,7 @@ export default function ChartPanel({
               key={c}
               onClick={() => setColor(c)}
               aria-label={`Color ${c}`}
-              className={cx("w-5 h-5 rounded-full flex-none m-0.5 border-2", color === c ? "border-ink" : "border-transparent")}
+              className={cx("w-6 h-6 rounded-full flex-none m-0.5 border-2", color === c ? "border-ink" : "border-transparent")}
               style={{ backgroundColor: c }}
             />
           ))}

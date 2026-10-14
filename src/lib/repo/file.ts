@@ -8,23 +8,17 @@
 import { randomUUID } from "node:crypto";
 import { readDoc, writeDoc } from "@/lib/fileStore";
 import type {
-  AlertRuleInsert,
   AlertRuleRow,
   AuditRow,
-  DrawingInsert,
   DrawingRow,
   JournalInsert,
   JournalPnlFilter,
   JournalRow,
-  LiveOrderInsert,
   LiveOrderRow,
-  PaperOrderInsert,
   PaperOrderRow,
-  PaperPositionInsert,
   PaperPositionRow,
   Repo,
   SettingRow,
-  SignalInsert,
   SignalRow,
   Timestamp,
 } from "./types";

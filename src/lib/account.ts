@@ -7,7 +7,6 @@
  */
 import { getRepo } from "@/lib/repo";
 import { exchangeAccountConfigured } from "./credentials";
-import { flags } from "./flags";
 import { liveBalances, livePositions } from "./exchange/service";
 import { getTickers } from "./market/service";
 import { getPaperState } from "./paper/engine";

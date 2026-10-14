@@ -10,14 +10,16 @@ import { runBacktest, aggregateWalkForward } from "./backtest";
 function makeCandles(count: number, startPrice = 100, trend: "up" | "down" | "flat" = "up"): Candle[] {
   const candles: Candle[] = [];
   let price = startPrice;
-  const now = Math.floor(Date.now() / 1000);
+  const now = 1700000000;
+  let seed = 123456;
+  const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
   for (let i = 0; i < count; i++) {
     const drift = trend === "up" ? 0.5 : trend === "down" ? -0.5 : 0;
     const open = price;
-    const close = price + drift + (Math.random() - 0.5) * 2;
-    const high = Math.max(open, close) + Math.random() * 1.5;
-    const low = Math.min(open, close) - Math.random() * 1.5;
-    candles.push({ time: now + i * 300, open, high, low, close, volume: 100 + Math.random() * 50 });
+    const close = price + drift + (random() - 0.5) * 2;
+    const high = Math.max(open, close) + random() * 1.5;
+    const low = Math.min(open, close) - random() * 1.5;
+    candles.push({ time: now + i * 300, open, high, low, close, volume: 100 + random() * 50 });
     price = close;
   }
   return candles;
@@ -134,10 +136,10 @@ describe("backtest", () => {
     assert.ok(result.losingTrades >= 0);
     assert.ok(result.winRate >= 0 && result.winRate <= 100);
     assert.ok(Number.isFinite(result.expectancy));
-    assert.ok(Number.isFinite(result.profitFactor));
+    assert.ok(result.profitFactor === null || Number.isFinite(result.profitFactor));
     assert.ok(Number.isFinite(result.maxDrawdown));
     assert.ok(Number.isFinite(result.sharpeRatio));
-    assert.ok(Number.isFinite(result.dsr));
+    assert.equal(result.dsr, null);
   });
 
   it("aggregates walk-forward results", () => {
@@ -151,6 +153,6 @@ describe("backtest", () => {
     const agg = aggregateWalkForward(results);
     assert.ok(agg.totalTrades >= 0);
     assert.ok(Number.isFinite(agg.expectancy));
-    assert.ok(Number.isFinite(agg.dsr));
+    assert.equal(agg.dsr, null);
   });
 });

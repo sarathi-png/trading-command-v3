@@ -15,9 +15,9 @@ export function Panel({
   className?: string; onHide?: () => void; badge?: ReactNode;
 }) {
   return (
-    <section className={cx("panel flex flex-col min-h-0", className)}>
+    <section className={cx("panel flex flex-col min-h-0 min-w-0", className)}>
       {(title || right || onHide) && (
-        <header className="flex items-center gap-2 border-b border-edge px-3 h-9 flex-none">
+        <header className="flex items-center gap-2 border-b border-edge px-4 min-h-11 py-2 flex-none">
           {title && <h3 className="microlabel">{title}</h3>}
           {badge}
           <div className="ml-auto flex items-center gap-1.5">{right}</div>
@@ -85,7 +85,7 @@ export function Btn({ variant = "outline", size = "sm", className, ...rest }: Bt
     <button
       className={cx(
         "inline-flex items-center justify-center gap-1.5 rounded transition-colors disabled:opacity-40 disabled:pointer-events-none",
-        size === "sm" ? "h-7 px-2.5 text-[11px]" : "h-8.5 px-4 text-[12px]",
+        size === "sm" ? "h-8 px-3 text-[11px]" : "h-10 px-4 text-[12px]",
         variants[variant],
         className
       )}
@@ -99,7 +99,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={cx(
-        "bg-bg2 border border-edge rounded px-2 h-7.5 text-[12px] text-ink placeholder:text-dim w-full focus:border-accent/50 outline-none",
+        "bg-bg2 border border-edge rounded px-2 h-9 text-[12px] text-ink placeholder:text-dim w-full focus:border-accent/50 outline-none",
         props.className
       )}
     />
@@ -111,7 +111,7 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
     <select
       {...props}
       className={cx(
-        "bg-bg2 border border-edge rounded px-1.5 h-7.5 text-[12px] text-ink outline-none focus:border-accent/50",
+        "bg-bg2 border border-edge rounded px-1.5 h-9 text-[12px] text-ink outline-none focus:border-accent/50",
         props.className
       )}
     />
@@ -198,20 +198,21 @@ export function MetricCard({
   tone?: "flat" | "up" | "dn" | "accent"; onHide?: () => void; tooltip?: string;
 }) {
   return (
-    <div className="panel px-3 py-2.5 relative group min-w-0 metric-card-hover" title={tooltip}>
+    <div className="panel px-4 py-4 relative group min-w-0" title={tooltip}>
       <div className="flex items-center justify-between gap-2">
         <p className="microlabel truncate">{label}</p>
         {onHide && (
           <button
             onClick={onHide}
             aria-label={`Hide ${label}`}
-            className="opacity-0 group-hover:opacity-100 text-dim hover:text-ink transition-opacity"
+            title={`Hide ${label}`}
+            className="metric-hide opacity-0 group-hover:opacity-100 text-dim hover:text-ink transition-opacity flex items-center justify-center w-6 h-6 rounded"
           >
-            <X size={11} />
+            <X size={12} />
           </button>
         )}
       </div>
-      <div className={cx("num text-lg leading-6 mt-1 truncate",
+      <div className={cx("num text-[23px] leading-8 mt-2 truncate",
         tone === "up" ? "text-up" : tone === "dn" ? "text-dn" : tone === "accent" ? "text-accent" : "text-ink")}>
         {value}
       </div>
@@ -321,9 +322,9 @@ export function PremiumPanel({
     4: "shadow-[0_8px_32px_rgba(0,0,0,0.2)]",
   };
   return (
-    <section className={cx("panel flex flex-col min-h-0 transition-shadow duration-200 hover:shadow-[0_2px_8px_rgba(0,0,0,0.12)]", shadows[elevation], className)}>
+    <section className={cx("panel flex flex-col min-h-0 min-w-0 transition-shadow duration-200 hover:shadow-[0_2px_8px_rgba(0,0,0,0.12)]", shadows[elevation], className)}>
       {(title || right || badge) && (
-        <header className="flex items-center gap-2 border-b border-edge px-3 h-9 flex-none">
+        <header className="flex items-center gap-2 border-b border-edge px-4 min-h-11 py-2 flex-none">
           {title && <h3 className="microlabel">{title}</h3>}
           {badge}
           <div className="ml-auto flex items-center gap-1.5">{right}</div>
@@ -334,11 +335,26 @@ export function PremiumPanel({
   );
 }
 
+export function PageHeader({ crumb, title, description, actions }: {
+  crumb: string; title: ReactNode; description?: ReactNode; actions?: ReactNode;
+}) {
+  return (
+    <header className="flex flex-wrap items-end justify-between gap-4">
+      <div className="min-w-0">
+        <p className="microlabel mb-2">{crumb}</p>
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        {description && <p className="text-xs text-mut mt-2 max-w-2xl">{description}</p>}
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    </header>
+  );
+}
+
 export function SectionHeader({ title, right, className }: {
   title: ReactNode; right?: ReactNode; className?: string;
 }) {
   return (
-    <div className={cx("flex items-center justify-between border-b border-edge px-3 h-9 flex-none", className)}>
+    <div className={cx("flex items-center justify-between border-b border-edge px-4 min-h-11 py-2 flex-none", className)}>
       <h3 className="microlabel">{title}</h3>
       {right && <div className="flex items-center gap-1.5">{right}</div>}
     </div>

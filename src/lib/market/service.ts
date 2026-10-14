@@ -4,6 +4,7 @@
  * Live mode: served by the exchange adapter (CoinDCX public REST).
  * Errors are surfaced — we never silently substitute stale/demo data for live.
  */
+import { demoCandles, demoTicker, demoOrderbook, demoTrades, DEMO_SYMBOLS } from "./demo";
 import { flags } from "../flags";
 import { getSettings } from "../settings";
 import type { Candle, OrderBook, RecentTrade, Ticker, Timeframe } from "../types";
@@ -18,8 +19,8 @@ import type { ExchangeTicker } from "../exchange/types";
 
 export class MarketError extends Error {}
 
-export async function activeDataSource(): Promise<"live"> {
-  return "live";
+export async function activeDataSource(): Promise<"live" | "demo"> {
+  return (await getSettings()).dataSource;
 }
 
 export function knownSymbols(): string[] {
@@ -48,6 +49,7 @@ function toAppTicker(t: ExchangeTicker): Ticker {
 }
 
 export async function getTickers(symbols?: string[]): Promise<Ticker[]> {
+  if (await activeDataSource() === "demo") return (symbols ?? DEMO_SYMBOLS.map(s => s.symbol)).map(demoTicker);
   try {
     const all = await marketTickers(symbols);
     return all.map(toAppTicker);
@@ -68,7 +70,8 @@ export async function getCandles(
   symbol: string,
   timeframe: Timeframe,
   limit = 300
-): Promise<{ candles: Candle[]; source: "live" }> {
+): Promise<{ candles: Candle[]; source: "live" | "demo" }> {
+  if (await activeDataSource() === "demo") return { candles: demoCandles(symbol, timeframe, limit), source: "demo" };
   const candles = await marketCandles(symbol, TF_MINUTES[timeframe] * 60, limit);
   if (candles.length === 0) {
     throw new MarketError(`No candles available for ${symbol} ${timeframe}`);
@@ -80,6 +83,7 @@ export async function getOrderbook(symbol: string): Promise<OrderBook> {
   if (!flags.orderbook()) {
     throw new MarketError("Orderbook feature disabled");
   }
+  if (await activeDataSource() === "demo") return demoOrderbook(symbol);
   try {
     const book = await marketOrderBook(symbol, 20);
     return {
@@ -95,6 +99,7 @@ export async function getOrderbook(symbol: string): Promise<OrderBook> {
 }
 
 export async function getRecentTrades(symbol: string): Promise<RecentTrade[]> {
+  if (await activeDataSource() === "demo") return demoTrades(symbol);
   try {
     return await marketRecentTrades(symbol);
   } catch (e) {

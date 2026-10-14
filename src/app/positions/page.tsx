@@ -1,6 +1,6 @@
 "use client";
 import { PositionsTable, RiskCard } from "@/components/panels";
-import { Chip, KV, MetricCard, PremiumPanel } from "@/components/ui";
+import { Chip, KV, MetricCard, PageHeader, PremiumPanel } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtPct, fmtUsd, pnlTone } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -25,7 +25,10 @@ export default function PositionsPage() {
   const rl = settings.riskLimits;
 
   return (
-    <div className="p-3 space-y-3 max-w-[1400px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-4 max-w-[1400px] mx-auto">
+      <PageHeader crumb="TRADING / POSITIONS" title="Positions & exposure"
+        description="Everything currently at risk, paper and live, marked against the latest prices." />
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         <MetricCard label="EQUITY" value={fmtUsd(account?.equity)} sub={account?.source === "demo" ? "DEMO / PAPER" : "COINDCX"} />
         <MetricCard label="OPEN P&L" value={fmtUsd(account?.openPnl, { sign: true })}

@@ -1,12 +1,13 @@
 "use client";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   useCallback, useEffect, useMemo, useRef, useState, type ReactNode,
 } from "react";
 import {
   BarChart2, BarChart3, Bell, BookOpen, Bot, Briefcase, CandlestickChart, ChevronLeft, ChevronRight,
-  Command, LayoutDashboard, Layers, LineChart, List, ListFilter, LogOut, Menu, Search, Settings,
-  Target, ArrowUpDown, Wifi, X, Zap,
+  Command, LayoutDashboard, Layers, LineChart, List, ListFilter, LogOut, Menu, Settings,
+  Target, ArrowUpDown, X, Zap,
 } from "lucide-react";
 import { useAlerts, useApp, useMarket } from "@/stores";
 import { api, ApiError, logout } from "@/lib/api";
@@ -35,7 +36,7 @@ const NAV = [
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const {
-    settings, settingsLoaded, applySettings, system, setSystem,
+    settings, settingsLoaded, applySettings, setSystem, activeSymbol,
     paletteOpen, setPalette, helpOpen, setHelp, notify,
   } = useApp();
   const [capabilities, setCapabilities] = useState({ liveExecution: false, exchangeAccountConfigured: false });
@@ -86,9 +87,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   /* ---- market feed: REST polling (the venue socket is server-side only) -- */
   const symbolsKey = useMemo(() => {
-    const set = new Set([...settings.watchlist, useApp.getState().activeSymbol, "BTCUSD"]);
+    const set = new Set([...settings.watchlist, activeSymbol, "BTCUSD"]);
     return [...set].join(",");
-  }, [settings.watchlist]);
+  }, [settings.watchlist, activeSymbol]);
 
   useEffect(() => {
     if (!settingsLoaded) return;
@@ -138,6 +139,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       gain.gain.setValueAtTime(0.06, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
       osc.connect(gain).connect(ctx.destination);
+      osc.onended = () => { void ctx.close(); };
       osc.start();
       osc.stop(ctx.currentTime + 0.26);
     } catch { /* audio unavailable */ }
@@ -193,16 +195,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }, 7000, { enabled: settingsLoaded && settings.mode === "paper" });
 
   const seenSignals = useRef(new Set<string>());
+  const signalsHydrated = useRef(false);
   usePoll(async () => {
     const res = await api.get<{ signals: { id: string; status: string; symbol: string; strategy: string; createdAt: string }[] }>("/api/signals?limit=8");
     for (const s of res.signals) {
       if ((s.status === "LONG_SETUP" || s.status === "SHORT_SETUP") && !seenSignals.current.has(s.id)) {
         seenSignals.current.add(s.id);
-        if (seenSignals.current.size > 1) { // skip initial hydration batch
+        if (signalsHydrated.current && rules.some(r => r.enabled && !r.triggeredAt && r.kind === "strategy_signal" && (r.symbol === "ANY" || r.symbol === s.symbol))) {
           notify({ title: `Signal: ${s.symbol}`, body: `${s.strategy} → ${s.status.replace("_", " ")}`, tone: s.status === "LONG_SETUP" ? "success" : "danger" });
         }
       }
     }
+    signalsHydrated.current = true;
+    if (seenSignals.current.size > 200) seenSignals.current = new Set([...seenSignals.current].slice(-100));
     return res.signals;
   }, 30000, { enabled: settingsLoaded });
 
@@ -280,17 +285,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
+    <div className="h-dvh flex flex-col overflow-hidden">
+      <a href="#main-content" className="skip-link">Skip to workspace</a>
       <TopBar onReconnect={() => setReconnectNonce((n) => n + 1)} />
       <div className="flex flex-1 min-h-0">
         <Sidebar />
-        <main className="flex-1 min-w-0 grid-bg overflow-y-auto pb-14 md:pb-0">{children}</main>
+        <main id="main-content" className="flex-1 min-w-0 grid-bg overflow-y-auto pb-14 md:pb-0">{children}</main>
       </div>
       <StatusBar />
       <MobileNav />
       {paletteOpen && <CommandPalette />}
       <HelpModal open={helpOpen} onClose={() => setHelp(false)} />
-      <NotificationCenter />
     </div>
   );
 }
@@ -301,7 +306,7 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
   const { activeSymbol, setSymbol, timeframe, setTimeframe, settings, system } = useApp();
   const feed = useMarket((s) => s.feed);
   const latency = useMarket((s) => s.latencyMs);
-  const { setPalette, sidebarCollapsed, toggleSidebar } = useApp();
+  const { setPalette } = useApp();
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const symbols = settings.watchlist.includes(activeSymbol)
@@ -323,7 +328,7 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
 
   return (
     <>
-      <header className="h-11 border-b border-edge bg-panel flex items-center gap-3 px-3 flex-none z-20">
+      <header className="min-h-14 border-b border-edge bg-panel flex flex-wrap items-center gap-2 sm:gap-3 px-3 py-2 flex-none z-20">
         {/* Mobile hamburger menu */}
         <button
           onClick={() => setMobileMenuOpen(true)}
@@ -344,7 +349,7 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
         ) : settings.dataSource === "live" ? (
           <Chip tone="up"><StatusDot tone="ok" /> COINDCX LIVE</Chip>
         ) : (
-          <Chip tone="warn"><StatusDot tone="warn" /> DEMO FEED</Chip>
+          <Chip tone="warn"><StatusDot tone="warn" /> DEMO DATA</Chip>
         )}
 
         {/* symbol + live price */}
@@ -386,7 +391,7 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
               ? system?.exchangeAccount === "configured"
                 ? "COINDCX · ACCOUNT UNVERIFIED"
                 : "COINDCX · NOT CONFIGURED"
-              : "DEMO ACCOUNT"}
+              : "DEMO / SIMULATED"}
           </Chip>
           {modeBadge}
           <NotifBell />
@@ -433,12 +438,12 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
                 { href: "/alerts", label: "Alerts", icon: Bell },
                 { href: "/settings", label: "Settings", icon: Settings },
               ].map((item) => (
-                <a key={item.href} href={item.href} onClick={() => setMobileMenuOpen(false)}
+                <Link key={item.href} href={item.href} onClick={() => setMobileMenuOpen(false)}
                   className={cx("flex items-center gap-3 px-3 py-2.5 rounded text-[11px] text-mut hover:text-ink hover:bg-panel2/50 transition-colors",
                     pathname === item.href ? "text-accent bg-accent-dim" : "")}>
                   <item.icon size={16} />
                   {item.label}
-                </a>
+                </Link>
               ))}
               <div className="border-t border-edge pt-3 mt-3">
                 <button onClick={() => void logout()} className="flex items-center gap-3 px-3 py-2.5 rounded text-[11px] text-dn hover:bg-dn/10 transition-colors w-full">
@@ -456,7 +461,6 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
 
 function PriceFlash({ symbol }: { symbol: string }) {
   const t = useMarket((s) => s.tickers[symbol]);
-  const prev = useMarket((s) => s.prevPrice[symbol]);
   const [anim, setAnim] = useState("");
   const lastPrice = useRef<number | null>(null);
 
@@ -477,7 +481,7 @@ function PriceFlash({ symbol }: { symbol: string }) {
       <span key={anim + String(t.price)} className={cx("num text-[16px] font-semibold leading-none", anim)}>
         ${fmtPrice(t.price)}
       </span>
-      <span className={cx("num text-[11px]", t.change24hPct >= 0 ? "text-up" : "text-dn")}>
+      <span className={cx("num text-[11px] hidden sm:inline", t.change24hPct >= 0 ? "text-up" : "text-dn")}>
         {fmtPct(t.change24hPct)}
       </span>
     </div>
@@ -494,10 +498,10 @@ function Sidebar() {
       aria-label="Primary"
       className={cx(
         "hidden md:flex flex-col border-r border-edge bg-panel2 flex-none transition-[width] duration-200",
-        sidebarCollapsed ? "w-12" : "w-47"
+        sidebarCollapsed ? "w-16" : "w-52"
       )}
     >
-      <div className={cx("flex items-center gap-2 h-11 border-b border-edge flex-none", sidebarCollapsed ? "justify-center px-0" : "px-3")}>
+      <div className={cx("flex items-center gap-2 h-18 border-b border-edge flex-none", sidebarCollapsed ? "justify-center px-0" : "px-3")}>
         <Logo size={20} />
         {!sidebarCollapsed && (
           <div className="leading-none">
@@ -506,18 +510,18 @@ function Sidebar() {
           </div>
         )}
       </div>
-      <div className="flex-1 overflow-y-auto py-2">
+      <div className="flex-1 overflow-y-auto py-4">
         {NAV.map((item) => {
           const active = pathname === item.href;
           const Icon = item.icon;
           return (
-            <a
+            <Link
               key={item.href}
               href={item.href}
               title={item.label}
               aria-current={active ? "page" : undefined}
               className={cx(
-                "flex items-center gap-2.5 mx-1.5 px-2.5 h-8 rounded text-[10.5px] tracking-[0.1em] mb-0.5 transition-colors",
+                "flex items-center gap-2.5 mx-3 px-3 h-10 rounded-md text-[11px] tracking-[0.04em] mb-1 transition-colors",
                 active ? "bg-accent-dim text-accent" : "text-mut hover:text-ink hover:bg-panel"
               )}
             >
@@ -526,7 +530,7 @@ function Sidebar() {
               {!sidebarCollapsed && item.tag && (
                 <span className="text-[8px] text-dim border border-edge rounded px-1">{item.tag}</span>
               )}
-            </a>
+            </Link>
           );
         })}
       </div>
@@ -617,10 +621,10 @@ function MobileNav() {
           const Icon = it.icon;
           const active = pathname === it.href;
           return (
-            <a key={it.href} href={it.href} className={cx("flex flex-col items-center justify-center gap-0.5 text-[9px]", active ? "text-accent" : "text-dim")}>
+            <Link key={it.href} href={it.href} className={cx("flex flex-col items-center justify-center gap-0.5 text-[9px]", active ? "text-accent" : "text-dim")}>
               <Icon size={16} />
               {it.label}
-            </a>
+            </Link>
           );
         })}
         <button onClick={() => setMore(true)} className="flex flex-col items-center justify-center gap-0.5 text-[9px] text-dim">
@@ -637,9 +641,9 @@ function MobileNav() {
             </div>
             <div className="grid grid-cols-3 gap-2">
               {NAV.map((n) => (
-                <a key={n.href} href={n.href} onClick={() => setMore(false)} className="panel-2 p-2.5 text-[10px] tracking-wide text-mut hover:text-ink flex items-center gap-1.5">
+                <Link key={n.href} href={n.href} onClick={() => setMore(false)} className="panel-2 p-2.5 text-[10px] tracking-wide text-mut hover:text-ink flex items-center gap-1.5">
                   <n.icon size={13} /> {n.label}
-                </a>
+                </Link>
               ))}
             </div>
             <button
@@ -677,7 +681,7 @@ function NotifBell() {
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-9 w-80 panel z-80 slide-in shadow-2xl shadow-black/50">
+        <div className="absolute right-0 top-9 w-[min(320px,calc(100vw-24px))] panel z-80 slide-in shadow-2xl shadow-black/50">
           <div className="flex items-center justify-between px-3 h-9 border-b border-edge">
             <p className="microlabel">NOTIFICATIONS</p>
             <div className="flex gap-2">
@@ -706,12 +710,6 @@ function NotifBell() {
       )}
     </div>
   );
-}
-
-function NotificationCenter() {
-  // The bell dropdown is the notification center; this placeholder keeps the
-  // API stable for future global toasts.
-  return null;
 }
 
 /* ================= help =================================================== */

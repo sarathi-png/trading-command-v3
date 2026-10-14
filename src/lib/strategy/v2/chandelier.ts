@@ -39,49 +39,21 @@ export function chandelierExit(
   const trend: ("long" | "short")[] = new Array(candles.length).fill("long");
 
   let currentTrend: "long" | "short" = "long";
-  let highestHigh = candles[0].high;
-  let lowestLow = candles[0].low;
-
   for (let i = 0; i < candles.length; i++) {
-    const c = candles[i];
-    const atrVal = atr[i];
-
-    if (i === 0) {
-      longStop[i] = c.close - multiplier * (atrVal || 0);
-      shortStop[i] = c.close + multiplier * (atrVal || 0);
-      trend[i] = "long";
-      highestHigh = c.high;
-      lowestLow = c.low;
-      continue;
-    }
-
-    highestHigh = Math.max(highestHigh, c.high);
-    lowestLow = Math.min(lowestLow, c.low);
-
-    if (currentTrend === "long") {
-      const newLongStop = highestHigh - multiplier * (atrVal || 0);
-      longStop[i] = Math.max(longStop[i - 1] || -Infinity, newLongStop);
-
-      if (c.close < longStop[i]) {
-        currentTrend = "short";
-        shortStop[i] = lowestLow + multiplier * (atrVal || 0);
-        longStop[i] = NaN;
-      } else {
-        shortStop[i] = NaN;
-      }
-    } else {
-      const newShortStop = lowestLow + multiplier * (atrVal || 0);
-      shortStop[i] = Math.min(shortStop[i - 1] || Infinity, newShortStop);
-
-      if (c.close > shortStop[i]) {
-        currentTrend = "long";
-        longStop[i] = highestHigh - multiplier * (atrVal || 0);
-        shortStop[i] = NaN;
-      } else {
-        longStop[i] = NaN;
-      }
-    }
-
+    if (!Number.isFinite(atr[i])) continue;
+    const window = candles.slice(Math.max(0, i - atrLength + 1), i + 1);
+    const rawLong = Math.max(...window.map(c => c.high)) - multiplier * atr[i];
+    const rawShort = Math.min(...window.map(c => c.low)) + multiplier * atr[i];
+    const previousLong = longStop[i - 1];
+    const previousShort = shortStop[i - 1];
+    const previousClose = candles[i - 1]?.close;
+    longStop[i] = Number.isFinite(previousLong) && previousClose > previousLong
+      ? Math.max(rawLong, previousLong) : rawLong;
+    shortStop[i] = Number.isFinite(previousShort) && previousClose < previousShort
+      ? Math.min(rawShort, previousShort) : rawShort;
+    // A close crosses a stop known BEFORE this candle, not a future-adjusted stop.
+    if (Number.isFinite(previousShort) && candles[i].close > previousShort) currentTrend = "long";
+    else if (Number.isFinite(previousLong) && candles[i].close < previousLong) currentTrend = "short";
     trend[i] = currentTrend;
   }
 

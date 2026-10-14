@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { ShieldAlert } from "lucide-react";
-import { Btn, Chip, EmptyState, Input, KV, Modal, PremiumPanel, Select, Skeleton, Toggle } from "@/components/ui";
+import { Btn, Chip, EmptyState, Input, KV, Modal, PremiumPanel, PageHeader, Select, Skeleton, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtDateTime, fmtPrice, fmtUsd } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -84,7 +84,10 @@ export default function OrdersPage() {
   const history = orders.filter((o) => o.status !== "open").slice(0, 40);
 
   return (
-    <div className="p-3 grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-3 max-w-[1500px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-4 max-w-[1500px] mx-auto">
+      <PageHeader crumb="TRADING / ORDERS" title="Order desk"
+        description="Place paper orders, review the working book and keep the ticket separate from your analysis." />
+      <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-4">
       {/* order ticket */}
       <PremiumPanel title="ORDER TICKET" badge={
         settings.mode === "paper" ? <Chip tone="warn">PAPER</Chip>
@@ -226,6 +229,7 @@ export default function OrdersPage() {
           </div>
         </div>
       </Modal>
+      </div>
     </div>
   );
 }

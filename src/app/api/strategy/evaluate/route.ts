@@ -3,10 +3,10 @@ import { flags } from "@/lib/flags";
 import { getCandles } from "@/lib/market/service";
 import { getSettings, logAudit } from "@/lib/settings";
 import { ALL_STRATEGIES, buildAnalysis } from "@/lib/strategy/engine";
-import { TF_MINUTES, TIMEFRAMES, type Candle, type Timeframe } from "@/lib/types";
+import { TF_MINUTES, TIMEFRAMES, type Timeframe } from "@/lib/types";
 import { analyzeConfluence, gateSignal, type ConfluenceResult } from "@/lib/strategy/quant/confluence";
 import { buildFeatures, toArray, FEATURE_COLUMNS } from "@/lib/strategy/quant/features";
-import { predictProba, gateWithMeta, META_MODEL as META_WEIGHTS, META_MODEL_INFO } from "@/lib/strategy/quant/metaModel";
+import { predictProba, gateWithMeta, META_MODEL as META_WEIGHTS } from "@/lib/strategy/quant/metaModel";
 import { regime } from "@/lib/strategy/quant/diagnostics";
 
 export const dynamic = "force-dynamic";

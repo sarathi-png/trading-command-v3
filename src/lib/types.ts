@@ -177,7 +177,7 @@ export interface AppSettings {
   mode: ExecMode;
   liveArmed: boolean; // master trading switch, OFF by default
   layout: LayoutPreset;
-  dataSource: "live";
+  dataSource: "live" | "demo";
   accent: "teal" | "blue" | "purple" | "amber";
   density: "comfortable" | "compact";
   reduceMotion: boolean;

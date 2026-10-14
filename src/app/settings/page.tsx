@@ -6,7 +6,7 @@ import { api, logout } from "@/lib/api";
 import { cx, fmtDateTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
 import { LAYOUT_PRESETS, useApp } from "@/stores";
-import type { AppSettings, LayoutPreset, SystemStatus } from "@/lib/types";
+import type { AppSettings, LayoutPreset } from "@/lib/types";
 
 const ACCENTS = [
   { id: "teal", color: "#57E6D2", label: "Teal" },
@@ -38,7 +38,7 @@ function getServerOrigin(): string {
 export default function SettingsPage() {
   const { settings, patchSettings, applySettings, applyLayoutPreset, system, notify } = useApp();
   const [confirm, confirmNode] = useConfirm();
-  const { data: caps, refresh: refreshCaps } = usePoll(
+  const { data: caps } = usePoll(
     () => api.get<{ capabilities: Record<string, boolean> }>("/api/settings").then((r) => r.capabilities),
     600000
   );
@@ -217,10 +217,11 @@ export default function SettingsPage() {
         <div className="p-3 space-y-2.5">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="microlabel w-28">SOURCE</span>
-            <button onClick={() => void patchSettings({ dataSource: "live" })}
-              className="h-7 px-3 rounded border text-[10px] tracking-wider uppercase border-accent/60 text-accent bg-accent-dim">
-              CoinDCX Futures
-            </button>
+            {(["demo", "live"] as const).map(source => <button key={source} onClick={() => void patchSettings({ dataSource: source })}
+              aria-pressed={settings.dataSource === source}
+              className={cx("h-9 px-3 rounded-md border text-[11px]", settings.dataSource === source ? "border-accent/60 text-accent bg-accent-dim" : "border-edge text-mut")}>
+              {source === "demo" ? "Demo simulator" : "CoinDCX Futures"}
+            </button>)}
           </div>
           <div className="flex items-center gap-2 text-[11px] text-mut">
             <StatusDot tone={system?.exchangeMarket === "online" ? "ok" : system?.exchangeMarket === "offline" ? "err" : "off"} />

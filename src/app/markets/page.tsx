@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Star, X } from "lucide-react";
 import { OrderBookPanel } from "@/components/panels";
-import { Btn, Chip, EmptyState, Panel, Select, Skeleton } from "@/components/ui";
+import { Btn, Chip, EmptyState, PageHeader, Panel, Select, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtCompactUsd, fmtPct, fmtPrice, fmtTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -11,7 +11,7 @@ import { useApp, useMarket } from "@/stores";
 import type { RecentTrade, Ticker } from "@/lib/types";
 
 export default function MarketsPage() {
-  const { settings, patchSettings, setSymbol, activeSymbol } = useApp();
+  const { settings, patchSettings, setSymbol } = useApp();
   const router = useRouter();
   const [selected, setSelected] = useState<string | null>(null);
   const { data } = usePoll(
@@ -36,7 +36,10 @@ export default function MarketsPage() {
   };
 
   return (
-    <div className="p-3 grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-3 max-w-[1700px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-4 max-w-[1700px] mx-auto">
+      <PageHeader crumb="MARKETS / WATCHLIST" title="Markets"
+        description="Your watchlist with live prices, 24h range and depth for the selected instrument." />
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-4">
       <Panel title="WATCHLIST" right={
         <div className="flex items-center gap-1.5">
           {addable.length > 0 && (
@@ -148,14 +151,13 @@ export default function MarketsPage() {
           </>
         )}
       </div>
+      </div>
     </div>
   );
 }
 
 function MarketDetail({ symbol }: { symbol: string }) {
   const t = useMarket((s) => s.tickers[symbol]);
-  const { activeSymbol } = useApp();
-  void activeSymbol;
   return (
     <Panel title={symbol} badge={t && <Chip tone={t.source === "demo" ? "warn" : "up"}>{t.source === "demo" ? "DEMO DATA" : "COINDCX LIVE"}</Chip>}>
       <div className="p-3">

@@ -1,7 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import { BarChart3 } from "lucide-react";
-import { EmptyState, MetricCard, Panel, Skeleton } from "@/components/ui";
+import { EmptyState, MetricCard, PageHeader, Panel, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtDuration, fmtUsd } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -64,7 +64,10 @@ export default function AnalyticsPage() {
 
   if (loading && !data) {
     return (
-      <div className="p-3 space-y-3 max-w-[1400px] mx-auto">
+      <div className="p-4 lg:p-6 space-y-4 max-w-[1400px] mx-auto">
+        <PageHeader crumb="INSIGHTS / ANALYTICS" title="Performance analytics"
+          description="Outcome distribution across your recorded trades. Descriptive statistics only, not a forecast." />
+
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
           {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
         </div>
@@ -75,7 +78,10 @@ export default function AnalyticsPage() {
 
   if (closed.length === 0) {
     return (
-      <div className="p-3 max-w-[1400px] mx-auto">
+      <div className="p-4 lg:p-6 space-y-4 max-w-[1400px] mx-auto">
+        <PageHeader crumb="INSIGHTS / ANALYTICS" title="Performance analytics"
+          description="Outcome distribution across your recorded trades. Descriptive statistics only, not a forecast." />
+
         <Panel title="ANALYTICS">
           <EmptyState
             icon={<BarChart3 size={20} />}

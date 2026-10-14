@@ -3,17 +3,19 @@
 /* ---- Trading Command theme -------------------------------------------- */
 
 :root {
-  --accent: #57e6d2;
+  --font-inter: "Inter Variable";
+  --font-jet: "JetBrains Mono Variable";
+  --accent: #65d7c0;
   --accent-dim: rgba(87, 230, 210, 0.14);
-  --bg: #070a0f;
+  --bg: #0b1017;
   --bg-2: #0b0f16;
-  --panel: #0e131b;
-  --panel-2: #111720;
-  --edge: rgba(148, 163, 184, 0.09);
+  --panel: #111923;
+  --panel-2: #151f2b;
+  --edge: rgba(148, 163, 184, 0.14);
   --edge-2: rgba(148, 163, 184, 0.16);
   --ink: #e7ecf3;
   --mut: #8b98a9;
-  --dim: #5b6b80;
+  --dim: #8493a6;
   --up: #2fd388;
   --dn: #f0524f;
   --warn: #f5b84d;
@@ -69,13 +71,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* subtle technical grid on the workspace */
-.grid-bg {
-  background-image:
-    linear-gradient(rgba(148, 163, 184, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.035) 1px, transparent 1px);
-  background-size: 34px 34px;
-}
+.grid-bg { background: var(--bg); }
 
 .num {
   font-family: var(--font-mono);
@@ -85,7 +81,7 @@ body {
 
 .microlabel {
   font-size: 10px;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--dim);
   font-weight: 500;
@@ -94,7 +90,7 @@ body {
 .panel {
   background: var(--panel);
   border: 1px solid var(--edge);
-  border-radius: 6px;
+  border-radius: 10px;
 }
 
 .panel-2 {
@@ -200,7 +196,7 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .metric-card-hover:hover {
-  transform: translateY(-2px);
+  border-color: var(--edge-2);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
 
@@ -276,19 +272,6 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
   --elevation-4: 0 8px 32px rgba(15, 23, 42, 0.12);
 }
 
-/* Premium panel with elevation */
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-md);
-  box-shadow: var(--elevation-1);
-  transition: box-shadow var(--transition-normal), transform var(--transition-normal);
-}
-
-.panel:hover {
-  box-shadow: var(--elevation-2);
-}
-
 /* Premium metric card */
 .metric-card {
   background: var(--panel);
@@ -300,7 +283,7 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 }
 
 .metric-card:hover {
-  transform: translateY(-2px);
+  border-color: var(--edge-2);
   box-shadow: var(--elevation-2);
 }
 
@@ -348,7 +331,7 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 
 .section-title {
   font-size: 10px;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--dim);
   font-weight: 500;
@@ -433,4 +416,24 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
   .grid-responsive {
     grid-template-columns: repeat(4, 1fr);
   }
+}
+
+/* Clear controls and accessible motion, without changing the font families. */
+button:not(:disabled), a, select { -webkit-tap-highlight-color: transparent; }
+button:not(:disabled), select { cursor: pointer; }
+.panel > header { min-width: 0; }
+.panel > header .microlabel { color: var(--mut); font-weight: 600; }
+.skip-link { position: fixed; top: -80px; left: 16px; z-index: 200; padding: 12px 18px; background: var(--accent); color: #071713; border-radius: 6px; }
+.skip-link:focus { top: 12px; }
+/* Touch devices have no hover: keep icon actions visible and large enough. */
+@media (hover: none), (pointer: coarse) {
+  .metric-hide { opacity: 1; }
+  button, [role="switch"], select { min-height: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}
+@media (max-width: 639px) {
+  nav[aria-label="Mobile"] { padding-bottom: env(safe-area-inset-bottom); height: calc(56px + env(safe-area-inset-bottom)); }
+  #main-content { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 }

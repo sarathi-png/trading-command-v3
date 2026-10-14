@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Zap, CandlestickChart } from "lucide-react";
+import { Zap } from "lucide-react";
 import { Chip, EmptyState, Input, Panel, Skeleton, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtDateTime, fmtPrice } from "@/lib/format";
@@ -39,22 +39,6 @@ function ComponentBar({ label, value }: { label: string; value: number }) {
       </span>
     </div>
   );
-}
-
-interface QuantSnapshot {
-  confluence?: {
-    score: number; direction: string;
-    components: { trend: number; zone: number; momentum: number; volume: number };
-    reasons: string[]; atr: number | null;
-  } | null;
-  metaProba?: number | null;
-  regime?: string;
-  gates?: {
-    confluence: { passed: boolean; reason: string };
-    meta: { passed: boolean; reason: string };
-    final: boolean;
-  };
-  error?: string;
 }
 
 const STRATEGY_META: Record<string, { name: string; desc: string }> = {

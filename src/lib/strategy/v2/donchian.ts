@@ -8,13 +8,13 @@ export function donchianRibbon(
   const upper: number[][] = periods.map(() => new Array(candles.length).fill(NaN));
   const lower: number[][] = periods.map(() => new Array(candles.length).fill(NaN));
   const middle: number[][] = periods.map(() => new Array(candles.length).fill(NaN));
-  const trend: ("green" | "red")[] = new Array(candles.length).fill("green");
+  const trend: ("green" | "red" | "neutral")[] = new Array(candles.length).fill("neutral");
 
   for (let pIdx = 0; pIdx < periods.length; pIdx++) {
     const period = periods[pIdx];
 
     for (let i = 0; i < candles.length; i++) {
-      if (i < period - 1) {
+      if (i < period) {
         upper[pIdx][i] = NaN;
         lower[pIdx][i] = NaN;
         middle[pIdx][i] = NaN;
@@ -24,7 +24,7 @@ export function donchianRibbon(
       let highestHigh = -Infinity;
       let lowestLow = Infinity;
 
-      for (let j = i - period + 1; j <= i; j++) {
+      for (let j = i - period; j < i; j++) {
         highestHigh = Math.max(highestHigh, candles[j].high);
         lowestLow = Math.min(lowestLow, candles[j].low);
       }
@@ -56,7 +56,7 @@ export function donchianRibbon(
 
     if (allGreen) trend[i] = "green";
     else if (allRed) trend[i] = "red";
-    else trend[i] = trend[i - 1] || "green";
+    else trend[i] = trend[i - 1] || "neutral";
   }
 
   return { upper, lower, middle, trend };
@@ -71,7 +71,7 @@ export function getDonchianState(
 } {
   const result = donchianRibbon(candles, periods);
   const lastIdx = candles.length - 1;
-  const trend = result.trend[lastIdx];
+  const trend = result.trend[lastIdx] ?? "neutral";
 
   const periodsState: Record<number, { upper: number; lower: number; middle: number }> = {};
   for (let pIdx = 0; pIdx < periods.length; pIdx++) {

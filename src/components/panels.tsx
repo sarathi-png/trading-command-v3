@@ -205,12 +205,12 @@ export function RiskCard({ account, symbol, defaultLevels, className }: {
           <div className="flex border border-edge overflow-hidden">
             <button
               onClick={switchToAuto}
-              className={cx("px-2.5 py-0.5 text-[10px] tracking-wide",
+              className={cx("px-3 min-h-6 text-[10px] tracking-wide",
                 calcMode === "auto" ? "bg-accent text-bg font-semibold" : "text-dim hover:text-ink")}
             >AUTO</button>
             <button
               onClick={switchToManual}
-              className={cx("px-2.5 py-0.5 text-[10px] tracking-wide",
+              className={cx("px-3 min-h-6 text-[10px] tracking-wide",
                 calcMode === "manual" ? "bg-accent text-bg font-semibold" : "text-dim hover:text-ink")}
             >MANUAL</button>
           </div>
