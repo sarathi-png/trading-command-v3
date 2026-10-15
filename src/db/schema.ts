@@ -71,7 +71,7 @@ export const journalTable = pgTable("trade_journal", {
   tags: jsonb("tags").notNull().default([]),
   openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
   closedAt: timestamp("closed_at", { withTimezone: true }),
-  source: text("source").notNull().default("manual"), // manual | paper | seed
+  source: text("source").notNull().default("manual"), // manual | paper | seed | coindcx
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 

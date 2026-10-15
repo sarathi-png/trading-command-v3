@@ -64,7 +64,7 @@ export function normalizeRiskLimits(input: Partial<RiskLimits>): RiskLimits {
     maxDailyLoss: finite(input.maxDailyLoss, 200),
     maxOrderValue: finite(input.maxOrderValue, 5000),
     maxLeverage: Math.min(finite(input.maxLeverage, 10), 50),
-    maxOpenPositions: Math.min(Math.round(finite(input.maxOpenPositions, 4)), 50),
+    maxOpenPositions: Math.max(1, Math.min(Math.round(finite(input.maxOpenPositions, 4)), 50)),
   };
 }
 
@@ -82,6 +82,12 @@ export function evaluateOrderRisk(input: RiskInput, ctx: RiskContext): RiskVerdi
   }
 
   const orderValue = input.qty * input.price;
+  if (!Number.isFinite(orderValue)) return block("invalid_order_value", "Order value is not finite.", 0);
+  if (!input.reduceOnly && (!Number.isFinite(ctx.equity) || ctx.equity <= 0 ||
+      !Number.isFinite(ctx.currentNotional) || ctx.currentNotional < 0)) {
+    return block("invalid_risk_context", "Equity or exposure cannot be verified.", orderValue);
+  }
+
 
   if (limits.maxOrderValue > 0 && orderValue > limits.maxOrderValue) {
     return block(
@@ -120,7 +126,7 @@ export function evaluateOrderRisk(input: RiskInput, ctx: RiskContext): RiskVerdi
     );
   }
 
-  if (limits.maxLeverage > 0 && ctx.equity > 0) {
+  if (!input.reduceOnly && limits.maxLeverage > 0 && ctx.equity > 0) {
     const exposure = ctx.currentNotional + orderValue;
     const leverage = exposure / ctx.equity;
     if (leverage > limits.maxLeverage) {

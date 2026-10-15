@@ -1,7 +1,8 @@
 "use client";
+import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
 import { useMemo } from "react";
 import { BarChart3 } from "lucide-react";
-import { EmptyState, MetricCard, Panel, Skeleton } from "@/components/ui";
+import { EmptyState, MetricCard, PageHeader, Panel, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtDuration, fmtUsd } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -21,7 +22,8 @@ function cumulativePnl(entries: Row[]): number[] {
 }
 
 export default function AnalyticsPage() {
-  const { data, loading } = usePoll(() => api.get<{ entries: Row[] }>("/api/journal"), 60000);
+  useDisplayCurrency();
+  const { data, loading } = usePoll(() => api.get<{ entries: Row[] }>("/api/journal?mode=paper"), 60000);
 
   const closed = useMemo(
     () => (data?.entries ?? []).filter((e) => e.exit !== null && e.closedAt).sort(
@@ -64,8 +66,11 @@ export default function AnalyticsPage() {
 
   if (loading && !data) {
     return (
-      <div className="p-3 space-y-3 max-w-[1400px] mx-auto">
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
+      <div className="p-4 lg:p-6 space-y-4 page-shell">
+        <PageHeader crumb="INSIGHTS / ANALYTICS" title="Performance analytics"
+          description="Outcome distribution across your recorded trades. Descriptive statistics only, not a forecast." />
+
+        <div className="auto-cells">
           {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
         </div>
         <Skeleton className="h-64" />
@@ -75,7 +80,10 @@ export default function AnalyticsPage() {
 
   if (closed.length === 0) {
     return (
-      <div className="p-3 max-w-[1400px] mx-auto">
+      <div className="p-4 lg:p-6 space-y-4 page-shell">
+        <PageHeader crumb="INSIGHTS / ANALYTICS" title="Performance analytics"
+          description="Outcome distribution across your recorded trades. Descriptive statistics only, not a forecast." />
+
         <Panel title="ANALYTICS">
           <EmptyState
             icon={<BarChart3 size={20} />}
@@ -88,8 +96,8 @@ export default function AnalyticsPage() {
   }
 
   return (
-    <div className="p-3 space-y-3 max-w-[1400px] mx-auto">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+    <div className="p-3 space-y-3 page-shell">
+      <div className="auto-cells">
         <MetricCard label="TOTAL TRADES" value={String(closed.length)} sub={`${wins.length}W / ${losses.length}L`} />
         <MetricCard label="WIN RATE" value={`${((wins.length / closed.length) * 100).toFixed(1)}%`}
           tone={wins.length >= losses.length ? "up" : "dn"} />
@@ -104,7 +112,7 @@ export default function AnalyticsPage() {
           tone={net >= 0 ? "up" : "dn"} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div className="auto-panels">
         <Panel title="EQUITY CURVE (CUMULATIVE P&L)">
           <div className="p-3">
             <SvgLine data={equity} />
@@ -153,6 +161,7 @@ export default function AnalyticsPage() {
 }
 
 function SvgLine({ data }: { data: number[] }) {
+  useDisplayCurrency();
   const w = 560; const h = 180;
   if (data.length < 2) return <p className="text-[11px] text-dim py-8 text-center">Need at least two closed trades.</p>;
   const min = Math.min(0, ...data);
@@ -166,7 +175,7 @@ function SvgLine({ data }: { data: number[] }) {
       <line x1="0" y1={zeroY} x2={w} y2={zeroY} stroke="rgba(148,163,184,0.2)" strokeDasharray="3 4" strokeWidth="1" />
       <polyline points={pts.join(" ")} fill="none" stroke={last >= 0 ? "var(--up)" : "var(--dn)"} strokeWidth="1.6" strokeLinejoin="round" />
       <text x={w - 4} y={12} textAnchor="end" fill="var(--mut)" fontSize="10" fontFamily="JetBrains Mono, monospace">
-        {last >= 0 ? "+" : ""}{last.toFixed(0)}
+        {fmtUsd(last, { sign: true, decimals: 0 })}
       </text>
     </svg>
   );

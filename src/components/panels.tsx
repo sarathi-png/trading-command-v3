@@ -1,4 +1,7 @@
 "use client";
+import { useMoneyInput } from "@/lib/useMoneyInput";
+import { currencySymbol, displayRate } from "@/lib/displayCurrency";
+import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
 import { useMemo, useState } from "react";
 import { Inbox } from "lucide-react";
 import { api } from "@/lib/api";
@@ -21,6 +24,7 @@ const STATUS_TONE: Record<StrategySignal["status"], "default" | "up" | "dn" | "w
 };
 
 export function SignalPanel({ analysis, className }: { analysis: Analysis | null; className?: string }) {
+  useDisplayCurrency();
   const primary = analysis?.signals.find((s) => s.entry !== null) ?? analysis?.signals[0] ?? null;
   return (
     <Panel title="STRATEGY SIGNAL" className={className} badge={analysis && (
@@ -83,7 +87,7 @@ export function SignalPanel({ analysis, className }: { analysis: Analysis | null
 
           <div className="border-t border-edge pt-2 grid grid-cols-2 gap-x-4">
             <KV k="ENTRY" v={primary?.entry ? fmtPrice(primary.entry) : "—"} />
-            <KV k="R:R" v={primary?.rr ? `1 : ${primary.rr.toFixed(1)}` : "—"} />
+            <KV k="R:R" v={primary?.rr ? `1 : ${primary.rr.toFixed(1)}` : "—"} help="rr" />
             <KV k="STOP" v={primary?.stop ? <span className="text-dn">{fmtPrice(primary.stop)}</span> : "—"} mono />
             <KV k="TARGET" v={primary?.target ? <span className="text-up">{fmtPrice(primary.target)}</span> : "—"} mono />
           </div>
@@ -107,6 +111,7 @@ export function SignalPanel({ analysis, className }: { analysis: Analysis | null
 /* ================= order book ================= */
 
 export function OrderBookPanel({ symbol, className }: { symbol: string; className?: string }) {
+  useDisplayCurrency();
   const { data } = usePoll(
     () => api.get<{ orderbook: OrderBook; trades: RecentTrade[] }>(`/api/market/orderbook?symbol=${symbol}`),
     2600,
@@ -160,6 +165,7 @@ export function RiskCard({ account, symbol, defaultLevels, className }: {
   defaultLevels?: { entry?: number | null; stop?: number | null; target?: number | null };
   className?: string;
 }) {
+  useDisplayCurrency();
   const ticker = useMarket((s) => s.tickers[symbol]);
   const [entry, setEntry] = useState<string>("");
   const [stop, setStop] = useState<string>("");
@@ -172,6 +178,10 @@ export function RiskCard({ account, symbol, defaultLevels, className }: {
   const e = parseFloat(entry) || (touched ? NaN : defaultLevels?.entry ?? ticker?.price ?? NaN);
   const s = parseFloat(stop) || (touched ? NaN : defaultLevels?.stop ?? NaN);
   const t = parseFloat(target) || (touched ? NaN : defaultLevels?.target ?? NaN);
+  const rate = displayRate();
+  const entryInput = useMoneyInput(entry, setEntry);
+  const stopInput = useMoneyInput(stop, setStop);
+  const targetInput = useMoneyInput(target, setTarget);
   const q = parseFloat(qty) || 0;
   const balance = account?.equity ?? 0;
 
@@ -205,12 +215,12 @@ export function RiskCard({ account, symbol, defaultLevels, className }: {
           <div className="flex border border-edge overflow-hidden">
             <button
               onClick={switchToAuto}
-              className={cx("px-2.5 py-0.5 text-[10px] tracking-wide",
+              className={cx("px-3 min-h-6 text-[10px] tracking-wide",
                 calcMode === "auto" ? "bg-accent text-bg font-semibold" : "text-dim hover:text-ink")}
             >AUTO</button>
             <button
               onClick={switchToManual}
-              className={cx("px-2.5 py-0.5 text-[10px] tracking-wide",
+              className={cx("px-3 min-h-6 text-[10px] tracking-wide",
                 calcMode === "manual" ? "bg-accent text-bg font-semibold" : "text-dim hover:text-ink")}
             >MANUAL</button>
           </div>
@@ -218,29 +228,30 @@ export function RiskCard({ account, symbol, defaultLevels, className }: {
             {calcMode === "auto" ? "mirrors the current signal levels" : "type your own entry / stop / target"}
           </span>
         </div>
+        <p className="text-[10px] text-dim">Price inputs: {currencySymbol()} · USD-equivalent execution units; coin quantity unchanged.</p>
         <div className="grid grid-cols-2 gap-2">
           <label className="space-y-1"><span className="microlabel">ENTRY</span>
             <Input inputMode="decimal" placeholder={Number.isFinite(e) ? String(e) : "—"}
-              value={entry || (calcMode === "auto" && Number.isFinite(e) ? String(e) : "")}
-              onChange={(ev) => { setEntry(ev.target.value); setTouched(true); setCalcMode("manual"); }} /></label>
+              value={entryInput.value || (calcMode === "auto" && Number.isFinite(e) ? String(e * rate) : "")}
+              onChange={(ev) => { entryInput.onChange(ev.target.value); setTouched(true); setCalcMode("manual"); }} /></label>
           <label className="space-y-1"><span className="microlabel">QTY</span>
             <Input inputMode="decimal" value={qty} onChange={(ev) => setQty(ev.target.value)} /></label>
           <label className="space-y-1"><span className="microlabel">STOP</span>
             <Input inputMode="decimal" placeholder={Number.isFinite(s) ? String(s) : "—"}
-              value={stop || (calcMode === "auto" && Number.isFinite(s) ? String(s) : "")}
-              onChange={(ev) => { setStop(ev.target.value); setTouched(true); setCalcMode("manual"); }} /></label>
+              value={stopInput.value || (calcMode === "auto" && Number.isFinite(s) ? String(s * rate) : "")}
+              onChange={(ev) => { stopInput.onChange(ev.target.value); setTouched(true); setCalcMode("manual"); }} /></label>
           <label className="space-y-1"><span className="microlabel">TARGET</span>
             <Input inputMode="decimal" placeholder={Number.isFinite(t) ? String(t) : "—"}
-              value={target || (calcMode === "auto" && Number.isFinite(t) ? String(t) : "")}
-              onChange={(ev) => { setTarget(ev.target.value); setTouched(true); setCalcMode("manual"); }} /></label>
+              value={targetInput.value || (calcMode === "auto" && Number.isFinite(t) ? String(t * rate) : "")}
+              onChange={(ev) => { targetInput.onChange(ev.target.value); setTouched(true); setCalcMode("manual"); }} /></label>
         </div>
         <div className="border-t border-edge pt-2">
           {valid ? (
             <>
-              <KV k="RISK AMOUNT" v={<span className="text-dn">{fmtUsd(riskAmt)}</span>} />
+              <KV k="RISK AMOUNT" help="rMultiple" v={<span className="text-dn">{fmtUsd(riskAmt)}</span>} />
               <KV k="RISK % OF EQUITY" v={balance > 0 ? fmtPct((riskAmt / balance) * 100) : "N/A"} />
               <KV k="POTENTIAL PROFIT" v={<span className="text-up">{fmtUsd(rewardAmt)}</span>} />
-              <KV k="R : R" v={`1 : ${rr.toFixed(2)}`} />
+              <KV k="R : R" help="rr" v={`1 : ${rr.toFixed(2)}`} />
               <KV k="EST. FEES (0.05% ×2)" v={fmtUsd(fees)} />
               <KV k="EST. NET RESULT" v={<span className="text-up">{fmtUsd(net)}</span>} />
               <p className="text-[9px] text-dim mt-1.5 leading-snug">
@@ -268,6 +279,7 @@ export function PositionsTable({
   source: "paper" | "all";
   className?: string;
 }) {
+  useDisplayCurrency();
   const positions = account?.positions.filter((p) => source === "all" || p.source === source) ?? [];
   return (
     <Panel title={source === "paper" ? "PAPER POSITIONS" : "POSITIONS"} className={className}
@@ -301,7 +313,7 @@ export function PositionsTable({
                     <td className="px-2 py-1.5 num text-right">{fmtPrice(p.entry)}</td>
                     <td className="px-2 py-1.5 num text-right">{fmtPrice(p.mark)}</td>
                     <td className={cx("px-2 py-1.5 num text-right", tone === "pos" ? "text-up" : tone === "neg" ? "text-dn" : "")}>
-                      {p.upl >= 0 ? "+" : "-"}${Math.abs(p.upl).toFixed(2)}
+                      {fmtUsd(p.upl, { sign: true })}
                     </td>
                     <td className="px-2 py-1.5"><Chip>{p.source.toUpperCase()}</Chip></td>
                     {onClose && (

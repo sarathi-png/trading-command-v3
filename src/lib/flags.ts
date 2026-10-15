@@ -9,15 +9,6 @@ function envBool(name: string, fallback: boolean): boolean {
   return v === "true" || v === "1";
 }
 
-/** First non-empty value among equivalent names (rename support). */
-function envBoolAny(names: string[], fallback: boolean): boolean {
-  for (const name of names) {
-    const v = process.env[name];
-    if (v !== undefined && v !== "") return v === "true" || v === "1";
-  }
-  return fallback;
-}
-
 export const flags = {
   /**
    * Public exchange market data via REST (no credentials required).

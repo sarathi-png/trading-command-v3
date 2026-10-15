@@ -11,6 +11,6 @@ export async function GET(req: Request) {
     return Response.json({ tickers, source: await activeDataSource(), known: knownSymbols() });
   } catch (e) {
     const msg = e instanceof MarketError ? e.message : "Market data unavailable";
-    return Response.json({ error: msg, tickers: [], source: await activeDataSource() }, { status: 502 });
+    return Response.json({ error: msg, tickers: [], source: await activeDataSource(), known: knownSymbols() }, { status: 502 });
   }
 }

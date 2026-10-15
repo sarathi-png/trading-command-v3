@@ -1,4 +1,5 @@
 "use client";
+import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
 import { TrendingUp, TrendingDown, Minus, Activity } from "lucide-react";
 import { Chip, KV, PremiumPanel, Skeleton } from "@/components/ui";
 import { fmtPrice } from "@/lib/format";
@@ -14,6 +15,7 @@ const STATUS_TONE: Record<StrategySignal["status"], "default" | "up" | "dn" | "w
 };
 
 export function SignalDisplay({ state, className }: { state: SignalState | null; className?: string }) {
+  useDisplayCurrency();
   if (!state || !state.signal) {
     return (
       <PremiumPanel title="CHANDELIER + DONCHIAN" className={className} elevation={2}>

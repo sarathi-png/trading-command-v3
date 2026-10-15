@@ -96,17 +96,18 @@ export function exchangeConfigured(): boolean {
  * The CoinDCX client, rebuilt only when the configuration changes (which in a
  * serverless process means "once"). Stateless, so sharing it is safe.
  */
-export function exchangeClient(): CoinDcxClient {
+export function exchangeClient(options?: { timeoutMs?: number; maxReadRetries?: number }): CoinDcxClient {
   const state = exchangeConfigState();
   const apiKey = env("COINDCX_API_KEY");
   const apiSecret = env("COINDCX_API_SECRET");
-  const fingerprint = `${state.baseUrl}|${state.publicBaseUrl}|${apiKey ? "k" : ""}${apiSecret ? "s" : ""}|${apiKey.length}:${apiSecret.length}`;
+  const fingerprint = `${state.baseUrl}|${state.publicBaseUrl}|${apiKey ? "k" : ""}${apiSecret ? "s" : ""}|${apiKey.length}:${apiSecret.length}|${options?.timeoutMs ?? "default"}:${options?.maxReadRetries ?? "default"}`;
   if (cached && cached.fingerprint === fingerprint) return cached.client;
   const client = new CoinDcxClient({
     baseUrl: state.baseUrl,
     publicBaseUrl: state.publicBaseUrl,
     credentials: apiKey && apiSecret ? { apiKey, apiSecret } : null,
     exchange: state.exchange,
+    ...options,
   });
   cached = { fingerprint, client };
   return client;

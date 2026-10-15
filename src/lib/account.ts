@@ -7,7 +7,6 @@
  */
 import { getRepo } from "@/lib/repo";
 import { exchangeAccountConfigured } from "./credentials";
-import { flags } from "./flags";
 import { liveBalances, livePositions } from "./exchange/service";
 import { getTickers } from "./market/service";
 import { getPaperState } from "./paper/engine";
@@ -36,10 +35,10 @@ export async function getAccountState(): Promise<AccountState> {
 
   // Demo rows are synthetic, so they must not count towards real P&L.
   const repo = await getRepo();
-  const realizedTotal = await repo.sumJournalPnl({ excludeMode: "demo" });
+  const realizedTotal = await repo.sumJournalPnl({ mode: "paper" });
   const dayStart = new Date();
   dayStart.setUTCHours(0, 0, 0, 0);
-  const todayPnl = await repo.sumJournalPnl({ excludeMode: "demo", closedSince: dayStart });
+  const todayPnl = await repo.sumJournalPnl({ mode: "paper", closedSince: dayStart });
 
   const equity = settings.startingBalance + realizedTotal + openPnl;
 

@@ -1,3 +1,4 @@
+import { setDisplayCurrency } from "./lib/displayCurrency";
 import { create } from "zustand";
 import { api } from "./lib/api";
 import type { AppSettings, LayoutPreset, SystemStatus, Ticker, Timeframe } from "./lib/types";
@@ -97,7 +98,7 @@ export const useApp = create<AppState>((set, get) => ({
   helpOpen: false,
   sidebarCollapsed: false,
 
-  applySettings: (s) => set({ settings: s, settingsLoaded: true }),
+  applySettings: (s) => { setDisplayCurrency(s); set({ settings: s, settingsLoaded: true }); },
 
   patchSettings: async (patch, persist = true) => {
     const next = {
@@ -107,10 +108,12 @@ export const useApp = create<AppState>((set, get) => ({
       strategiesEnabled: { ...get().settings.strategiesEnabled, ...(patch.strategiesEnabled ?? {}) },
       riskLimits: { ...get().settings.riskLimits, ...(patch.riskLimits ?? {}) },
     };
+    setDisplayCurrency(next);
     set({ settings: next });
     if (persist) {
       try {
         const res = await api.post<{ settings: AppSettings }>("/api/settings", patch);
+        setDisplayCurrency(res.settings);
         set({ settings: res.settings });
       } catch {
         /* keep optimistic value; server cache resyncs on next load */
@@ -148,7 +151,11 @@ export const useApp = create<AppState>((set, get) => ({
   clearNotifications: () => set({ notifications: [], unread: 0 }),
   setPalette: (open) => set({ paletteOpen: open }),
   setHelp: (open) => set({ helpOpen: open }),
-  toggleSidebar: () => set((st) => ({ sidebarCollapsed: !st.sidebarCollapsed })),
+  toggleSidebar: () => {
+    // A manual toggle pins the choice for this session (see AppShell).
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("tc:sidebar-pinned"));
+    set((st) => ({ sidebarCollapsed: !st.sidebarCollapsed }));
+  },
 }));
 
 /* ---------------- market store ---------------- */

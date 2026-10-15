@@ -1,3 +1,4 @@
+import { currentDisplayCurrency, currencySymbol, displayRate } from "./displayCurrency";
 /** Formatting helpers. All timestamps are stored UTC; display converts. */
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
@@ -5,18 +6,19 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
 }
 
 export function fmtUsd(n: number | null | undefined, opts?: { sign?: boolean; decimals?: number }): string {
-  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  n *= displayRate();
   const d = opts?.decimals ?? (Math.abs(n) >= 1000 ? 0 : 2);
-  const abs = Math.abs(n).toLocaleString("en-US", {
+  const abs = Math.abs(n).toLocaleString(currentDisplayCurrency().displayCurrency === "inr" ? "en-IN" : "en-US", {
     minimumFractionDigits: d,
     maximumFractionDigits: d,
   });
   const sign = n < 0 ? "-" : opts?.sign && n > 0 ? "+" : "";
-  return `${sign}$${abs}`;
+  return `${sign}${currencySymbol()}${abs}`;
 }
 
 export function fmtNum(n: number | null | undefined, decimals = 2): string {
-  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
   return n.toLocaleString("en-US", {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
@@ -24,26 +26,27 @@ export function fmtNum(n: number | null | undefined, decimals = 2): string {
 }
 
 export function fmtPrice(n: number | null | undefined): string {
-  if (n === null || n === undefined || Number.isNaN(n)) return "N/A";
-  if (n >= 10000) return fmtNum(n, 1);
-  if (n >= 100) return fmtNum(n, 2);
-  if (n >= 1) return fmtNum(n, 3);
-  return fmtNum(n, 5);
+  if (n === null || n === undefined || !Number.isFinite(n)) return "N/A";
+  n *= displayRate();
+  const decimals = Math.abs(n) >= 10000 ? 1 : Math.abs(n) >= 100 ? 2 : Math.abs(n) >= 1 ? 3 : 5;
+  return `${currentDisplayCurrency().displayCurrency === "inr" ? "₹" : ""}${fmtNum(n, decimals)}`;
 }
 
 export function fmtPct(n: number | null | undefined, opts?: { sign?: boolean; decimals?: number }): string {
-  if (n === null || n === undefined || Number.isNaN(n)) return "N/A";
+  if (n === null || n === undefined || !Number.isFinite(n)) return "N/A";
   const sign = n > 0 && opts?.sign !== false ? "+" : "";
   return `${sign}${n.toFixed(opts?.decimals ?? 2)}%`;
 }
 
 export function fmtCompactUsd(n: number | null | undefined): string {
-  if (n === null || n === undefined || Number.isNaN(n)) return "N/A";
+  if (n === null || n === undefined || !Number.isFinite(n)) return "N/A";
+  n *= displayRate();
+  const symbol = currencySymbol();
   const abs = Math.abs(n);
-  if (abs >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
-  return `$${n.toFixed(0)}`;
+  if (abs >= 1e9) return `${symbol}${(n / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${symbol}${(n / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3) return `${symbol}${(n / 1e3).toFixed(1)}K`;
+  return `${symbol}${n.toFixed(0)}`;
 }
 
 const TZ_MAP: Record<string, string | undefined> = {

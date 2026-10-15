@@ -1,6 +1,7 @@
 "use client";
+import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
 import { PositionsTable, RiskCard } from "@/components/panels";
-import { Chip, KV, MetricCard, PremiumPanel } from "@/components/ui";
+import { Chip, KV, MetricCard, PageHeader, PremiumPanel } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtPct, fmtUsd, pnlTone } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -8,6 +9,7 @@ import { useApp } from "@/stores";
 import type { AccountState } from "@/lib/types";
 
 export default function PositionsPage() {
+  useDisplayCurrency();
   const { settings, activeSymbol, notify } = useApp();
   const { data, refresh } = usePoll(() => api.get<{ account: AccountState }>("/api/account"), 5000);
   const account = data?.account ?? null;
@@ -25,10 +27,13 @@ export default function PositionsPage() {
   const rl = settings.riskLimits;
 
   return (
-    <div className="p-3 space-y-3 max-w-[1400px] mx-auto">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-        <MetricCard label="EQUITY" value={fmtUsd(account?.equity)} sub={account?.source === "demo" ? "DEMO / PAPER" : "COINDCX"} />
-        <MetricCard label="OPEN P&L" value={fmtUsd(account?.openPnl, { sign: true })}
+    <div className="p-4 lg:p-6 space-y-4 page-shell">
+      <PageHeader crumb="TRADING / POSITIONS" title="Positions & exposure"
+        description="Everything currently at risk, paper and live, marked against the latest prices." />
+
+      <div className="auto-cells">
+        <MetricCard label="EQUITY" help="equity" value={fmtUsd(account?.equity)} sub={account?.source === "demo" ? "DEMO / PAPER" : "COINDCX"} />
+        <MetricCard label="OPEN P&L" help="openPnl" value={fmtUsd(account?.openPnl, { sign: true })}
           tone={pnlTone(account?.openPnl ?? 0) === "pos" ? "up" : pnlTone(account?.openPnl ?? 0) === "neg" ? "dn" : "flat"} />
         <MetricCard label="MARGIN USED" value={fmtUsd(account?.marginUsed)}
           sub={account && account.equity > 0 ? fmtPct((account.marginUsed / account.equity) * 100, { sign: false }) : undefined} />
@@ -36,7 +41,7 @@ export default function PositionsPage() {
           sub={`LIMIT ${rl.maxOpenPositions}`} tone={(account?.positions.length ?? 0) >= rl.maxOpenPositions ? "dn" : "flat"} />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-3">
+      <div className="auto-split with-aside">
         <div className="space-y-3">
           <PositionsTable
             account={account}

@@ -15,7 +15,7 @@
  *                         shared secret + timestamp window in that handler
  */
 import { NextResponse, type NextRequest } from "next/server";
-import { authConfigured, isAuthenticated } from "./lib/auth";
+import { authConfigured, isAuthenticated, timingSafeEqual } from "./lib/auth";
 
 const PUBLIC_API = new Set([
   "/api/auth/login",
@@ -27,6 +27,11 @@ const PUBLIC_API = new Set([
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  // Scheduler credential grants access ONLY to the two read/synchronization monitor endpoints.
+  if (["/api/notifications/scan", "/api/journal/sync"].includes(pathname) && process.env.CRON_SECRET &&
+      timingSafeEqual(req.headers.get("authorization") ?? "", `Bearer ${process.env.CRON_SECRET}`)) {
+    return NextResponse.next();
+  }
   if (PUBLIC_API.has(pathname)) return NextResponse.next();
 
   // Fail closed: refuse everything rather than serve an unauthenticated API

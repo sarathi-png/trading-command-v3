@@ -66,7 +66,7 @@ async function reservePort() {
  */
 async function startFakeVenue() {
   const calls = [];
-  const state = { dailyPnlShape: "array", pnlToday: -12.5 };
+  const state = { dailyPnlShape: "array", pnlToday: -12.5, bulkJournal: false };
 
   const server = http.createServer((req, res) => {
     const chunks = [];
@@ -130,11 +130,11 @@ async function startFakeVenue() {
         // The trades endpoint is per pair and the pair travels in the SIGNED
         // BODY (CoinDCX signs the body, not the query string), so the mock
         // reads it from there rather than from searchParams.
-        if (parsed?.pair !== "B-BTC_USDT") {
+        if (parsed?.pair !== "B-BTC_USDT" || parsed?.margin_currency_short_name?.[0] === "INR") {
           send(200, []);
           return;
         }
-        send(200, [
+        const rows = [
           {
             price: 60000,
             quantity: 0.01,
@@ -155,7 +155,13 @@ async function startFakeVenue() {
             timestamp: 1767312000000,
             order_id: "fill-sell",
           },
-        ]);
+        ];
+        if (state.bulkJournal) {
+          rows.push(...Array.from({length:400},(_,i)=>({trade_id:`bulk-buy-${i}`,order_id:`bulk-buy-order-${i}`,pair:"B-BTC_USDT",side:"buy",price:60000,quantity:.000001,fee_amount:.00003,timestamp:1767398400000+i})));
+          rows.push({trade_id:"bulk-close",order_id:"bulk-close-order",pair:"B-BTC_USDT",side:"sell",price:61000,quantity:.0004,fee_amount:.00005,timestamp:1767484800000});
+        }
+        const page = Number(parsed?.page ?? 1), size = Number(parsed?.size ?? 100);
+        send(200, rows.slice((page-1)*size,page*size));
         return;
       }
       if (p === "/exchange/v1/derivatives/futures/positions/transactions") {
@@ -302,6 +308,7 @@ test("Vercel ↔ CoinDCX boundary, paper isolation and live-order safety", { tim
         COINDCX_PUBLIC_BASE_URL: venue.url,
         COINDCX_API_KEY,
         COINDCX_API_SECRET,
+        COINDCX_JOURNAL_FROM: "2025-12-31",
         // Present in the process but must be ignored by the migrated app.
         TRADING_GATEWAY_URL: retiredGateway.url,
         TRADING_GATEWAY_SECRET: GATEWAY_SECRET,
@@ -468,8 +475,51 @@ test("Vercel ↔ CoinDCX boundary, paper isolation and live-order safety", { tim
     assert.equal(paper.status, "filled");
     assert.equal(venue.calls.length, before, "paper orders must never reach CoinDCX");
 
+    // Automatic live collection is separate from execution, even in paper mode.
+    const submittedBeforeSync = createCalls().length;
+    const firstSync = await json("/api/journal/sync", {});
+    assert.equal(firstSync.sync.nextPair, 1);
+    const imported = await request("/api/journal?mode=live").then(r=>r.json());
+    assert.equal(imported.entries.length, 1);
+    assert.equal(imported.entries[0].source, "coindcx");
+    assert.equal(imported.entries[0].pnl, 3.95);
+    assert.equal(imported.entries[0].fees, 6.05);
+    assert.ok(imported.entries[0].tags.includes("fifo-estimate"));
+    assert.deepEqual(imported.entries[0].predictionContext, []);
+    assert.equal(imported.fills.length, 2, "opening and closing fills are both retained");
+    assert.notEqual(imported.entries[0].pnl, summary.realizedPnlUsd, "FIFO estimate must not be called venue-booked P&L");
+    await json("/api/journal", {id:imported.entries[0].id, notes:"Preserve this annotation"}, "PATCH");
+    for (let i=0;i<40;i++) await json("/api/journal/sync", {});
+    const repeated = await request("/api/journal?mode=live").then(r=>r.json());
+    assert.equal(repeated.entries.length,1,"repeated sync must not duplicate round trips");
+    assert.equal(repeated.fills.length,2,"repeated sync must not duplicate fill activity");
+    assert.equal(repeated.entries[0].id,imported.entries[0].id);
+    assert.equal(repeated.entries[0].notes,"Preserve this annotation");
+    assert.equal(createCalls().length,submittedBeforeSync,"journal sync cannot submit orders");
+    assert.equal((await request("/api/settings").then(r=>r.json())).settings.mode,"paper","sync cannot change execution mode");
+
+    // Pagination is resumable and never advertised as a completed history early.
+    let cursor = repeated.sync.nextPair;
+    while (cursor !== 0) cursor = (await json("/api/journal/sync", {})).sync.nextPair;
+    venue.state.bulkJournal = true;
+    const staged = await json("/api/journal/sync", {});
+    const pending = staged.sync.pairs.find(p=>p.symbol==="BTCUSD"&&p.margin==="USDT");
+    assert.equal(pending.pendingPage,5,"a request stops at the four-page budget");
+    assert.equal(pending.fills,400,"even staged opening fills are retained");
+    assert.equal((await request("/api/journal?mode=live").then(r=>r.json())).entries.length,1,"incomplete pages cannot invent completed round trips");
+    cursor = staged.sync.nextPair;
+    while (cursor !== 0) cursor = (await json("/api/journal/sync", {})).sync.nextPair;
+    await json("/api/journal/sync", {});
+    const paginated = await request("/api/journal?mode=live&export=1").then(r=>r.json());
+    assert.equal(paginated.entries.length,401,"all 400 opening lots and their actual closing fill are reconstructed");
+    assert.equal(paginated.fills.length,403,"all fetched native fills persist, not just the first page");
+    assert.equal(new Set(paginated.entries.map(e=>e.id)).size,401);
+    assert.equal(paginated.sync.pairs.find(p=>p.symbol==="BTCUSD"&&p.margin==="USDT").pendingPage,null);
+    assert.equal(createCalls().length,submittedBeforeSync,"pagination is still read-only");
+
     // ---- 6. no secret reaches a response or a bundle ---------------------
     const responses = {
+      "/api/journal": JSON.stringify(await request("/api/journal").then(r=>r.json())),
       "/api/settings": JSON.stringify(await request("/api/settings").then((r) => r.json())),
       "/api/settings/exchange-credentials": JSON.stringify(
         await request("/api/settings/exchange-credentials").then((r) => r.json())

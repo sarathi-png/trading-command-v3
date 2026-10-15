@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "output/features-js",
+    "rootDir": "src",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "strict": true,
+    "types": [
+      "node"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  },
+  "include": [
+    "src/lib/notifications/**/*.ts",
+    "src/lib/market/movers.ts",
+    "src/lib/market/movers.test.ts",
+    "src/lib/ai/**/*.ts",
+    "src/lib/types.ts",
+    "src/lib/fileStore.ts",
+    "src/lib/journal/core.test.ts",
+    "src/lib/displayCurrency*.ts",
+    "src/lib/format.ts",
+    "src/lib/paper/accounting.ts",
+    "src/components/chart/labels.ts"
+  ]
+}

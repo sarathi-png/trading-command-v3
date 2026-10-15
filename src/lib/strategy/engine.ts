@@ -18,6 +18,7 @@ export interface StrategyContext {
   trend: TrendState;
   structure: StructurePoint[];
   levels: SRLevel[];
+  breakoutLevels?: SRLevel[];
   emaFast: number;
   emaSlow: number;
   lastClose: number;
@@ -156,6 +157,7 @@ export function buildAnalysis(
 
   const ctx: StrategyContext = {
     symbol, timeframe, candles, trend, structure, levels,
+    breakoutLevels: findLevels(window.slice(0, -1), detectSwings(window.slice(0, -1), 2), candles.at(-2)?.close ?? 0, opts),
     emaFast, emaSlow, lastClose, lastTime: last?.time ?? Math.floor(Date.now() / 1000),
   };
 
@@ -284,9 +286,11 @@ export const breakoutStrategy: StrategyDef = {
   description: "Detects closes beyond the strongest detected support/resistance clusters.",
   evaluate(ctx) {
     const c = ctx.lastClose;
-    const res = ctx.levels.filter((l) => l.kind === "resistance").sort((a, b) => a.price - b.price)[0];
-    const sup = ctx.levels.filter((l) => l.kind === "support").sort((a, b) => b.price - a.price)[0];
-    if (res && c > res.price) {
+    const priorClose = ctx.candles.at(-2)?.close ?? c;
+    const levels = ctx.breakoutLevels ?? ctx.levels;
+    const res = levels.filter((l) => l.kind === "resistance").sort((a, b) => a.price - b.price)[0];
+    const sup = levels.filter((l) => l.kind === "support").sort((a, b) => b.price - a.price)[0];
+    if (res && priorClose <= res.price && c > res.price) {
       const stop = res.price * 0.998;
       const entry = c;
       const target = entry + 1.5 * (entry - stop);
@@ -301,7 +305,7 @@ export const breakoutStrategy: StrategyDef = {
         "Breakout not confirmed — no close above the level yet",
       ]);
     }
-    if (sup && c < sup.price) {
+    if (sup && priorClose >= sup.price && c < sup.price) {
       const stop = sup.price * 1.002;
       const entry = c;
       const target = entry - 1.5 * (stop - entry);

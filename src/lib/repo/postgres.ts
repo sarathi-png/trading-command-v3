@@ -106,6 +106,7 @@ function toJournal(r: typeof journalTable.$inferSelect): JournalRow {
 
 function journalValues(v: JournalInsert) {
   return {
+    id: v.id,
     mode: v.mode,
     symbol: v.symbol,
     direction: v.direction,
@@ -369,7 +370,7 @@ export const postgresRepo: Repo = {
   // ---- journal ----
   async listJournal(opts) {
     const db = await getDb();
-    const rows = await db.select().from(journalTable).orderBy(desc(journalTable.openedAt)).limit(800);
+    const rows = await db.select().from(journalTable).orderBy(desc(journalTable.openedAt)).limit(opts?.limit ?? 800);
     let out = rows.map(toJournal);
     // Historically these filters ran after the query; keep that so the response
     // body is unchanged.
@@ -379,14 +380,28 @@ export const postgresRepo: Repo = {
   },
   async insertJournal(value) {
     const db = await getDb();
-    const [row] = await db.insert(journalTable).values(journalValues(value)).returning();
-    return toJournal(row);
+    const [row] = await db.insert(journalTable).values(journalValues(value)).onConflictDoNothing().returning();
+    if (row) return toJournal(row);
+    const [existing] = await db.select().from(journalTable).where(eq(journalTable.id, value.id!));
+    if (!existing) throw Error("Journal persistence failed");
+    return toJournal(existing);
   },
   async insertJournalMany(values) {
     const db = await getDb();
     const rows = values.map(journalValues);
     await db.insert(journalTable).values(rows);
     return rows.length;
+  },
+  async upsertImportedJournal(values) {
+    if (!values.length) return 0;
+    if (values.some(row => row.source !== "coindcx")) throw Error("Import accepts CoinDCX records only");
+    const db = await getDb();
+    // Execution facts may be refined as pagination completes; annotations survive.
+    await db.insert(journalTable).values(values.map(journalValues)).onConflictDoUpdate({ target: journalTable.id, set: {
+      entry: sql`excluded.entry`, exit: sql`excluded.exit`, qty: sql`excluded.qty`, fees: sql`excluded.fees`, pnl: sql`excluded.pnl`,
+      openedAt: sql`excluded.opened_at`, closedAt: sql`excluded.closed_at`, reason: sql`excluded.reason`,
+    }, setWhere: eq(journalTable.source, "coindcx") });
+    return values.length;
   },
   async updateJournal(id, patch) {
     const db = await getDb();
@@ -438,7 +453,7 @@ export const postgresRepo: Repo = {
           .where(eq(paperOrdersTable.status, opts.status))
           .orderBy(desc(paperOrdersTable.createdAt))
       : await db.select().from(paperOrdersTable).orderBy(desc(paperOrdersTable.createdAt));
-    return rows.map(toPaperOrder);
+    return rows.slice(0, opts?.limit ?? 1_000_000).map(toPaperOrder);
   },
   async getPaperOrder(id) {
     const db = await getDb();
