@@ -204,6 +204,44 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.equal(journal.entries[0].source, "paper");
     assert.ok(Number.isFinite(journal.entries[0].pnl));
 
+    assert.ok(journal.entries[0].fees > 0, "automatic paper fees include opening and closing commissions");
+    assert.ok(journal.entries[0].tags.includes("market-source:demo"));
+    assert.deepEqual(journal.entries[0].predictionContext, [], "no invented AI association");
+    assert.equal(journal.sync.configured, false);
+    assert.equal(journal.fills.length, 0, "no invented CoinDCX activity");
+    const known = (await request("/api/market/tickers").then(r=>r.json())).known;
+    assert.deepEqual((await request("/api/settings").then(r=>r.json())).settings.watchlist, known);
+    assert.equal((await json("/api/journal", { action: "seed" })).status, 405);
+    assert.equal((await json("/api/journal", { symbol: "BTCUSD", entry: 1, pnl: 10000 })).status, 405);
+    assert.equal((await request(`/api/journal?id=${journal.entries[0].id}`, { method: "DELETE" })).status, 405);
+    assert.equal((await request("/api/journal", { method: "PATCH", headers: {"content-type":"application/json"}, body: JSON.stringify({ id: journal.entries[0].id, pnl: 10000 }) })).status, 400);
+    const annotated = await request("/api/journal", { method: "PATCH", headers: {"content-type":"application/json"}, body: JSON.stringify({ id: journal.entries[0].id, notes: "Review only", tags: ["market-source:live", "review"] }) }).then(r=>r.json());
+    assert.equal(annotated.entry.pnl, journal.entries[0].pnl);
+    assert.equal(annotated.entry.notes, "Review only");
+    assert.ok(annotated.entry.tags.includes("market-source:demo"));
+    assert.ok(!annotated.entry.tags.includes("market-source:live"));
+    const noLive = await json("/api/journal/sync", {}).then(r=>r.json());
+    assert.equal(noLive.sync.configured, false);
+    assert.equal(noLive.sync.pairs.length, known.length * 2);
+    assert.equal((await json("/api/settings", { usdInrRate: 0 })).status, 400);
+    assert.equal((await json("/api/settings", { displayCurrency: "inr", usdInrRate: 88 })).status, 200);
+    const unchanged = await request("/api/journal").then(r=>r.json());
+    assert.equal(unchanged.entries[0].entry, journal.entries[0].entry, "INR does not change execution units");
+
+    // Partial closes and the remainder must charge each commission/profit once.
+    await json("/api/paper", {action:"place",symbol:"BTCUSD",side:"buy",type:"market",qty:qty*2});
+    await json("/api/paper", {action:"place",symbol:"BTCUSD",side:"sell",type:"market",qty,reduceOnly:true});
+    const remainder = await request("/api/paper").then(r=>r.json());
+    assert.equal(remainder.positions.length, 1);
+    await json("/api/paper", {action:"close",symbol:"BTCUSD",positionId:remainder.positions[0].id});
+    const completed = await request("/api/journal?export=1").then(r=>r.json());
+    assert.equal(completed.entries.length,3);
+    const partialRoundTrip = completed.entries.filter(e=>e.openedAt===remainder.positions[0].openedAt);
+    assert.equal(partialRoundTrip.length,2);
+    for(const row of partialRoundTrip) assert.ok(Math.abs(row.pnl + row.fees - (row.exit-row.entry)*row.qty) < 1e-6, "net plus fees equals that slice's gross profit");
+    assert.equal(completed.paperPositions.length,0);
+    assert.ok(completed.paperOrders.length>=3);
+
     // ---- separation of paper from private/exchange paths -------------------
     // Private CoinDCX reads need credentials; without them they fail closed
     // with a readable message instead of falling back to demo numbers.

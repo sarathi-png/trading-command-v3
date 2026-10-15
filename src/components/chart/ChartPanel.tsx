@@ -1,4 +1,5 @@
 "use client";
+import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
 import {
   useCallback, useEffect, useMemo, useRef, useState,
 } from "react";
@@ -11,11 +12,17 @@ import type {
   IPriceLine, ISeriesApi, SeriesMarker, Time as LTime,
 } from "lightweight-charts";
 import { api } from "@/lib/api";
-import { cx } from "@/lib/format";
+import { cx, fmtPrice } from "@/lib/format";
 import { useApp } from "@/stores";
+import { useViewport } from "@/lib/useResponsive";
 import type { Analysis, Candle, Drawing, DrawingType, Timeframe } from "@/lib/types";
 import { DrawLayer, type HitResult } from "./drawLayer";
 import { toHeikinAshi } from "@/lib/strategy/v2/heikin-ashi";
+import ChartLegend from "./ChartLegend";
+import {
+  CHANDELIER_LONG, CHANDELIER_SHORT, ENTRY, STOP, TARGET, donchianBound, drawingTitle, levelTitle,
+  type LabelMode, type LegendRow,
+} from "./labels";
 
 type Tool = "cursor" | DrawingType;
 
@@ -38,7 +45,7 @@ const SINGLE_POINT: DrawingType[] = ["hline", "vline", "text", "entry", "stop", 
 
 export default function ChartPanel({
   symbol, timeframe, analysis, interactive = true, showObjectTree = false, className,
-  chartType: initialChartType = "candlestick",
+  chartType: initialChartType = "candlestick", lockChartType = false,
 }: {
   symbol: string;
   timeframe: Timeframe;
@@ -47,8 +54,12 @@ export default function ChartPanel({
   showObjectTree?: boolean;
   className?: string;
   chartType?: ChartType;
+  /** True when the page renders two charts (candles + Heikin-Ashi) side by side. */
+  lockChartType?: boolean;
 }) {
-  const { settings } = useApp();
+  useDisplayCurrency();
+  const { settings, patchSettings } = useApp();
+  const viewport = useViewport();
   const containerRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +70,17 @@ export default function ChartPanel({
   const [color, setColor] = useState(COLORS[0]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(showObjectTree);
-  const [chartType, setChartType] = useState<ChartType>(initialChartType);
+  const [chartTypeChoice, setChartTypeChoice] = useState<ChartType>(initialChartType);
+  // When a page owns the split view the prop wins, so the panel never drifts
+  // away from the chart it is predicting for.
+  const chartType: ChartType = lockChartType ? initialChartType : chartTypeChoice;
+  const labelMode: LabelMode = settings.chartLabelMode ?? "compact";
+  const labelModeRef = useRef<LabelMode>(labelMode);
+  useEffect(() => { labelModeRef.current = labelMode; }, [labelMode]);
+
+  useEffect(() => {
+    chartRef.current?.applyOptions({ localization: { priceFormatter: (price: number) => fmtPrice(price) } });
+  }, [settings.displayCurrency, settings.usdInrRate]);
 
   // refs mirroring state for event handlers
   const chartRef = useRef<import("lightweight-charts").IChartApi | null>(null);
@@ -149,7 +170,6 @@ export default function ChartPanel({
       
       // Read CSS variables for theme-aware colors
       const rootStyles = getComputedStyle(document.documentElement);
-      const bgColor = rootStyles.getPropertyValue('--bg').trim();
       const textColor = rootStyles.getPropertyValue('--mut').trim();
       const gridColor = rootStyles.getPropertyValue('--edge').trim();
       const panelColor = rootStyles.getPropertyValue('--panel').trim();
@@ -158,6 +178,10 @@ export default function ChartPanel({
       
       const chart = LWC.createChart(containerRef.current, {
         autoSize: true,
+        // Pin the formatting locale: some browsers report a non-BCP-47
+        // navigator.language (e.g. "en-US@posix"), which makes the default
+        // tick-mark formatter throw and leaves the chart blank.
+        localization: { locale: "en-US", priceFormatter: (price: number) => fmtPrice(price) },
         layout: {
           background: { type: LWC.ColorType.Solid, color: "transparent" },
           textColor: textColor || "#8B98A9",
@@ -220,10 +244,13 @@ export default function ChartPanel({
   /* ---------------- candle data ---------------- */
   useEffect(() => {
     if (!ready) return;
+    // Resource switch: never show a prior symbol/source as the current chart.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    candlesRef.current = []; setLastCandle(null); setHover(null); applyCandles([]);
     let stop = false;
     const load = async () => {
       try {
-        const res = await api.get<{ candles: Candle[]; source: "live" }>(
+        const res = await api.get<{ candles: Candle[]; source: "live" | "demo" }>(
           `/api/market/candles?symbol=${symbol}&timeframe=${timeframe}&limit=300`
         );
         if (stop) return;
@@ -260,6 +287,7 @@ export default function ChartPanel({
     for (const l of linesRef.current) series.removePriceLine(l);
     linesRef.current = [];
 
+    const mode: LabelMode = labelModeRef.current;
     const add = (price: number, colorV: string, style: 0 | 1 | 2, title: string) => {
       if (!Number.isFinite(price) || price <= 0) return;
       linesRef.current.push(series.createPriceLine({
@@ -270,10 +298,10 @@ export default function ChartPanel({
 
     for (const d of drawingsRef.current) {
       if (d.hidden) continue;
-      if (d.type === "hline") add(d.points[0]?.price ?? NaN, d.color, 0, d.label || "LEVEL");
-      if (d.type === "entry") add(d.points[0]?.price ?? NaN, d.color, 0, d.label || "ENTRY");
-      if (d.type === "stop") add(d.points[0]?.price ?? NaN, d.color, 2, d.label || "STOP");
-      if (d.type === "target") add(d.points[0]?.price ?? NaN, d.color, 2, d.label || "TARGET");
+      if (d.type === "hline") add(d.points[0]?.price ?? NaN, d.color, 0, drawingTitle("hline", d.label, mode));
+      if (d.type === "entry") add(d.points[0]?.price ?? NaN, d.color, 0, drawingTitle("entry", d.label, mode));
+      if (d.type === "stop") add(d.points[0]?.price ?? NaN, d.color, 2, drawingTitle("stop", d.label, mode));
+      if (d.type === "target") add(d.points[0]?.price ?? NaN, d.color, 2, drawingTitle("target", d.label, mode));
     }
 
     if (analysis && settings.srAuto && settings.modules.supportResistance !== false) {
@@ -282,32 +310,31 @@ export default function ChartPanel({
           lvl.price,
           lvl.kind === "support" ? "rgba(47,211,136,0.55)" : "rgba(240,82,79,0.55)",
           2,
-          `${lvl.kind === "support" ? "S" : "R"}·${lvl.touches}t ${Math.round(lvl.strength * 100)}%`
+          levelTitle(lvl.kind, lvl.touches, Math.round(lvl.strength * 100), mode)
         );
       }
     }
 
     const primary = analysis?.signals.find((s) => s.entry !== null);
     if (primary) {
-      if (primary.entry) add(primary.entry, "#57E6D2", 0, "ENTRY");
-      if (primary.stop) add(primary.stop, "#F0524F", 2, "STOP");
-      if (primary.target) add(primary.target, "#2FD388", 2, "TARGET");
+      if (primary.entry) add(primary.entry, "#57E6D2", 0, mode === "full" ? ENTRY.full : ENTRY.compact);
+      if (primary.stop) add(primary.stop, "#F0524F", 2, mode === "full" ? STOP.full : STOP.compact);
+      if (primary.target) add(primary.target, "#2FD388", 2, mode === "full" ? TARGET.full : TARGET.compact);
     }
     redraw();
-  }, [drawings, analysis, ready, settings.srAuto, settings.modules.supportResistance, redraw]);
+  }, [drawings, analysis, ready, labelMode, settings.srAuto, settings.modules.supportResistance, redraw]);
 
   const [showStrategyOverlay, setShowStrategyOverlay] = useState(true);
-  const [strategyOverlay, setStrategyOverlay] = useState<{
-    chandelierLongStop: number | null;
-    chandelierShortStop: number | null;
-    donchianPeriods: Record<number, { upper: number; lower: number; middle: number }>;
-  } | null>(null);
+  const [strategyOverlay, setStrategyOverlay] = useState<StrategyOverlay | null>(null);
 
   /* ---------------- strategy overlay (Chandelier + Donchian) ---------------- */
   const strategyOverlayRef = useRef<typeof strategyOverlay>(null);
   strategyOverlayRef.current = strategyOverlay;
 
   useEffect(() => {
+    // Clear the old indicator resource before requesting a new source/chart view.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStrategyOverlay(null);
     if (!showStrategyOverlay) return;
     let stop = false;
     const load = async () => {
@@ -318,14 +345,14 @@ export default function ChartPanel({
             chandelierShortStop: number | null;
             donchianPeriods: Record<number, { upper: number; lower: number; middle: number }>;
           } | null;
-        }>(`/api/strategy/chandelier-donchian?symbol=${symbol}&timeframe=${timeframe}`);
+        }>(`/api/strategy/chandelier-donchian?symbol=${symbol}&timeframe=${timeframe}&chartType=${chartType === "heikin-ashi" ? "heikin-ashi" : "candles"}`);
         if (!stop && res.state) setStrategyOverlay(res.state);
-      } catch { /* overlay is optional */ }
+      } catch { if (!stop) setStrategyOverlay(null); }
     };
     void load();
     const id = setInterval(() => void load(), 30000);
     return () => { stop = true; clearInterval(id); };
-  }, [symbol, timeframe, showStrategyOverlay]);
+  }, [symbol, timeframe, showStrategyOverlay, chartType, settings.dataSource, settings.chandelierDonchian]);
 
   useEffect(() => {
     const series = seriesRef.current as unknown as ISeriesApi<"Candlestick"> | null;
@@ -340,6 +367,7 @@ export default function ChartPanel({
     );
 
     if (!showStrategyOverlay || !strategyOverlay) return;
+    const cdMode: LabelMode = labelModeRef.current;
 
     const addCd = (price: number, colorV: string, style: 0 | 1 | 2, title: string) => {
       if (!Number.isFinite(price) || price <= 0) return;
@@ -351,16 +379,18 @@ export default function ChartPanel({
     };
 
     if (strategyOverlay.chandelierLongStop !== null) {
-      addCd(strategyOverlay.chandelierLongStop, "rgba(47,211,136,0.7)", 2, "CD:CH-LONG");
+      addCd(strategyOverlay.chandelierLongStop, "rgba(47,211,136,0.7)", 2, cdMode === "full" ? CHANDELIER_LONG.axisFull ?? CHANDELIER_LONG.full : CHANDELIER_LONG.compact);
     }
     if (strategyOverlay.chandelierShortStop !== null) {
-      addCd(strategyOverlay.chandelierShortStop, "rgba(240,82,79,0.7)", 2, "CD:CH-SHORT");
+      addCd(strategyOverlay.chandelierShortStop, "rgba(240,82,79,0.7)", 2, cdMode === "full" ? CHANDELIER_SHORT.axisFull ?? CHANDELIER_SHORT.full : CHANDELIER_SHORT.compact);
     }
     for (const [period, data] of Object.entries(strategyOverlay.donchianPeriods)) {
-      if (Number.isFinite(data.upper)) addCd(data.upper, "rgba(87,230,210,0.4)", 0, `CD:D${period}-U`);
-      if (Number.isFinite(data.lower)) addCd(data.lower, "rgba(154,178,206,0.4)", 0, `CD:D${period}-L`);
+      const upper = donchianBound(Number(period), "upper");
+      const lower = donchianBound(Number(period), "lower");
+      if (Number.isFinite(data.upper)) addCd(data.upper, "rgba(87,230,210,0.4)", 0, cdMode === "full" ? upper.axisFull ?? upper.full : upper.compact);
+      if (Number.isFinite(data.lower)) addCd(data.lower, "rgba(154,178,206,0.4)", 0, cdMode === "full" ? lower.axisFull ?? lower.full : lower.compact);
     }
-  }, [strategyOverlay, showStrategyOverlay, ready]);
+  }, [strategyOverlay, showStrategyOverlay, ready, labelMode]);
 
   /* ---------------- markers (structure + signal) ---------------- */
   useEffect(() => {
@@ -486,8 +516,8 @@ export default function ChartPanel({
       const orig = drawingsRef.current.find((d) => d.id === hit.id);
       if (!orig) return;
       const points = orig.points.map((p) => ({ ...p }));
-      const startTime = points[0].time;
-      const startPrice = points[0].price;
+      const startTime = L.timeFromX(startPx) ?? points[0].time;
+      const startPrice = L.priceFromY(startPy) ?? points[0].price;
       const moved: { time: number; price: number }[] = points.map((p) => ({ ...p }));
 
       const onMove = (ev: PointerEvent) => {
@@ -589,11 +619,18 @@ export default function ChartPanel({
 
   const shown = hover ?? lastCandle;
 
+  // Legend rows: everything drawn on the chart, spelled out.
+  const legendRows = useMemo(
+    () => buildLegendRows(analysis, strategyOverlay, showStrategyOverlay, drawings, settings),
+    [analysis, strategyOverlay, showStrategyOverlay, drawings, settings]
+  );
+
   return (
-    <div className={cx("flex min-h-0 h-full", className)}>
-      {/* tool strip */}
+    <div className={cx("flex flex-col min-h-0 h-full", className)}>
+      <div className="flex flex-col md:flex-row min-h-0 flex-1">
+      {/* tool strip: a scrollable bar above the chart on phones, a rail from md up */}
       {interactive && (
-        <div className="flex md:flex-col gap-1 p-1.5 border-r border-edge flex-none overflow-x-auto md:overflow-y-auto" role="toolbar" aria-label="Drawing tools">
+        <div className="flex md:flex-col gap-1 p-1.5 border-b md:border-b-0 md:border-r border-edge flex-none overflow-x-auto md:overflow-y-auto max-w-full" role="toolbar" aria-label="Drawing tools">
           {TOOL_DEFS.map((t) => {
             const Icon = t.icon;
             return (
@@ -618,7 +655,7 @@ export default function ChartPanel({
               key={c}
               onClick={() => setColor(c)}
               aria-label={`Color ${c}`}
-              className={cx("w-5 h-5 rounded-full flex-none m-0.5 border-2", color === c ? "border-ink" : "border-transparent")}
+              className={cx("w-6 h-6 rounded-full flex-none m-0.5 border-2", color === c ? "border-ink" : "border-transparent")}
               style={{ backgroundColor: c }}
             />
           ))}
@@ -649,17 +686,19 @@ export default function ChartPanel({
             <CandlestickChart size={14} />
           </button>
           <div className="hidden md:block border-t border-edge my-1 mx-1" />
+          {!lockChartType && (
           <div className="flex items-center gap-1 p-1">
             <span className="text-[9px] text-dim">CHART</span>
             <select
               value={chartType}
-              onChange={(e) => setChartType(e.target.value as ChartType)}
+              onChange={(e) => setChartTypeChoice(e.target.value as ChartType)}
               className="bg-bg2 border border-edge rounded px-1.5 h-6 text-[10px] text-ink outline-none focus:border-accent/50"
             >
               <option value="candlestick">Candlestick</option>
               <option value="heikin-ashi">Heikin Ashi</option>
             </select>
           </div>
+          )}
           <div className="hidden md:block border-t border-edge my-1 mx-1" />
           <button
             onClick={() => selectedId && void deleteDrawing(selectedId)}
@@ -686,15 +725,18 @@ export default function ChartPanel({
       {/* chart surface */}
       <div className="flex-1 min-w-0 relative">
         <div ref={containerRef} className="absolute inset-0" />
-        {/* OHLC legend */}
+        {/* Candle legend — abbreviations stay, meaning is on hover and in the legend below */}
         <div className="absolute top-1.5 left-2 z-10 pointer-events-none flex items-center gap-2 text-[10px] num">
           <span className="text-mut">{symbol} · {timeframe}</span>
+          {chartType === "heikin-ashi" && (
+            <span className="text-warn" title="Heikin-Ashi candles are smoothed averages; their prices never traded, so they are used to read direction only.">HEIKIN-ASHI</span>
+          )}
           {shown && (
             <span className="text-dim hidden sm:inline">
-              O <span className={shown.close >= shown.open ? "text-up" : "text-dn"}>{shown.open}</span>{" "}
-              H <span className={shown.close >= shown.open ? "text-up" : "text-dn"}>{shown.high}</span>{" "}
-              L <span className={shown.close >= shown.open ? "text-up" : "text-dn"}>{shown.low}</span>{" "}
-              C <span className={shown.close >= shown.open ? "text-up" : "text-dn"}>{shown.close}</span>
+              <Abbr token="O" full="Open" /> <span className={shown.close >= shown.open ? "text-up" : "text-dn"}>{fmtPrice(shown.open)}</span>{" "}
+              <Abbr token="H" full="High" /> <span className={shown.close >= shown.open ? "text-up" : "text-dn"}>{fmtPrice(shown.high)}</span>{" "}
+              <Abbr token="L" full="Low" /> <span className={shown.close >= shown.open ? "text-up" : "text-dn"}>{fmtPrice(shown.low)}</span>{" "}
+              <Abbr token="C" full="Close" /> <span className={shown.close >= shown.open ? "text-up" : "text-dn"}>{fmtPrice(shown.close)}</span>
             </span>
           )}
         </div>
@@ -723,8 +765,97 @@ export default function ChartPanel({
           onDelete={deleteDrawing}
         />
       )}
+      </div>
+
+      {/* Decoding legend: full words for every abbreviation drawn above. Remounts
+          once when the viewport is first measured so a phone starts collapsed. */}
+      <ChartLegend
+        key={viewport.ready ? viewport.device : "initial"}
+        defaultOpen={!viewport.ready || !(viewport.device === "mobile" && viewport.orientation === "portrait")}
+        rows={legendRows}
+        mode={labelMode}
+        onModeChange={(mode) => void patchSettings({ chartLabelMode: mode })}
+        hiddenCount={drawings.filter((d) => d.hidden).length}
+      />
     </div>
   );
+}
+
+/** Shape returned by /api/strategy/chandelier-donchian (state only). */
+interface StrategyOverlay {
+  chandelierLongStop: number | null;
+  chandelierShortStop: number | null;
+  donchianPeriods: Record<number, { upper: number; lower: number; middle: number }>;
+}
+
+/* ================= label helpers ================= */
+
+/** Abbreviation whose full form appears on hover. */
+function Abbr({ token, full }: { token: string; full: string }) {
+  return <span className="text-dim" title={full}>{token}</span>;
+}
+
+/** Every overlay currently drawn on the chart, spelled out for the legend. */
+function buildLegendRows(
+  analysis: Analysis | null | undefined,
+  overlay: StrategyOverlay | null,
+  showOverlay: boolean,
+  drawings: Drawing[],
+  settings: { srAuto: boolean; modules: { supportResistance?: boolean; marketStructure?: boolean } }
+): LegendRow[] {
+  const rows: LegendRow[] = [];
+  for (const d of drawings) {
+    if (d.hidden || !["hline", "entry", "stop", "target"].includes(d.type)) continue;
+    rows.push({
+      id: `drawing-${d.id}`,
+      kind: "drawing",
+      label: drawingTitle(d.type, d.label, "full"),
+      token: d.label || undefined,
+      value: d.points[0]?.price ?? null,
+    });
+  }
+  if (analysis && settings.srAuto && settings.modules.supportResistance !== false) {
+    for (const lvl of analysis.levels) {
+      const kind = lvl.kind === "support" ? "support" : "resistance";
+      rows.push({
+        id: `level-${kind}-${lvl.price}`,
+        kind,
+        label: `${kind === "support" ? "SUPPORT" : "RESISTANCE"} · ${lvl.touches} touch${lvl.touches === 1 ? "" : "es"} · ${Math.round(lvl.strength * 100)}% strength`,
+        token: kind === "support" ? "S" : "R",
+        value: lvl.price,
+        detail: kind === "support"
+          ? "An area where buying previously stopped a fall (from swing lows)."
+          : "An area where selling previously stopped a rise (from swing highs).",
+        help: kind === "support" ? "supportLevel" : "resistanceLevel",
+      });
+    }
+  }
+  const primary = analysis?.signals.find((sig) => sig.entry !== null);
+  if (primary) {
+    if (primary.entry) rows.push({ id: "sig-entry", kind: "signal", label: ENTRY.full, value: primary.entry, help: "entryLevel" });
+    if (primary.stop) rows.push({ id: "sig-stop", kind: "signal", label: STOP.full, value: primary.stop, help: "stopLevel" });
+    if (primary.target) rows.push({ id: "sig-target", kind: "signal", label: TARGET.full, value: primary.target, help: "targetLevel" });
+  }
+  if (showOverlay && overlay) {
+    if (overlay.chandelierLongStop !== null) {
+      rows.push({ id: "ch-long", kind: "chandelier-long", label: CHANDELIER_LONG.full, token: CHANDELIER_LONG.compact, value: overlay.chandelierLongStop, detail: CHANDELIER_LONG.detail, help: "chandelier" });
+    }
+    if (overlay.chandelierShortStop !== null) {
+      rows.push({ id: "ch-short", kind: "chandelier-short", label: CHANDELIER_SHORT.full, token: CHANDELIER_SHORT.compact, value: overlay.chandelierShortStop, detail: CHANDELIER_SHORT.detail, help: "chandelier" });
+    }
+    for (const [period, data] of Object.entries(overlay.donchianPeriods)) {
+      const p = Number(period);
+      if (Number.isFinite(data.upper)) {
+        const form = donchianBound(p, "upper");
+        rows.push({ id: `d${period}-u`, kind: "donchian", label: form.full, token: form.compact, value: data.upper, detail: form.detail, help: "donchian" });
+      }
+      if (Number.isFinite(data.lower)) {
+        const form = donchianBound(p, "lower");
+        rows.push({ id: `d${period}-l`, kind: "donchian", label: form.full, token: form.compact, value: data.lower, detail: form.detail, help: "donchian" });
+      }
+    }
+  }
+  return rows;
 }
 
 /* ================= object tree ================= */
@@ -740,7 +871,7 @@ function ObjectTree({
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   return (
-    <aside className="w-52 border-l border-edge flex flex-col flex-none min-h-0" aria-label="Chart objects">
+    <aside className="hidden md:flex w-52 border-l border-edge flex-col flex-none min-h-0" aria-label="Chart objects">
       <p className="microlabel px-2.5 h-8 flex items-center border-b border-edge">CHART OBJECTS</p>
       <div className="flex-1 overflow-y-auto p-1.5">
         {drawings.length === 0 && (

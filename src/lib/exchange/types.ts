@@ -86,6 +86,7 @@ export interface ExchangeOrder {
 }
 
 export interface ExchangeFill {
+  fillId?: string | null;
   id: string | null;
   symbol: InternalSymbol;
   exchangeSymbol: string;

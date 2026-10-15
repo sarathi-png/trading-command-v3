@@ -64,7 +64,7 @@ export async function GET() {
     strategy: flags.strategyEngine(),
     execution,
     webhook: flags.tradingviewWebhook() || settings.tradingviewEnabled,
-    demoMode: false,
+    demoMode: settings.dataSource === "demo",
     latencyMs: null,
     version: APP_VERSION,
     exchange: {

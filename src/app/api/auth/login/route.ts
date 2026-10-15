@@ -12,6 +12,7 @@ import {
   passwordMatches,
   sessionSecret,
   signSession,
+  sessionCookieOptions,
 } from "@/lib/auth";
 import { logAudit } from "@/lib/settings";
 
@@ -27,9 +28,11 @@ export async function POST(req: Request) {
   }
 
   let password = "";
+  let embeddedSession = false;
   try {
-    const body = (await req.json()) as { password?: unknown };
+    const body = (await req.json()) as { password?: unknown; embeddedSession?: unknown };
     password = typeof body.password === "string" ? body.password : "";
+    embeddedSession = body.embeddedSession === true && process.env.EMBEDDED_PREVIEW_COOKIES === "true";
   } catch {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -43,12 +46,14 @@ export async function POST(req: Request) {
   const token = await signSession(Date.now() + SESSION_TTL_MS, sessionSecret());
   await logAudit("auth_login_succeeded", {});
 
-  const res = NextResponse.json({ ok: true, expiresInMs: SESSION_TTL_MS });
+  // Only an explicitly configured embedded preview can issue this JS-readable
+  // fallback. It is NOT the API password and expires in 15 minutes.
+  const previewToken = embeddedSession
+    ? await signSession(Date.now() + 15 * 60_000, sessionSecret()) : undefined;
+  const res = NextResponse.json({ ok: true, expiresInMs: SESSION_TTL_MS, ...(previewToken ? { previewToken } : {}) });
+  res.headers.set("Cache-Control", "no-store");
   res.cookies.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "strict",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
+    ...sessionCookieOptions(),
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   });
   return res;

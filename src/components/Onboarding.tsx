@@ -33,17 +33,16 @@ export default function Onboarding({ capabilities }: {
   const finish = async () => {
     setFinishing(true);
     const modules = modulesForPreset(layout, DEFAULT_SETTINGS.modules);
-    const watchlist = [symbol, ...["BTCUSD", "ETHUSD", "SOLUSD"].filter((s) => s !== symbol)];
     try {
       const res = await api.post<{ settings: AppSettings }>("/api/settings", {
         onboarded: true,
         mode,
         layout,
         modules,
-        watchlist,
         dataSource: capabilities.exchangeAccountConfigured ? "live" : "demo",
       });
       applySettings(res.settings);
+      setSymbol(symbol);
     } catch (e) {
       notify({
         title: "Could not save workspace",

@@ -10,6 +10,7 @@
  */
 import { useState, type FormEvent } from "react";
 import { KeyRound, ShieldCheck } from "lucide-react";
+import { setPreviewSession } from "@/lib/previewSession";
 import { api, ApiError } from "@/lib/api";
 import { Logo } from "./Onboarding";
 import { Btn, Input } from "./ui";
@@ -24,14 +25,25 @@ export default function LoginGate({ onLoggedIn }: { onLoggedIn: () => void }) {
     if (!password || busy) return;
     setBusy(true);
     setError(null);
+    let passwordAccepted = false;
     try {
-      await api.post("/api/auth/login", { password });
+      const login = await api.post<{ previewToken?: string }>("/api/auth/login", { password, embeddedSession: true });
+      passwordAccepted = true;
+      setPreviewSession(login.previewToken ?? null);
+      // Verify via the same authenticated client used throughout the app. This
+      // works even when the sandbox blocks both cookies and browser storage.
+      try {
+        await api.get("/api/settings");
+      } catch (err) {
+        setPreviewSession(null);
+        throw err;
+      }
       setPassword("");
       onLoggedIn();
     } catch (err) {
       setError(
         err instanceof ApiError && err.status === 401
-          ? "Wrong password."
+          ? passwordAccepted ? "Password accepted, but the sandbox rejected the session. Please report this message; repeating the password will not help." : "Wrong password."
           : err instanceof Error
             ? err.message
             : "Login failed — is the server running?"
@@ -68,7 +80,7 @@ export default function LoginGate({ onLoggedIn }: { onLoggedIn: () => void }) {
             />
           </div>
 
-          {error && <p className="text-[11px] text-dn">{error}</p>}
+          {error && <p role="alert" className="text-[11px] text-dn">{error}</p>}
 
           <Btn
             type="submit"

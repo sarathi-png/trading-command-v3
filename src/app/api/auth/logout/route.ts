@@ -5,7 +5,7 @@
  * when the session has already expired.
  */
 import { NextResponse } from "next/server";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { SESSION_COOKIE, sessionCookieOptions } from "@/lib/auth";
 import { logAudit } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
@@ -15,10 +15,7 @@ export async function POST() {
   await logAudit("auth_logout", {});
   const res = NextResponse.json({ ok: true });
   res.cookies.set(SESSION_COOKIE, "", {
-    httpOnly: true,
-    sameSite: "strict",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
+    ...sessionCookieOptions(),
     maxAge: 0,
   });
   return res;

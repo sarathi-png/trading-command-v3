@@ -8,23 +8,17 @@
 import { randomUUID } from "node:crypto";
 import { readDoc, writeDoc } from "@/lib/fileStore";
 import type {
-  AlertRuleInsert,
   AlertRuleRow,
   AuditRow,
-  DrawingInsert,
   DrawingRow,
   JournalInsert,
   JournalPnlFilter,
   JournalRow,
-  LiveOrderInsert,
   LiveOrderRow,
-  PaperOrderInsert,
   PaperOrderRow,
-  PaperPositionInsert,
   PaperPositionRow,
   Repo,
   SettingRow,
-  SignalInsert,
   SignalRow,
   Timestamp,
 } from "./types";
@@ -244,13 +238,27 @@ export const fileRepo: Repo = {
   },
   async insertJournal(value) {
     const row = normaliseJournal(value);
-    await mutate<JournalRow[]>(DOC_JOURNAL, [], (rows) => [row, ...rows]);
-    return row;
+    const rows = await mutate<JournalRow[]>(DOC_JOURNAL, [], (rows) => rows.some(old => old.id === row.id) ? null : [row, ...rows]);
+    return rows.find(old => old.id === row.id) ?? row;
   },
   async insertJournalMany(values) {
     const stamped = values.map(normaliseJournal);
     await mutate<JournalRow[]>(DOC_JOURNAL, [], (rows) => [...stamped, ...rows]);
     return stamped.length;
+  },
+  async upsertImportedJournal(values) {
+    const incoming = values.map(normaliseJournal);
+    if (incoming.some(row => row.source !== "coindcx")) throw Error("Import accepts CoinDCX records only");
+    await mutate<JournalRow[]>(DOC_JOURNAL, [], rows => {
+      const byId = new Map(rows.map(row => [row.id, row]));
+      for (const row of incoming) {
+        const old = byId.get(row.id);
+        if (old && old.source !== "coindcx") throw Error("Import ID collision");
+        byId.set(row.id, old ? { ...row, notes: old.notes, emotion: old.emotion, tags: [...new Set([...row.tags, ...old.tags])] } : row);
+      }
+      return [...byId.values()];
+    });
+    return incoming.length;
   },
   async updateJournal(id, patch) {
     let updated: JournalRow | null = null;
@@ -280,7 +288,7 @@ export const fileRepo: Repo = {
   async listPaperOrders(opts) {
     const rows = readDoc<PaperOrderRow[]>(DOC_PAPER_ORDERS, []);
     const filtered = opts?.status ? rows.filter((r) => r.status === opts.status) : rows;
-    return [...filtered].sort(byTimeDesc);
+    return [...filtered].sort(byTimeDesc).slice(0, opts?.limit ?? 1_000_000);
   },
   async getPaperOrder(id) {
     return readDoc<PaperOrderRow[]>(DOC_PAPER_ORDERS, []).find((r) => r.id === id) ?? null;

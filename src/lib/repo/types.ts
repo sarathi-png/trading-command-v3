@@ -64,7 +64,7 @@ export interface JournalRow {
 
   openedAt: Timestamp;
   closedAt: MaybeTs;
-  source: "manual" | "paper" | "seed";
+  source: "manual" | "paper" | "seed" | "coindcx";
 }
 
 /** Insert payload: `id`/timestamps are optional, and dates may be `Date`s. */
@@ -101,13 +101,14 @@ export interface Repo {
   listJournal(opts?: { symbol?: string; mode?: string; limit?: number }): Promise<JournalRow[]>;
   insertJournal(value: JournalInsert): Promise<JournalRow>;
   insertJournalMany(values: JournalInsert[]): Promise<number>;
+  upsertImportedJournal(values: JournalInsert[]): Promise<number>;
   updateJournal(id: string, patch: Partial<JournalRow>): Promise<JournalRow | null>;
   deleteJournal(id: string): Promise<void>;
   sumJournalPnl(filter?: JournalPnlFilter): Promise<number>;
   hasAnyJournal(): Promise<boolean>;
 
   // ---- paper orders ----
-  listPaperOrders(opts?: { status?: string }): Promise<PaperOrderRow[]>;
+  listPaperOrders(opts?: { status?: string; limit?: number }): Promise<PaperOrderRow[]>;
   getPaperOrder(id: string): Promise<PaperOrderRow | null>;
   insertPaperOrder(value: PaperOrderInsert): Promise<PaperOrderRow>;
   updatePaperOrder(id: string, patch: Partial<PaperOrderRow>): Promise<PaperOrderRow | null>;

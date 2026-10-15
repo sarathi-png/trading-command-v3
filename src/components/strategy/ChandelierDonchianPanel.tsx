@@ -1,22 +1,18 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
+import { useCallback, useEffect, useRef } from "react";
 import { Zap } from "lucide-react";
+import { fmtUsd, fmtPrice } from "@/lib/format";
 import { api } from "@/lib/api";
 import { usePoll } from "@/lib/hooks";
 import { useApp } from "@/stores";
-import { Chip, PremiumPanel, Skeleton } from "@/components/ui";
+import { Chip, HelpTip, PremiumPanel, Skeleton } from "@/components/ui";
 import { SignalDisplay } from "./SignalDisplay";
 import { ChandelierDonchianConfig } from "./ChandelierDonchianConfig";
 import type { ChandelierDonchianConfig as Config, SignalState } from "@/lib/strategy/v2/types";
 import type { BacktestResult } from "@/lib/strategy/v2/types";
 
-const DEFAULT_CONFIG: Config = {
-  chandelier: { atrLength: 20, multiplier: 3.0 },
-  donchian: { periods: [20, 50, 100, 200] },
-  heikinAshi: true,
-  timeStop: { enabled: true, bars: 48 },
-  risk: { leverage: 10, riskPct: 1.0, lotSize: null, maxPositions: 1, mode: "auto" },
-};
+import { DEFAULT_CHANDELIER_DONCHIAN_CONFIG as DEFAULT_CONFIG } from "@/lib/strategy/v2/types";
 
 interface ApiResponse {
   symbol: string;
@@ -34,18 +30,20 @@ interface ApiResponse {
   backtest: BacktestResult | null;
   config: Config;
   source: string;
+  sizingSource: string | null;
   evaluatedAt: number;
 }
 
 export function ChandelierDonchianPanel({ className }: { className?: string }) {
+  useDisplayCurrency();
   const { activeSymbol, timeframe, settings, patchSettings, notify } = useApp();
-  const [config, setConfig] = useState<Config>(DEFAULT_CONFIG);
+  const config = settings.chandelierDonchian ?? DEFAULT_CONFIG;
   const prevSignalStatusRef = useRef<string | null>(null);
 
   const { data, error } = usePoll<ApiResponse>(
     () => api.get<ApiResponse>(`/api/strategy/chandelier-donchian?symbol=${activeSymbol}&timeframe=${timeframe}&backtest=true`),
-    5000,
-    { deps: [activeSymbol, timeframe] }
+    30000,
+    { deps: [activeSymbol, timeframe, config, settings.dataSource] }
   );
 
   const signalState: SignalState | null = data?.state
@@ -78,13 +76,13 @@ export function ChandelierDonchianPanel({ className }: { className?: string }) {
       if (status === "LONG_SETUP") {
         notify({
           title: "Chandelier+Donchian: LONG SETUP",
-          body: `${activeSymbol} ${timeframe} — BUY ${data.signal.entry ? data.signal.entry.toFixed(2) : "on trigger"}`,
+          body: `${activeSymbol} ${timeframe} — BUY ${data.signal.entry ? fmtPrice(data.signal.entry) : "on trigger"}`,
           tone: "success",
         });
       } else if (status === "SHORT_SETUP") {
         notify({
           title: "Chandelier+Donchian: SHORT SETUP",
-          body: `${activeSymbol} ${timeframe} — SELL ${data.signal.entry ? data.signal.entry.toFixed(2) : "on trigger"}`,
+          body: `${activeSymbol} ${timeframe} — SELL ${data.signal.entry ? fmtPrice(data.signal.entry) : "on trigger"}`,
           tone: "danger",
         });
       }
@@ -94,7 +92,6 @@ export function ChandelierDonchianPanel({ className }: { className?: string }) {
   }, [data?.signal?.status, activeSymbol, timeframe, notify]);
 
   const handleConfigChange = useCallback((newConfig: Config) => {
-    setConfig(newConfig);
     void patchSettings({
       chandelierDonchian: newConfig,
     } as Partial<import("@/lib/types").AppSettings>);
@@ -106,14 +103,15 @@ export function ChandelierDonchianPanel({ className }: { className?: string }) {
         <div>
           <h2 className="text-[13px] font-semibold">Chandelier Exit + Donchian Ribbon</h2>
           <p className="text-[10px] text-dim">
-            5m Heikin Ashi · Chandelier ATR-20 ×3.0 · Donchian 20/50/100/200
+            {timeframe} {config.heikinAshi ? "Heikin Ashi" : "Standard candles"} · ATR-{config.chandelier.atrLength} ×{config.chandelier.multiplier} · Donchian {config.donchian.periods.join("/")}
           </p>
         </div>
         <Chip tone="accent">
-          <Zap size={11} /> {data ? "LIVE" : "LOADING"}
+          <Zap size={11} /> {error ? "UNAVAILABLE" : data ? (data.source === "demo" ? "DEMO CANDLES" : "COINDCX LIVE CANDLES") : "LOADING"}
         </Chip>
       </div>
 
+      {data?.source === "demo" && <p className="text-[11px] text-warn mb-3">The engine is running on demo candles. Select CoinDCX Futures in Settings → Market data for real public candles. Live execution remains separately gated; failed live reads never fall back to demo.</p>}
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-3">
         <div className="space-y-3">
           {error ? (
@@ -139,7 +137,7 @@ export function ChandelierDonchianPanel({ className }: { className?: string }) {
                       <span className="text-dim">QUANTITY</span>
                       <span className="num text-right text-ink">{data.sizing.qty.toFixed(4)}</span>
                       <span className="text-dim">RISK AMOUNT</span>
-                      <span className="num text-right text-dn">${data.sizing.riskAmount.toFixed(2)}</span>
+                      <span className="num text-right text-dn">{fmtUsd(data.sizing.riskAmount)}</span>
                       <span className="text-dim">RISK %</span>
                       <span className="num text-right text-ink">{data.sizing.riskPct.toFixed(1)}%</span>
                       <span className="text-dim">LEVERAGE</span>
@@ -158,11 +156,11 @@ export function ChandelierDonchianPanel({ className }: { className?: string }) {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
                       <Metric label="TRADES" value={String(data.backtest.totalTrades)} />
                       <Metric label="WIN RATE" value={`${data.backtest.winRate.toFixed(1)}%`} />
-                      <Metric label="EXPECTANCY" value={data.backtest.expectancy.toFixed(4)} tone={data.backtest.expectancy > 0 ? "up" : "dn"} />
-                      <Metric label="PROFIT FACTOR" value={data.backtest.profitFactor.toFixed(2)} />
+                      <Metric label="EXPECTANCY" help="expectancy" value={fmtUsd(data.backtest.expectancy, { decimals: 4 })} tone={data.backtest.expectancy > 0 ? "up" : "dn"} />
+                      <Metric label="PROFIT FACTOR" help="profitFactor" value={data.backtest.profitFactor?.toFixed(2) ?? "N/A (no losses)"} />
                       <Metric label="MAX DD" value={`${data.backtest.maxDrawdownPct.toFixed(1)}%`} tone="dn" />
-                      <Metric label="SHARPE" value={data.backtest.sharpeRatio.toFixed(2)} />
-                      <Metric label="DSR" value={data.backtest.dsr.toFixed(2)} tone={data.backtest.dsr > 0.5 ? "up" : "dn"} />
+                      <Metric label="RETURN / VOL (TRADE)" help="returnVol" value={data.backtest.sharpeRatio.toFixed(2)} />
+                      <Metric label="DSR" help="dsr" value="Not estimated" />
                       <Metric label="AVG HOLD" value={`${data.backtest.avgHoldBars.toFixed(0)} bars`} />
                     </div>
                   </div>
@@ -178,10 +176,10 @@ export function ChandelierDonchianPanel({ className }: { className?: string }) {
   );
 }
 
-function Metric({ label, value, tone }: { label: string; value: string; tone?: "up" | "dn" | "flat" }) {
+function Metric({ label, value, tone, help }: { label: string; value: string; tone?: "up" | "dn" | "flat"; help?: string }) {
   return (
     <div className="rounded border border-edge bg-panel2/60 px-2 py-1.5">
-      <p className="microlabel">{label}</p>
+      <p className="microlabel inline-flex items-center gap-1.5">{label}{help && <HelpTip topic={help} />}</p>
       <p className={`num text-[12px] font-semibold mt-0.5 ${
         tone === "up" ? "text-up" : tone === "dn" ? "text-dn" : "text-ink"
       }`}>

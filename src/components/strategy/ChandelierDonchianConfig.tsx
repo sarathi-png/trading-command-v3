@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Settings2 } from "lucide-react";
-import { Btn, Chip, Input, PremiumPanel, Select, ToggleSwitch } from "@/components/ui";
+import { Chip, Input, PremiumPanel, Select, ToggleSwitch } from "@/components/ui";
 import type { ChandelierDonchianConfig } from "@/lib/strategy/v2/types";
 
 interface ChandelierDonchianConfigProps {
@@ -75,13 +75,13 @@ export function ChandelierDonchianConfig({ config, onChange, className }: Chande
               <div className="flex border border-edge overflow-hidden">
                 <button
                   onClick={() => onChange({ ...config, risk: { ...config.risk, mode: "auto" } })}
-                  className={`px-2.5 py-0.5 text-[10px] tracking-wide ${
+                  className={`px-3 min-h-6 text-[10px] tracking-wide ${
                     config.risk.mode === "auto" ? "bg-accent text-bg font-semibold" : "text-dim hover:text-ink"
                   }`}
                 >AUTO</button>
                 <button
                   onClick={() => onChange({ ...config, risk: { ...config.risk, mode: "manual" } })}
-                  className={`px-2.5 py-0.5 text-[10px] tracking-wide ${
+                  className={`px-3 min-h-6 text-[10px] tracking-wide ${
                     config.risk.mode === "manual" ? "bg-accent text-bg font-semibold" : "text-dim hover:text-ink"
                   }`}
                 >MANUAL</button>
@@ -127,17 +127,19 @@ export function ChandelierDonchianConfig({ config, onChange, className }: Chande
 
         {activeTab === "indicators" && (
           <div className="space-y-3">
+            <button type="button" onClick={() => onChange({ ...config, chandelier: { atrLength: 1, multiplier: 2 } })} className="text-[10px] text-accent border border-edge rounded px-3 py-2 hover:bg-accent-dim">USE ATR 1 × 2 DEFAULTS</button>
+            <p className="text-[10px] text-dim">New defaults: ATR length 1, multiplier 2. Saved preferences are preserved; change either value freely.</p>
             <div className="grid grid-cols-2 gap-2">
               <label className="block space-y-1">
                 <span className="microlabel">CHANDELIER ATR LENGTH</span>
                 <Input
                   type="number"
-                  min={5}
-                  max={50}
+                  min={1}
+                  max={400}
                   value={config.chandelier.atrLength}
                   onChange={(e) => onChange({
                     ...config,
-                    chandelier: { ...config.chandelier, atrLength: parseInt(e.target.value, 10) || 20 },
+                    chandelier: { ...config.chandelier, atrLength: parseInt(e.target.value, 10) || 1 },
                   })}
                 />
               </label>
@@ -151,7 +153,7 @@ export function ChandelierDonchianConfig({ config, onChange, className }: Chande
                   value={config.chandelier.multiplier}
                   onChange={(e) => onChange({
                     ...config,
-                    chandelier: { ...config.chandelier, multiplier: parseFloat(e.target.value) || 3.0 },
+                    chandelier: { ...config.chandelier, multiplier: parseFloat(e.target.value) || 2.0 },
                   })}
                 />
               </label>

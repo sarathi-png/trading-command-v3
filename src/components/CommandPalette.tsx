@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { useApp, useMarket } from "@/stores";
 import { logout } from "@/lib/api";
-import { TIMEFRAMES, type Timeframe } from "@/lib/types";
+import { TIMEFRAMES } from "@/lib/types";
 import { cx } from "@/lib/format";
 
 interface Command {
@@ -17,7 +17,7 @@ interface Command {
 
 export default function CommandPalette() {
   const router = useRouter();
-  const { paletteOpen, setPalette, activeSymbol, setSymbol, setTimeframe, applyLayoutPreset, patchSettings, settings } = useApp();
+  const { paletteOpen, setPalette, setSymbol, setTimeframe, applyLayoutPreset, patchSettings, settings } = useApp();
   const tickers = useMarket((s) => s.tickers);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);

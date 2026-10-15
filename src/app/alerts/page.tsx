@@ -1,7 +1,10 @@
 "use client";
+import { useMoneyInput } from "@/lib/useMoneyInput";
+import { currencySymbol } from "@/lib/displayCurrency";
+import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
 import { useState } from "react";
 import { Bell, Plus, RotateCcw, Trash2 } from "lucide-react";
-import { Btn, Chip, EmptyState, Input, Panel, Select, Skeleton, Toggle } from "@/components/ui";
+import { Btn, Chip, EmptyState, Input, PageHeader, Panel, Select, Skeleton, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDateTime, fmtPrice } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -18,6 +21,7 @@ const KIND_LABEL: Record<AlertRule["kind"], string> = {
 };
 
 export default function AlertsPage() {
+  useDisplayCurrency();
   const { settings, patchSettings, notify } = useApp();
   const { rules, setRules } = useAlerts();
   const { loading, refresh } = usePoll(async () => {
@@ -30,6 +34,8 @@ export default function AlertsPage() {
     symbol: "BTCUSD", kind: "price_above" as AlertRule["kind"], level: "", level2: "", sound: true, browser: false,
   });
 
+  const levelInput = useMoneyInput(form.level, value => setForm(current => ({ ...current, level: value })));
+  const level2Input = useMoneyInput(form.level2, value => setForm(current => ({ ...current, level2: value })));
   const create = async () => {
     const body: Record<string, unknown> = {
       symbol: form.symbol.toUpperCase(), kind: form.kind,
@@ -50,7 +56,10 @@ export default function AlertsPage() {
   };
 
   return (
-    <div className="p-3 grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-3 max-w-[1400px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-4 page-shell">
+      <PageHeader crumb="MONITORING / ALERTS" title="Alerts"
+        description="Conditions you want to be told about, checked against live prices while the workspace is open." />
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-4">
       <Panel title="ALERT RULES" badge={<span className="text-[9px] num text-dim">{rules.filter((r) => r.enabled && !r.triggeredAt).length} ARMED</span>}>
         {loading && rules.length === 0 ? (
           <div className="p-3 space-y-1.5">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8" />)}</div>
@@ -120,11 +129,11 @@ export default function AlertsPage() {
                   <option value="strategy_signal">strategy signal (LONG/SHORT)</option>
                 </Select></label>
             </div>
-            <label className="block space-y-1"><span className="microlabel">{form.kind === "zone_enter" ? "ZONE LOWER" : "LEVEL"}</span>
-              <Input inputMode="decimal" value={form.level} onChange={(e) => setForm({ ...form, level: e.target.value })} /></label>
+            <label className="block space-y-1"><span className="microlabel">{form.kind === "zone_enter" ? "ZONE LOWER" : "LEVEL"} ({currencySymbol()})</span>
+              <Input inputMode="decimal" value={levelInput.value} onChange={(e) => levelInput.onChange(e.target.value)} /></label>
             {form.kind === "zone_enter" && (
               <label className="block space-y-1"><span className="microlabel">ZONE UPPER</span>
-                <Input inputMode="decimal" value={form.level2} onChange={(e) => setForm({ ...form, level2: e.target.value })} /></label>
+                <Input inputMode="decimal" value={level2Input.value} onChange={(e) => level2Input.onChange(e.target.value)} /></label>
             )}
             <div className="flex items-center justify-between">
               <span className="text-[10px] text-dim">Sound</span>
@@ -159,6 +168,7 @@ export default function AlertsPage() {
           </div>
         </Panel>
       </div>
+    </div>
     </div>
   );
 }

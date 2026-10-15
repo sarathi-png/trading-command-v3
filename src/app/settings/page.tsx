@@ -1,12 +1,14 @@
 "use client";
 import { useState, useSyncExternalStore } from "react";
 import { KeyRound, LogOut, ShieldAlert } from "lucide-react";
-import { Btn, Chip, Input, KV, Panel, Select, StatusDot, Toggle, useConfirm } from "@/components/ui";
+import { Btn, Chip, HelpTip, Input, KV, Panel, Select, StatusDot, Toggle, useConfirm } from "@/components/ui";
+import NotificationSettings from "@/components/NotificationSettings";
+import AiSettingsPanel from "@/components/AiSettingsPanel";
 import { api, logout } from "@/lib/api";
 import { cx, fmtDateTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
 import { LAYOUT_PRESETS, useApp } from "@/stores";
-import type { AppSettings, LayoutPreset, SystemStatus } from "@/lib/types";
+import type { AppSettings, LayoutPreset } from "@/lib/types";
 
 const ACCENTS = [
   { id: "teal", color: "#57E6D2", label: "Teal" },
@@ -38,7 +40,7 @@ function getServerOrigin(): string {
 export default function SettingsPage() {
   const { settings, patchSettings, applySettings, applyLayoutPreset, system, notify } = useApp();
   const [confirm, confirmNode] = useConfirm();
-  const { data: caps, refresh: refreshCaps } = usePoll(
+  const { data: caps } = usePoll(
     () => api.get<{ capabilities: Record<string, boolean> }>("/api/settings").then((r) => r.capabilities),
     600000
   );
@@ -142,7 +144,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="p-3 max-w-[1100px] mx-auto space-y-3">
+    <div className="p-3 space-y-3 page-shell-narrow">
       <h1 className="text-[15px] font-semibold">Settings</h1>
 
       {/* appearance */}
@@ -174,6 +176,14 @@ export default function SettingsPage() {
               onChange={(v) => void patchSettings({ density: v ? "compact" : "comfortable" })} />
           </div>
           <div className="flex items-center justify-between">
+            <span className="text-[11px] text-mut inline-flex items-center gap-1.5">
+              Colour-blind friendly gain/loss
+              <HelpTip topic="colorblind" />
+            </span>
+            <Toggle checked={settings.colorblindPalette} label="Colour-blind friendly palette"
+              onChange={(v) => void patchSettings({ colorblindPalette: v })} />
+          </div>
+          <div className="flex items-center justify-between">
             <span className="text-[11px] text-mut">Reduce animations</span>
             <Toggle checked={settings.reduceMotion} onChange={(v) => void patchSettings({ reduceMotion: v })} label="Reduce animations" />
           </div>
@@ -200,7 +210,7 @@ export default function SettingsPage() {
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1.5 border-t border-edge pt-3">
+          <div className="auto-panels gap-x-6 border-t border-edge pt-3">
             {Object.entries(MODULE_LABELS).map(([key, label]) => (
               <div key={key} className="flex items-center justify-between">
                 <span className="text-[11px] text-mut">{label}</span>
@@ -217,10 +227,11 @@ export default function SettingsPage() {
         <div className="p-3 space-y-2.5">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="microlabel w-28">SOURCE</span>
-            <button onClick={() => void patchSettings({ dataSource: "live" })}
-              className="h-7 px-3 rounded border text-[10px] tracking-wider uppercase border-accent/60 text-accent bg-accent-dim">
-              CoinDCX Futures
-            </button>
+            {(["demo", "live"] as const).map(source => <button key={source} onClick={() => void patchSettings({ dataSource: source })}
+              aria-pressed={settings.dataSource === source}
+              className={cx("h-9 px-3 rounded-md border text-[11px]", settings.dataSource === source ? "border-accent/60 text-accent bg-accent-dim" : "border-edge text-mut")}>
+              {source === "demo" ? "Demo simulator" : "CoinDCX Futures"}
+            </button>)}
           </div>
           <div className="flex items-center gap-2 text-[11px] text-mut">
             <StatusDot tone={system?.exchangeMarket === "online" ? "ok" : system?.exchangeMarket === "offline" ? "err" : "off"} />
@@ -233,6 +244,9 @@ export default function SettingsPage() {
       </Panel>
 
       {/* execution */}
+      <AiSettingsPanel />
+      <NotificationSettings />
+
       <Panel title="EXECUTION" badge={
         settings.mode === "live" && settings.liveArmed ? <Chip tone="danger" className="pulse-soft">LIVE ARMED</Chip>
         : settings.mode === "paper" ? <Chip tone="warn">PAPER</Chip> : <Chip>READ ONLY</Chip>
@@ -287,13 +301,14 @@ export default function SettingsPage() {
             </label>
             {settings.displayCurrency === "inr" && (
               <label className="block space-y-1">
-                <span className="microlabel">USD → ₹ RATE</span>
+                <span className="microlabel">USD → ₹ RATE · MANUAL</span>
                 <Input type="number" className="w-28" value={String(settings.usdInrRate)}
-                  onChange={(e) => void patchSettings({ usdInrRate: parseFloat(e.target.value) || 0 })} />
+                  onChange={(e) => void patchSettings({ usdInrRate: parseFloat(e.target.value) || settings.usdInrRate })} />
               </label>
             )}
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <p className="text-[10px] text-dim">FX provenance: user-configured conversion rate, not a live FX feed. USDT prices are treated as USD-equivalent. Prices, chart axes and monetary totals convert for display; coin quantities and percentages do not.</p>
+          <div className="auto-cells">
             {([
               ["maxDailyLoss", "MAX DAILY LOSS", true],
               ["maxOrderValue", "MAX ORDER VALUE", true],
@@ -419,7 +434,7 @@ export default function SettingsPage() {
 
       {/* feature flags + audit */}
       <Panel title="FEATURE FLAGS (SERVER)">
-        <div className="p-3 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1">
+        <div className="p-3 auto-panels gap-x-6">
           {Object.entries(system?.flags ?? {}).map(([k, v]) => (
             <div key={k} className="flex items-center justify-between">
               <span className="num text-[10px] text-mut">{k}</span>

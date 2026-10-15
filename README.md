@@ -7,6 +7,31 @@ paper trading and a trade journal — in one dark, low-clutter workspace.
 It is **not** a TradingView/CoinDCX/OSIRIS clone. It is a personal command center that answers:
 *Where is price? What is the market doing? What is my setup? What is my position? What is my risk?*
 
+Three things it does that most retail terminals do not:
+
+1. **No unexplained abbreviations.** Every overlay drawn on a chart is decoded in
+   full words, both in a "WHAT IS ON THIS CHART" legend and by switching the
+   price-axis labels from short tokens (`CD:D20-U`) to full names
+   (`DONCHIAN 20 · UPPER BOUND`).
+2. **Layouts that adapt to the screen, not just the width.** Grids reflow from
+   the available space, and the shape of the viewport decides what sits side by
+   side: two charts and a watchlist rail on a wide landscape monitor, a stacked
+   single column on a phone or a tall split window.
+3. **Predictions you can hold to account.** The AI panel (5-minute frame,
+   Chandelier Exit + Donchian ribbon) writes a structured call on both the
+   candlestick and Heikin-Ashi charts, and every call is recorded so its outcome
+   can be scored against what price actually did.
+
+> **Latest review (October 2026):** strategy correctness, runtime and interface audit —
+> findings, fixes, design benchmark and the forward roadmap are in
+> `docs/AUDIT_2026-10.md`. Headline items: Donchian windowing, backtest look-ahead and
+> Heikin-Ashi fill bias, position sizing, the `demo`/`live` data-source path, and a
+> readiness-first overview. A short plan (with a status note) lives in
+> `docs/IMPROVEMENT_PLAN.md`. Interface benchmark (goods/bads from TradingView, Coinbase
+> Advanced, Kraken Pro, Bybit, Binance, Zerodha Kite and Bloomberg Terminal, with an
+> anti-pattern audit of this project): `docs/DESIGN_BENCHMARK.md`. Competitive gap analysis and
+> the futuristic roadmap: `docs/FUTURE_ROADMAP.md`.
+
 ## Quick start
 
 ```bash
@@ -18,10 +43,17 @@ npm run dev
 
 Private account data (balances, positions, orders) additionally needs
 `COINDCX_API_KEY` / `COINDCX_API_SECRET` in the environment — see
-`docs/COINDCX_SETUP.md`. Tests: `npm test` runs the quant suite, the CoinDCX
+`docs/COINDCX_SETUP.md`. Tests: `npm test` runs the quant suite, the v2 strategy/regression suite, the CoinDCX
 adapter suite (signing vectors + a mock venue), the standalone gateway suite, a
 production build, the paper-trading end-to-end test and the Vercel↔CoinDCX
 boundary test.
+
+Fonts (Inter, JetBrains Mono) are bundled via `@fontsource-variable/*`, so no build-time
+font download is required.
+
+Market data follows the **Data source** setting in Settings → Market data: `demo` uses the
+deterministic simulator and `live` reads CoinDCX public REST. There is no silent fallback
+between them — a failed live request surfaces as an error, never as fabricated data.
 
 Open the app, complete the 5-step onboarding, done. Without any credentials the
 workspace runs on a **clearly-labelled deterministic demo simulator** (candles print live
@@ -91,6 +123,9 @@ be disabled. Full list in `.env.example`.
 - `docs/STRATEGY_ENGINE.md` — strategies, structure & S/R detection
 - `docs/PAPER_TRADING.md` — paper engine semantics
 - `docs/WEBHOOKS.md` — optional TradingView webhook (disabled by default)
+- `docs/AI_PREDICTION.md` — AI signal prediction: 5m Chandelier/Donchian calls on both charts, free-tier keys, guard rails, scoring
+- `docs/DESIGN_BENCHMARK.md` — premium-interface benchmark, anti-pattern audit, capability matrix
+- `docs/FUTURE_ROADMAP.md` — competitive landscape, gap analysis, unique/futuristic roadmap
 - `docs/DEPLOYMENT.md` — local, Docker, Cloudflare Tunnel
 
 ## Keyboard
@@ -106,3 +141,15 @@ Charting rendered by [TradingView Lightweight Charts](https://www.tradingview.co
 CoinDCX is an Indian VDA exchange registered with FIU-IND as a reporting entity;
 FIU-IND registration is not a SEBI licence and is not an endorsement of futures
 trading risk. Nothing here is investment advice.
+
+### Pattern reasoning and recorded memory
+
+Both chart prediction panels now include **Pattern recognition · reasoning checks · memory**: 30 rule-based candle patterns, EMA/VWAP/RSI/ADX checklists, MACD and Bollinger context, and comparable completed calls from the saved ledger. No key is needed for this analysis. See [definitions, research and storage limits](docs/PATTERN_REASONING_MEMORY.md). Poster win-rate claims are not adopted.
+
+### Day/night, messaging and market pulse
+
+Use the top-bar sun/moon switch for upgraded light/dark surfaces and motion-aware controls. **Markets → Market Pulse** shows up to 10 gainers/losers in the available universe with independent 5m candidate/wait checks. **Settings → Signal Notifications** configures Telegram/WhatsApp delivery (server credentials required). See [setup, background scheduling and limitations](docs/STYLE_ALERTS_MOVERS.md).
+
+### Automatic history, INR and messaging setup
+
+See [automatic history/currency/provenance](docs/AUTOMATIC_HISTORY_CURRENCY_PROVENANCE.md) for the read-only journal, bounded CoinDCX pagination/coverage, paper fee correction, honest prior-AI context, INR conversion and audit exports. Chandelier now defaults to ATR **1 × 2**; saved preferences survive, with an explicit reset in the indicator tab. All dropdown symbols join the watchlist automatically; absent quotes remain unavailable. Telegram can be configured securely in Settings. WhatsApp QR requires a real configured business sender and opens an **opt-in chat**, not personal account pairing. No messaging or live execution is enabled automatically.

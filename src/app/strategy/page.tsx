@@ -1,13 +1,16 @@
 "use client";
+import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
 import { useState } from "react";
-import { Zap, CandlestickChart } from "lucide-react";
-import { Chip, EmptyState, Input, Panel, Skeleton, Toggle } from "@/components/ui";
+import { Zap } from "lucide-react";
+import { Chip, EmptyState, Input, PageHeader, Panel, Skeleton, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtDateTime, fmtPrice } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
 import { useApp } from "@/stores";
 import type { Analysis } from "@/lib/types";
 import { ChandelierDonchianPanel } from "@/components/strategy/ChandelierDonchianPanel";
+import { SignalAccountability } from "@/components/strategy/SignalAccountability";
+import { AiPredictionLog } from "@/components/strategy/AiPredictionLog";
 
 interface QuantView {
   confluence: {
@@ -41,22 +44,6 @@ function ComponentBar({ label, value }: { label: string; value: number }) {
   );
 }
 
-interface QuantSnapshot {
-  confluence?: {
-    score: number; direction: string;
-    components: { trend: number; zone: number; momentum: number; volume: number };
-    reasons: string[]; atr: number | null;
-  } | null;
-  metaProba?: number | null;
-  regime?: string;
-  gates?: {
-    confluence: { passed: boolean; reason: string };
-    meta: { passed: boolean; reason: string };
-    final: boolean;
-  };
-  error?: string;
-}
-
 const STRATEGY_META: Record<string, { name: string; desc: string }> = {
   trend: { name: "Trend Pullback", desc: "EMA-aligned continuation after a pullback to the fast EMA." },
   breakout: { name: "Level Breakout", desc: "Closed candles beyond the strongest detected S/R clusters." },
@@ -64,27 +51,22 @@ const STRATEGY_META: Record<string, { name: string; desc: string }> = {
 };
 
 export default function StrategyPage() {
+  useDisplayCurrency();
   const { activeSymbol, timeframe, settings, patchSettings } = useApp();
-  const { data } = usePoll(
-    () => api.get<{ analysis: Analysis; quant: QuantView | null }>(`/api/strategy/evaluate?symbol=${activeSymbol}&timeframe=${timeframe}`),
-    20000, { deps: [activeSymbol, timeframe] }
+  const { data, error } = usePoll(
+    () => api.get<{ analysis: Analysis | null; quant: QuantView | null; source?: "demo" | "live"; enabled?: boolean }>(`/api/strategy/evaluate?symbol=${activeSymbol}&timeframe=${timeframe}`),
+    20000, { deps: [activeSymbol, timeframe, settings.dataSource] }
   );
   const analysis = data?.analysis ?? null;
   const quant = data?.quant ?? null;
 
   return (
-    <div className="p-3 space-y-3 max-w-[1500px] mx-auto">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h1 className="text-[15px] font-semibold">Strategy Engine</h1>
-          <p className="text-[11px] text-dim">
-            Evaluating <span className="num text-mut">{activeSymbol} · {timeframe}</span> on closed candles. Signals are setups, not predictions.
-          </p>
-        </div>
-        <Chip tone="accent"><Zap size={11} /> ENGINE {analysis ? "ONLINE" : "WARMING UP"}</Chip>
-      </div>
+    <div className="p-4 lg:p-6 space-y-4 page-shell">
+      <PageHeader crumb="RESEARCH / STRATEGY" title="Strategy engine"
+        description={`Evaluating ${activeSymbol} · ${timeframe} on closed candles only. Signals are setups with a published entry, stop and target — never predictions.`}
+        actions={<Chip tone="accent"><Zap size={11} /> ENGINE {error ? "UNAVAILABLE" : data?.enabled === false ? "DISABLED" : analysis ? "RUNNING" : "WARMING UP"} · {error ? "NO VERIFIED INPUTS" : data?.source === "demo" ? "DEMO CANDLES" : data?.source === "live" ? "COINDCX LIVE CANDLES" : "SOURCE UNAVAILABLE"}</Chip>} />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="auto-panels">
         {(["trend", "breakout", "sr"] as const).map((id) => {
           const sig = analysis?.signals.find((s) => s.strategy === id) ?? null;
           const meta = STRATEGY_META[id];
@@ -160,7 +142,7 @@ export default function StrategyPage() {
       {/* Chandelier Exit + Donchian Ribbon strategy */}
       <ChandelierDonchianPanel />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-3">
+      <div className="auto-split with-aside">
         <SignalHistory />
         <Panel title="DETECTION SETTINGS">
           <div className="p-3 space-y-2.5">
@@ -189,11 +171,14 @@ export default function StrategyPage() {
           </div>
         </Panel>
       </div>
-    </div>
+          <SignalAccountability />
+          <AiPredictionLog />
+</div>
   );
 }
 
 function SignalHistory() {
+  useDisplayCurrency();
   const { settings } = useApp();
   const [symbol, setSymbol] = useState("");
   const { data } = usePoll(
