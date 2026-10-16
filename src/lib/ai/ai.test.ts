@@ -310,6 +310,48 @@ describe("provider client (fake fetch, no network)", () => {
     if (!result.ok) assert.equal(result.kind, "not-configured");
   });
 
+  it("omits JSON response mode and gives reasoning models a larger budget", async () => {
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.max_tokens, 1500);
+      assert.equal("response_format" in body, false);
+      assert.deepEqual(body.provider.max_price, { prompt: 0, completion: 0 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"direction":"LONG"}' } }] }));
+    };
+    const result = await callProvider("openrouter", ctx, { apiKey: "test-key", fetchImpl });
+    assert.equal(result.ok, true);
+  });
+
+  it("accepts alternate text envelopes and prefers final answers over reasoning", () => {
+    const answer = '{"direction":"LONG"}';
+    for (const payload of [
+      { choices: [{ message: { content: [{ type: "text", text: answer }] } }] },
+      { choices: [{ message: { content: "", reasoning: answer } }] },
+      { choices: [{ message: { reasoning_content: answer } }] },
+      { choices: [{ delta: { content: answer } }] },
+      { content: answer }, { text: answer }, { reasoning: answer },
+    ]) assert.equal(extractMessageContent(payload), answer);
+    assert.equal(extractMessageContent({ choices: [{ message: { content: answer, reasoning: "thinking" } }] }), answer);
+    assert.equal(extractMessageContent({ choices: [null] }), null);
+    assert.equal(extractMessageContent({ choices: [{ message: { content: "   " } }] }), null);
+  });
+
+  it("parses JSON from reasoning when final content is empty", async () => {
+    const result = await callProvider("openrouter", ctx, { apiKey: "test-key",
+      fetchImpl: fakeFetch(200, JSON.stringify({ choices: [{ message: { content: "", reasoning_content: '```json\n{"direction":"LONG"}\n```' } }] })),
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.deepEqual(result.raw, { direction: "LONG" });
+  });
+
+  it("surfaces upstream errors on HTTP 200 without metadata or credentials", async () => {
+    const result = await callProvider("openrouter", ctx, { apiKey: "secret-key",
+      fetchImpl: fakeFetch(200, JSON.stringify({ error: { message: "Model failed secret-key", metadata: "private metadata" } })),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error, "Provider error: Model failed [redacted]");
+  });
+
   it("reads both chat-completion envelopes", () => {
     assert.equal(extractMessageContent({ choices: [{ message: { content: "hi" } }] }), "hi");
     assert.equal(extractMessageContent({ choices: [{ text: "hi" }] }), "hi");

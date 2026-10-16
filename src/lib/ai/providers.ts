@@ -72,10 +72,10 @@ export async function callProvider(
       { role: "user", content: userPrompt(context) },
     ],
     temperature: 0.2,
-    max_tokens: 500,
-    // Free endpoints honour this on some models and ignore it on others; the
-    // validator is what actually guarantees shape, so this is a hint only.
-    response_format: { type: "json_object" },
+    // Leave room for reasoning models to produce their final JSON answer.
+    max_tokens: 1500,
+    // Some free models return empty content with response_format. The prompt
+    // requests JSON; extractJson and the downstream validator enforce it.
     ...(provider === "openrouter" ? { provider: { max_price: { prompt: 0, completion: 0 } } } : {}),
   };
 
@@ -99,6 +99,17 @@ export async function callProvider(
       payload = JSON.parse(text);
     } catch {
       return { ok: false, kind: "bad-output", error: "Provider response was not JSON", model, latencyMs };
+    }
+    // Providers can report an error inside an otherwise successful HTTP response.
+    const upstreamError = payload && typeof payload === "object"
+      ? (payload as { error?: unknown }).error : undefined;
+    if (upstreamError) {
+      const message = typeof upstreamError === "string" ? upstreamError
+        : typeof upstreamError === "object" && typeof (upstreamError as { message?: unknown }).message === "string"
+          ? (upstreamError as { message: string }).message : "Unspecified upstream error";
+      // Do not forward metadata or accidentally echo the configured credential.
+      const safeMessage = message.split(options.apiKey).join("[redacted]").replace(/[\r\n]+/g, " ").slice(0, 300);
+      return { ok: false, kind: "bad-output", error: `Provider error: ${safeMessage}`, model, latencyMs };
     }
     const content = extractMessageContent(payload);
     if (!content) {
@@ -130,15 +141,33 @@ export async function callProvider(
   }
 }
 
-/** OpenAI-compatible envelope: choices[0].message.content. */
+/** Read common OpenAI-compatible envelopes, preferring final content to reasoning. */
 export function extractMessageContent(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null;
-  const choices = (payload as { choices?: unknown }).choices;
-  if (!Array.isArray(choices) || !choices.length) return null;
-  const first = choices[0] as { message?: { content?: unknown }; text?: unknown };
-  const content = first?.message?.content;
-  if (typeof content === "string" && content.trim()) return content;
-  // Some NIM models stream deltas into a single choice; accept that shape too.
-  if (typeof first?.text === "string" && first.text.trim()) return first.text;
+  const root = payload as Record<string, unknown>;
+  const first = Array.isArray(root.choices) ? root.choices[0] : undefined;
+  const choice = first && typeof first === "object" ? first as Record<string, unknown> : {};
+  const record = (value: unknown): Record<string, unknown> =>
+    value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const message = record(choice.message);
+  const delta = record(choice.delta);
+  const readText = (value: unknown): string | null => {
+    if (typeof value === "string") return value.trim() ? value : null;
+    if (Array.isArray(value)) {
+      const text = value.map((part) => {
+        if (typeof part === "string") return part;
+        const item = record(part);
+        return typeof item.text === "string" ? item.text : "";
+      }).join("");
+      return text.trim() ? text : null;
+    }
+    return null;
+  };
+  for (const value of [message.content, choice.text, delta.content, root.content, root.text,
+    message.reasoning, message.reasoning_content, delta.reasoning, delta.reasoning_content,
+    root.reasoning, root.reasoning_content]) {
+    const text = readText(value);
+    if (text) return text;
+  }
   return null;
 }
