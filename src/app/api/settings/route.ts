@@ -61,6 +61,9 @@ export async function POST(req: Request) {
     );
   }
 
+  if (patch.mode && patch.mode !== current.mode && req.headers.get("x-tc-workspace")) {
+    return Response.json({ error: "Switch workspaces instead of changing execution mode inside this profile." }, { status: 400 });
+  }
   // ---- execution-mode safety gates ---------------------------------------
   if (patch.mode === "live" && !flags.liveExecution()) {
     return Response.json(

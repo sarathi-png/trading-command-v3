@@ -27,7 +27,8 @@ export default function CommandPalette() {
     const go = (path: string) => () => { router.push(path); setPalette(false); };
     const nav: Command[] = [
       { id: "go-overview", label: "Open Overview", group: "Navigate", hint: "O", perform: go("/") },
-      { id: "go-chart", label: "Open Chart", group: "Navigate", hint: "C", perform: go("/chart") },
+      { id: "go-heikin-ashi", label: "Open Heikin-Ashi", group: "Navigate", perform: go("/heikin-ashi") },
+      { id: "go-chart", label: "Open Candlestick", group: "Navigate", hint: "C", perform: go("/chart") },
       { id: "go-markets", label: "Open Markets", group: "Navigate", perform: go("/markets") },
       { id: "go-positions", label: "Show Positions", group: "Navigate", hint: "P", perform: go("/positions") },
       { id: "go-orders", label: "Show Orders", group: "Navigate", perform: go("/orders") },
@@ -54,11 +55,6 @@ export default function CommandPalette() {
       perform: () => { void applyLayoutPreset(p); setPalette(false); },
     }));
     const actions: Command[] = [
-      {
-        id: "mode-paper", label: settings.mode === "paper" ? "Switch to Read Only" : "Enable Paper Mode",
-        group: "Actions",
-        perform: () => { void patchSettings({ mode: settings.mode === "paper" ? "read_only" : "paper" }); setPalette(false); },
-      },
       {
         id: "toggle-ob", label: settings.modules.orderbook ? "Hide Order Book" : "Show Order Book",
         group: "Actions",

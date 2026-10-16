@@ -50,3 +50,17 @@ Keep live trading disabled by default. Do not claim the strategies have an edge 
 - Verification: typecheck/lint, clean 321-test suite (zero failures), signed mock pagination test retaining 403 fills / 401 FIFO records, API annotation/dedup/no-order isolation, browser day/night INR + 390/834px (including charts) with no page errors or document overflow. Browser input check: ₹8,800 submits canonical USD 100 without changing coin quantity.
 
 Coverage, durable-worker/storage requirements, FIFO-vs-booked P&L and messaging/provider limitations are documented in `docs/AUTOMATIC_HISTORY_CURRENCY_PROVENANCE.md`. Real external account history/sends were not verified; preview remains demo/read-only and live execution is disabled.
+
+## Chart readability follow-up (local, awaiting a new publication session)
+
+Reported Vercel chart/AI crowding and overlapping sidebar cards are corrected with focused chart-view controls, container-width comparison, fixed plot allocation, folded optional legend/objects and naturally sized sidebar cards with independent scrolling. Duplicate Donchian badges and accumulating overlay references are corrected without changing underlying indicator values. Details: `docs/CHART_READABILITY.md`. Verification: clean 322-test suite, typecheck/lint, day/night browser tests at 390–2560px, stable plot heights and no card overlap/overflow/page errors. This follow-up has not been pushed because the coding session is closed.
+
+
+## Live/Paper workspace and focused navigation follow-up
+
+Implemented one authenticated operator with a Live/Paper profile gate, request-scoped application settings, strict financial-view filtering, no live-to-paper balance fallback, separate Candlestick/Heikin-Ashi routes, a dedicated AI connection route and authenticated zero-price model discovery with conservative rotation. Shared operator connections and remaining Vercel persistence limitations are explicit in `WORKSPACE_SEPARATION.md`. Verification: 329 tests, production build, typecheck/lint and responsive browser checks. Publication remains local because this coding session is closed.
+
+
+## Compact strategy/AI decisions and chart-specific indications
+
+Implemented the Strategy decision → AI decision → agreement summary with collapsed reasoning, original pre-veto model proposals, in-chart timeframe selectors, raw/HA analysis and drawing isolation, essential axis labels by default, removal of duplicate/oversized toolbar controls, and explicit green/red configuration glows. See `DECISION_SUMMARY_CHART_ISOLATION.md`. Full verification: 338 tests plus responsive browser checks; local changes only, no Vercel/provider connectivity claim.

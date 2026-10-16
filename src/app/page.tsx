@@ -87,10 +87,10 @@ export default function OverviewPage() {
             onHide={hide("margin")} />
         )}
         {m.pnl && (
-          <MetricCard label="TODAY P&L" help="todayPnl"
+          <MetricCard label={settings.mode === "live" ? "TODAY FIFO ESTIMATE" : "TODAY P&L"} help="todayPnl"
             value={accLoading ? <Skeleton className="h-6 w-20" /> : fmtUsd(account?.todayPnl, { sign: true })}
             tone={pnlTone(account?.todayPnl ?? 0) === "pos" ? "up" : pnlTone(account?.todayPnl ?? 0) === "neg" ? "dn" : "flat"}
-            sub="REALIZED TODAY" onHide={hide("pnl")} />
+            sub={settings.mode === "live" ? "IMPORTED FILLS · NOT VENUE-BOOKED" : "SIMULATED REALIZED TODAY"} onHide={hide("pnl")} />
         )}
         {m.pnl && (
           <MetricCard label="OPEN P&L" help="openPnl"
@@ -116,7 +116,7 @@ export default function OverviewPage() {
           </div>
         } elevation={1}>
           <div style={{ height: chartHeightFor(viewport) }}>
-            <ChartPanel symbol={activeSymbol} timeframe={timeframe} analysis={analysis} interactive />
+            <ChartPanel symbol={activeSymbol} timeframe={timeframe} analysis={analysis} interactive surfaceHeight={420} />
           </div>
         </PremiumPanel>
         {m.strategyScore && <SignalPanel analysis={analysis} />}
@@ -127,16 +127,16 @@ export default function OverviewPage() {
         {m.positions && (
           <PositionsTable
             account={account}
-            source="paper"
+            source={settings.mode === "live" ? "live" : "paper"}
             className="lg:col-span-1"
-            onClose={(symbol) => {
+            onClose={settings.mode === "paper" ? (symbol) => {
               void api.post("/api/paper", { action: "close", symbol }).then(() => {
                 refreshAccount();
                 useApp.getState().notify({ title: "Position closed", body: `${symbol} paper position closed`, tone: "info" });
               }).catch((e: Error) => {
                 useApp.getState().notify({ title: "Close failed", body: e.message, tone: "danger" });
               });
-            }}
+            } : undefined}
           />
         )}
         {m.risk && (
@@ -171,7 +171,7 @@ export default function OverviewPage() {
           </PremiumPanel>
         )}
       </div>
-      <ExchangeAccountPanel />
+      {settings.mode === "live" && <ExchangeAccountPanel />}
       <p className="text-[11px] text-dim pb-2">Signals are research candidates, not recommendations. Simulated results do not establish a trading edge.</p>
     </div>
   );

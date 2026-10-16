@@ -276,17 +276,17 @@ export function PositionsTable({
 }: {
   account: AccountState | null;
   onClose?: (symbol: string, positionId: string) => void;
-  source: "paper" | "all";
+  source: "paper" | "live" | "all";
   className?: string;
 }) {
   useDisplayCurrency();
   const positions = account?.positions.filter((p) => source === "all" || p.source === source) ?? [];
   return (
-    <Panel title={source === "paper" ? "PAPER POSITIONS" : "POSITIONS"} className={className}
+    <Panel title={source === "paper" ? "PAPER POSITIONS" : "LIVE POSITIONS"} className={className}
       badge={<span className="text-[9px] num text-dim">{positions.length} OPEN</span>}>
       {positions.length === 0 ? (
         <EmptyState icon={<Inbox size={18} />} title="No open positions"
-          hint={source === "all" ? "Connect CoinDCX or switch to PAPER mode to open simulated positions." : "Paper positions appear here when you place simulated orders."} />
+          hint={source === "live" ? "Only your CoinDCX positions are shown in this workspace." : source === "all" ? "Connect CoinDCX or switch to PAPER mode to open simulated positions." : "Paper positions appear here when you place simulated orders."} />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-[11px] sticky-header table-row-hover">

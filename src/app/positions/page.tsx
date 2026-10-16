@@ -1,7 +1,7 @@
 "use client";
 import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
 import { PositionsTable, RiskCard } from "@/components/panels";
-import { Chip, KV, MetricCard, PageHeader, PremiumPanel } from "@/components/ui";
+import { KV, MetricCard, PageHeader, PremiumPanel } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtPct, fmtUsd, pnlTone } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -11,7 +11,7 @@ import type { AccountState } from "@/lib/types";
 export default function PositionsPage() {
   useDisplayCurrency();
   const { settings, activeSymbol, notify } = useApp();
-  const { data, refresh } = usePoll(() => api.get<{ account: AccountState }>("/api/account"), 5000);
+  const { data, refresh, error } = usePoll(() => api.get<{ account: AccountState }>("/api/account"), 5000);
   const account = data?.account ?? null;
 
   const close = async (symbol: string) => {
@@ -29,8 +29,9 @@ export default function PositionsPage() {
   return (
     <div className="p-4 lg:p-6 space-y-4 page-shell">
       <PageHeader crumb="TRADING / POSITIONS" title="Positions & exposure"
-        description="Everything currently at risk, paper and live, marked against the latest prices." />
+        description="Positions from your selected workspace only, marked against the latest prices." />
 
+      {error && <p role="alert" className="panel p-4 text-warn text-sm">Account unavailable. {error}</p>}
       <div className="auto-cells">
         <MetricCard label="EQUITY" help="equity" value={fmtUsd(account?.equity)} sub={account?.source === "demo" ? "DEMO / PAPER" : "COINDCX"} />
         <MetricCard label="OPEN P&L" help="openPnl" value={fmtUsd(account?.openPnl, { sign: true })}
@@ -45,24 +46,10 @@ export default function PositionsPage() {
         <div className="space-y-3">
           <PositionsTable
             account={account}
-            source="all"
-            onClose={(symbol) => void close(symbol)}
+            source={settings.mode === "live" ? "live" : "paper"}
+            onClose={settings.mode === "paper" ? (symbol) => void close(symbol) : undefined}
           />
-          <PremiumPanel title="LIVE EXCHANGE POSITIONS" elevation={1}>
-            <div className="p-4 text-[11px] text-dim leading-relaxed">
-              {settings.dataSource === "live" ? (
-                <p className="flex items-center gap-2">
-                  <Chip tone="up">LIVE</Chip> Live positions merge into the table above when CoinDCX account data is connected.
-                </p>
-              ) : (
-                <p>
-                  The data source is currently <span className="text-warn">demo</span>. Configure CoinDCX in
-                  Settings → Market Data to overlay real exchange positions. Live positions are always
-                  labelled <Chip>LIVE</Chip>, paper positions <Chip>PAPER</Chip> — they are never mixed.
-                </p>
-              )}
-            </div>
-          </PremiumPanel>
+
         </div>
 
         <div className="space-y-3">

@@ -1,3 +1,4 @@
+import { toHeikinAshi } from "@/lib/strategy/v2/heikin-ashi";
 import { dispatchNotice } from "@/lib/notifications/service";
 import { getRepo } from "@/lib/repo";
 import { flags } from "@/lib/flags";
@@ -47,6 +48,9 @@ export async function GET(req: Request) {
     return Response.json({ error: `Unsupported timeframe: ${tf}` }, { status: 400 });
   }
 
+  const chartType = url.searchParams.get("chartType") ?? "candles";
+  if (!["candles", "heikin-ashi"].includes(chartType)) return Response.json({ error: "Unsupported chart type" }, { status: 400 });
+  try {
   const settings = await getSettings();
   const candleRes = await getCandles(
     symbol,
@@ -58,7 +62,7 @@ export async function GET(req: Request) {
   const analysis = buildAnalysis(
     symbol,
     tf as Timeframe,
-    candleRes.candles,
+    chartType === "heikin-ashi" ? toHeikinAshi(candleRes.candles) : candleRes.candles,
     {
       sensitivity: settings.srSensitivity,
       minTouches: settings.srMinTouches,
@@ -67,6 +71,12 @@ export async function GET(req: Request) {
     settings.strategiesEnabled,
     ALL_STRATEGIES
   );
+
+  analysis.chartType = chartType === "heikin-ashi" ? "heikin-ashi" : "candles";
+
+  // Smoothed-chart research is independent: never overwrite the raw-candle
+  // signal ledger or send normal-chart alerts with synthetic HA prices.
+  if (chartType === "heikin-ashi") return Response.json({ analysis, quant: null, source: candleRes.source, chartType, enabled: true, notice: "Heikin-Ashi analysis only; smoothed levels are not executable prices." });
 
   // ---- quant confluence + meta gate (port of trader_bot_v2) --------------
   let quant: QuantPayload | null = null;
@@ -169,5 +179,9 @@ export async function GET(req: Request) {
       direction: signal.status === "LONG_SETUP" ? "LONG" : "SHORT", barTime: signal.ts,
       source: candleRes.source, entry: signal.entry, stop: signal.stop, target: signal.target, reasons: signal.reasons });
   }
-  return Response.json({ analysis, quant, source: candleRes.source, enabled: flags.strategyEngine() });
+  return Response.json({ analysis, quant, chartType, source: candleRes.source, enabled: flags.strategyEngine() });
+  } catch {
+    return Response.json({ error: "Chart analysis unavailable for the selected data source. No other chart type or simulated analysis was substituted.", analysis: null }, { status: 502 });
+  }
+
 }

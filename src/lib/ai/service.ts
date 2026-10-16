@@ -16,10 +16,10 @@ import { getSettings } from "../settings";
 import { TF_MINUTES, type Candle, type Timeframe } from "../types";
 import { buildAiContext } from "./context";
 import { configuredProviders, resolveKey } from "./keys";
-import { callProvider } from "./providers";
+import { callFreeProvider } from "./autoProvider";
 import { degradationNotice, validatePrediction } from "./prompt";
 import { technicalConflicts, ruleEvidence, ruleVerdict } from "./rules";
-import { budgetState, findCached, listPredictions, recordCall, savePrediction, updatePredictions } from "./store";
+import { budgetState, findCached, listPredictions, savePrediction, updatePredictions } from "./store";
 import { predictOutcome, scorecard, type AiScorecard } from "./outcomes";
 import {
   AI_DEFAULT_HORIZON_BARS,
@@ -138,7 +138,7 @@ export async function predict(request: PredictRequest): Promise<PredictResult> {
     // instead of leaving the user wondering why a model was never used.
     const notice = requested === "rules"
       ? "The built-in rule engine is selected as the engine, so no external model is called."
-      : "No OpenRouter or NVIDIA API key is configured, so the built-in Chandelier + Donchian rule engine answered. Add a free-tier key in Settings → AI SIGNAL PREDICTION to use a model.";
+      : "No OpenRouter or NVIDIA API key is configured, so the built-in Chandelier + Donchian rule engine answered. Add a free-tier key in AI CONNECTION → AI SIGNAL PREDICTION to use a model.";
     const prediction = buildRulePrediction(context, notice);
     await persistPrediction(prediction);
     return { prediction, cached: false, warning: notice, evidence: ruleEvidence(context) };
@@ -161,8 +161,7 @@ export async function predict(request: PredictRequest): Promise<PredictResult> {
   }
 
   // Count the call before making it: a provider error still consumed quota.
-  await recordCall(target, now);
-  const call = await callProvider(target, context, { apiKey: resolved.key, model: resolved.model });
+  const call = await callFreeProvider(target, context, resolved.key);
 
   if (!call.ok) {
     const notice = degradationNotice(call.error, providerLabel);
@@ -181,6 +180,7 @@ export async function predict(request: PredictRequest): Promise<PredictResult> {
   }
 
   const v = validated.value;
+  const modelDecision = { direction: v.direction, rationale: v.rationale, confidence: v.confidence };
   const conflicts = technicalConflicts(context, v.direction);
   if (conflicts.length) {
     v.direction = "NEUTRAL";
@@ -196,6 +196,7 @@ export async function predict(request: PredictRequest): Promise<PredictResult> {
     chartType: request.chartType,
     provider: target,
     model: call.model,
+    modelDecision,
     direction: v.direction,
     confidence: v.confidence,
     horizonBars: v.horizonBars ?? AI_DEFAULT_HORIZON_BARS,
@@ -331,7 +332,7 @@ export async function aiPerformance(limit = 25): Promise<AiPerformance> {
         configured: Boolean(key.key),
         keySource: key.source,
         keyHint: key.hint,
-        model: key.model,
+        model: "Auto · verified free catalog",
         callsToday: budget.callsToday,
         dailyLimit: budget.dailyLimit,
         minIntervalSeconds: budget.minIntervalSeconds,

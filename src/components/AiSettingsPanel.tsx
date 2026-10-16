@@ -1,4 +1,6 @@
 "use client";
+import ConnectionStatus from "./ConnectionStatus";
+import FreeModelCatalog from "./FreeModelCatalog";
 /**
  * Settings → AI SIGNAL PREDICTION.
  *
@@ -155,11 +157,11 @@ export default function AiSettingsPanel() {
                   </span>
                   {info?.configured ? (
                     <span className="flex items-center gap-1.5">
-                      <Chip tone="up">KEY {info.keySource === "env" ? "FROM ENV" : "SAVED"}</Chip>
+                      <ConnectionStatus configured label={info.keySource === "env" ? "Key from environment" : "Saved key"} />
                       {info.keyHint && <span className="num text-[10px] text-dim">{info.keyHint}</span>}
                     </span>
                   ) : (
-                    <Chip>NO KEY</Chip>
+                    <ConnectionStatus configured={info?.configured ?? null} label="API key" />
                   )}
                 </div>
 
@@ -188,7 +190,7 @@ export default function AiSettingsPanel() {
                 </div>
 
                 <div className="grid gap-1">
-                  <KV k="Model" v={info?.model ?? "…"} />
+                  <FreeModelCatalog key={info?.keyHint ?? "no-key"} provider={provider} configured={Boolean(info?.configured)} />
                   <KV k="Env alternative" v={PROVIDER_COPY[provider].env} />
                   <KV k="Free-tier guard" v={`${limits.dailyLimit} calls/day, ${limits.minIntervalSeconds}s apart`} />
                 </div>

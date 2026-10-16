@@ -144,3 +144,19 @@ export function groupLegendRows(rows: LegendRow[]): { key: string; label: string
   }
   return [...groups.values()];
 }
+
+/** Equal Donchian bounds are one plotted level, not stacked duplicate badges. */
+export function groupDonchianBounds(periods: Record<number, { upper: number; lower: number }>): { bound: "upper" | "lower"; price: number; periods: number[] }[] {
+  const groups = new Map<string, { bound: "upper" | "lower"; price: number; periods: number[] }>();
+  for (const [period, row] of Object.entries(periods)) {
+    for (const bound of ["upper", "lower"] as const) {
+      const price = row[bound];
+      if (!Number.isFinite(price) || price <= 0) continue;
+      const key = `${bound}:${price}`;
+      const group = groups.get(key) ?? { bound, price, periods: [] };
+      group.periods.push(Number(period));
+      groups.set(key, group);
+    }
+  }
+  return [...groups.values()].map(group => ({ ...group, periods: group.periods.sort((a,b) => a-b) }));
+}

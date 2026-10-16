@@ -1,4 +1,5 @@
 "use client";
+import ConnectionStatus from "./ConnectionStatus";
 import Image from "next/image";
 import { useState } from "react";
 import { api } from "@/lib/api";
@@ -112,8 +113,7 @@ export default function NotificationSettings() {
             <div className="grid sm:grid-cols-2 gap-3">
               <div className="rounded-lg bg-panel2 p-3">
                 <strong>
-                  Telegram ·{" "}
-                  {data.providers.telegram ? "configured" : "not configured"}
+                  <ConnectionStatus configured={data.providers.telegram} label="Telegram" />
                 </strong>
                 <p className="mt-1">
                   Start your bot conversation first. Provide the bot token and numeric chat ID below, or use TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID on the server. Environment values take precedence.
@@ -131,8 +131,7 @@ export default function NotificationSettings() {
               </div>
               <div className="rounded-lg bg-panel2 p-3">
                 <strong>
-                  WhatsApp ·{" "}
-                  {data.providers.whatsapp ? "configured" : "not configured"}
+                  <ConnectionStatus configured={data.providers.whatsapp} label="WhatsApp" />
                 </strong>
                 <p className="mt-1">
                   WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TO
