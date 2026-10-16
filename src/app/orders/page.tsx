@@ -1,7 +1,10 @@
 "use client";
+import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
+import { useMoneyInput } from "@/lib/useMoneyInput";
+import { currencySymbol, displayRate } from "@/lib/displayCurrency";
 import { useState } from "react";
 import { ShieldAlert } from "lucide-react";
-import { Btn, Chip, EmptyState, Input, KV, Modal, PremiumPanel, Select, Skeleton, Toggle } from "@/components/ui";
+import { Btn, Chip, EmptyState, Input, KV, Modal, PremiumPanel, PageHeader, Select, Skeleton, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtDateTime, fmtPrice, fmtUsd } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -11,11 +14,12 @@ import type { PaperOrder, PaperPosition } from "@/lib/types";
 type OrderType = "market" | "limit" | "stop_market" | "stop_limit";
 
 export default function OrdersPage() {
+  useDisplayCurrency();
   const { settings, activeSymbol, notify } = useApp();
   const ticker = useMarket((s) => s.tickers[activeSymbol]);
   const { data, refresh } = usePoll(
     () => api.get<{ orders: PaperOrder[]; positions: (PaperPosition & { upl: number })[] }>("/api/paper"),
-    5000
+    5000, { enabled: settings.mode === "paper" }
   );
 
   const [side, setSide] = useState<"buy" | "sell">("buy");
@@ -29,6 +33,11 @@ export default function OrdersPage() {
   const [submitting, setSubmitting] = useState(false);
   const [liveModal, setLiveModal] = useState(false);
 
+  const rate = displayRate();
+  const priceInput = useMoneyInput(price, setPrice);
+  const stopPriceInput = useMoneyInput(stopPrice, setStopPrice);
+  const stopInput = useMoneyInput(stop, setStop);
+  const targetInput = useMoneyInput(target, setTarget);
   const readOnly = settings.mode === "read_only";
   const liveMode = settings.mode === "live";
   const refPrice = type === "market" ? ticker?.price ?? 0 : parseFloat(price) || parseFloat(stopPrice) || 0;
@@ -84,7 +93,10 @@ export default function OrdersPage() {
   const history = orders.filter((o) => o.status !== "open").slice(0, 40);
 
   return (
-    <div className="p-3 grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-3 max-w-[1500px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-4 page-shell">
+      <PageHeader crumb="TRADING / ORDERS" title="Order desk"
+        description="Order entry for your selected workspace only. Review the execution mode before submitting." />
+      <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-4">
       {/* order ticket */}
       <PremiumPanel title="ORDER TICKET" badge={
         settings.mode === "paper" ? <Chip tone="warn">PAPER</Chip>
@@ -104,6 +116,7 @@ export default function OrdersPage() {
           </div>
         ) : (
           <div className="p-3 space-y-2.5">
+            <p className="text-[10px] text-dim">Price inputs in {currencySymbol()}; execution stays USD-equivalent. Coin quantity is unchanged.</p>
             <div className="grid grid-cols-2 gap-1.5">
               <button onClick={() => setSide("buy")}
                 className={cx("h-8 rounded text-[11px] font-semibold border", side === "buy" ? "bg-up/15 text-up border-up/40" : "text-dim border-edge hover:text-mut")}>
@@ -127,21 +140,21 @@ export default function OrdersPage() {
             </label>
             {(type === "limit" || type === "stop_limit") && (
               <label className="block space-y-1"><span className="microlabel">LIMIT PRICE</span>
-                <Input inputMode="decimal" placeholder={ticker ? String(ticker.price) : ""} value={price} onChange={(e) => setPrice(e.target.value)} />
+                <Input inputMode="decimal" placeholder={ticker ? String(ticker.price * rate) : ""} value={priceInput.value} onChange={(e) => priceInput.onChange(e.target.value)} />
               </label>
             )}
             {(type === "stop_market" || type === "stop_limit") && (
               <label className="block space-y-1"><span className="microlabel">STOP TRIGGER PRICE</span>
-                <Input inputMode="decimal" value={stopPrice} onChange={(e) => setStopPrice(e.target.value)} />
+                <Input inputMode="decimal" value={stopPriceInput.value} onChange={(e) => stopPriceInput.onChange(e.target.value)} />
               </label>
             )}
             {settings.mode === "paper" && (
               <div className="grid grid-cols-2 gap-2">
                 <label className="block space-y-1"><span className="microlabel">STOP LOSS (OPT)</span>
-                  <Input inputMode="decimal" value={stop} onChange={(e) => setStop(e.target.value)} />
+                  <Input inputMode="decimal" value={stopInput.value} onChange={(e) => stopInput.onChange(e.target.value)} />
                 </label>
                 <label className="block space-y-1"><span className="microlabel">TAKE PROFIT (OPT)</span>
-                  <Input inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} />
+                  <Input inputMode="decimal" value={targetInput.value} onChange={(e) => targetInput.onChange(e.target.value)} />
                 </label>
               </div>
             )}
@@ -178,6 +191,7 @@ export default function OrdersPage() {
 
       {/* open orders + history */}
       <div className="space-y-3 min-w-0">
+        {liveMode ? <PremiumPanel title="LIVE EXECUTION"><div className="p-4 text-sm text-mut">Live submissions are sent only after confirmation and safety checks. Review imported CoinDCX fills in the Live journal; paper orders are not displayed here. This panel does not provide a complete live working-order book.</div></PremiumPanel> : <>
         <PremiumPanel title="OPEN ORDERS" badge={<span className="text-[9px] num text-dim">{openOrders.length}</span>}>
           {settings.mode === "read_only" ? (
             <EmptyState title="No order entry in read-only mode" hint="Switch to PAPER mode to place simulated orders." />
@@ -202,6 +216,7 @@ export default function OrdersPage() {
             <OrderRows orders={history} />
           )}
         </PremiumPanel>
+        </>}
       </div>
 
       {/* live confirmation */}
@@ -226,11 +241,13 @@ export default function OrdersPage() {
           </div>
         </div>
       </Modal>
+      </div>
     </div>
   );
 }
 
 function OrderRows({ orders, onCancel }: { orders: PaperOrder[]; onCancel?: (id: string) => void }) {
+  useDisplayCurrency();
   const { settings } = useApp();
   return (
     <div className="overflow-x-auto">

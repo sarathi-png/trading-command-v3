@@ -1,9 +1,11 @@
 "use client";
+import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
+import MarketMovers from "@/components/MarketMovers";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Star, X } from "lucide-react";
+import { Plus } from "lucide-react";
 import { OrderBookPanel } from "@/components/panels";
-import { Btn, Chip, EmptyState, Panel, Select, Skeleton } from "@/components/ui";
+import { Btn, Chip, EmptyState, PageHeader, Panel, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtCompactUsd, fmtPct, fmtPrice, fmtTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -11,10 +13,11 @@ import { useApp, useMarket } from "@/stores";
 import type { RecentTrade, Ticker } from "@/lib/types";
 
 export default function MarketsPage() {
-  const { settings, patchSettings, setSymbol, activeSymbol } = useApp();
+  useDisplayCurrency();
+  const { settings, setSymbol } = useApp();
   const router = useRouter();
   const [selected, setSelected] = useState<string | null>(null);
-  const { data } = usePoll(
+  const { data, error, loading } = usePoll(
     () => api.get<{ tickers: Ticker[]; known: string[] }>("/api/market/tickers"),
     3000
   );
@@ -25,10 +28,7 @@ export default function MarketsPage() {
 
   const tickers = data?.tickers ?? [];
   const known = data?.known ?? [];
-  const addable = known.filter((s) => !settings.watchlist.includes(s));
-  const rows = settings.watchlist
-    .map((s) => tickers.find((t) => t.symbol === s))
-    .filter((t): t is Ticker => Boolean(t));
+  const rows = (known.length ? known : settings.watchlist).map(symbol => ({ symbol, ticker: tickers.find(t => t.symbol === symbol) }));
 
   const openSymbol = (sym: string) => {
     setSelected(sym);
@@ -36,27 +36,15 @@ export default function MarketsPage() {
   };
 
   return (
-    <div className="p-3 grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-3 max-w-[1700px] mx-auto">
-      <Panel title="WATCHLIST" right={
-        <div className="flex items-center gap-1.5">
-          {addable.length > 0 && (
-            <Select
-              aria-label="Add symbol"
-              value=""
-              onChange={(e) => {
-                if (e.target.value) void patchSettings({ watchlist: [...settings.watchlist, e.target.value] });
-              }}
-            >
-              <option value="">+ add symbol</option>
-              {addable.map((s) => <option key={s} value={s}>{s}</option>)}
-            </Select>
-          )}
-        </div>
-      }>
-        {tickers.length === 0 ? (
+    <div className="p-4 lg:p-6 space-y-4 page-shell">
+      <PageHeader crumb="MARKETS / WATCHLIST" title="Markets"
+        description="All symbols in the market selector are included automatically. Missing quotes stay unavailable; demo quotes are labelled." />
+      <MarketMovers />
+      <div className="auto-split with-aside">
+      <Panel title="WATCHLIST · ALL AVAILABLE SYMBOLS">
+        {error && <p role="status" className="p-3 text-[11px] text-warn">Quotes unavailable: {error}. No demo fallback.</p>}
+        {loading && !data ? (
           <div className="p-3 space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-8" />)}</div>
-        ) : rows.length === 0 ? (
-          <EmptyState icon={<Star size={18} />} title="Your watchlist is empty" hint="Add a symbol with the selector above." />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-[11px]">
@@ -69,46 +57,34 @@ export default function MarketsPage() {
                   <th className="px-2 py-2 font-medium text-right hidden md:table-cell">FUNDING</th>
                   <th className="px-2 py-2 font-medium text-right hidden md:table-cell">OPEN INT</th>
                   <th className="px-2 py-2 font-medium text-right">SRC</th>
-                  <th className="px-2 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((t) => (
+                {rows.map(({ symbol, ticker: t }) => (
                   <tr
-                    key={t.symbol}
-                    onClick={() => openSymbol(t.symbol)}
+                    key={symbol}
+                    onClick={() => openSymbol(symbol)}
                     className={cx(
                       "border-b border-edge/50 cursor-pointer hover:bg-panel2/70",
-                      selected === t.symbol && "bg-accent-dim/40"
+                      selected === symbol && "bg-accent-dim/40"
                     )}
                   >
-                    <td className="px-3 py-2 num font-semibold">{t.symbol}</td>
-                    <td className="px-2 py-2 num text-right">{fmtPrice(t.price)}</td>
-                    <td className={cx("px-2 py-2 num text-right", t.change24hPct >= 0 ? "text-up" : "text-dn")}>
-                      {fmtPct(t.change24hPct)}
+                    <td className="px-3 py-2 num font-semibold">{symbol}</td>
+                    <td className="px-2 py-2 num text-right">{fmtPrice(t?.price)}</td>
+                    <td className={cx("px-2 py-2 num text-right", (t?.change24hPct ?? 0) >= 0 ? "text-up" : "text-dn")}>
+                      {fmtPct(t?.change24hPct)}
                     </td>
-                    <td className="px-2 py-2 num text-right hidden sm:table-cell text-mut">{fmtCompactUsd(t.volume24hUsd)}</td>
+                    <td className="px-2 py-2 num text-right hidden sm:table-cell text-mut">{fmtCompactUsd(t?.volume24hUsd)}</td>
                     <td className="px-2 py-2 num text-right hidden md:table-cell text-mut">
-                      {t.fundingRate !== null ? fmtPct(t.fundingRate, { decimals: 4 }) : "N/A"}
+                      {t?.fundingRate != null ? fmtPct(t.fundingRate, { decimals: 4 }) : "N/A"}
                     </td>
                     <td className="px-2 py-2 num text-right hidden md:table-cell text-mut">
-                      {t.openInterest !== null ? fmtCompactUsd(t.openInterest) : "N/A"}
+                      {t?.openInterest != null ? fmtCompactUsd(t.openInterest) : "N/A"}
                     </td>
                     <td className="px-2 py-2 text-right">
-                      <Chip tone={t.source === "demo" ? "warn" : "up"}>{t.source === "demo" ? "DEMO" : "LIVE"}</Chip>
+                      <Chip tone={!t || t.source === "demo" ? "warn" : "up"}>{!t ? "NO QUOTE" : t.source === "demo" ? "DEMO" : "LIVE"}</Chip>
                     </td>
-                    <td className="px-2 py-2 text-right">
-                      <button
-                        aria-label={`Remove ${t.symbol} from watchlist`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void patchSettings({ watchlist: settings.watchlist.filter((s) => s !== t.symbol) });
-                        }}
-                        className="text-dim hover:text-dn"
-                      >
-                        <X size={12} />
-                      </button>
-                    </td>
+
                   </tr>
                 ))}
               </tbody>
@@ -148,21 +124,21 @@ export default function MarketsPage() {
           </>
         )}
       </div>
+      </div>
     </div>
   );
 }
 
 function MarketDetail({ symbol }: { symbol: string }) {
+  useDisplayCurrency();
   const t = useMarket((s) => s.tickers[symbol]);
-  const { activeSymbol } = useApp();
-  void activeSymbol;
   return (
     <Panel title={symbol} badge={t && <Chip tone={t.source === "demo" ? "warn" : "up"}>{t.source === "demo" ? "DEMO DATA" : "COINDCX LIVE"}</Chip>}>
       <div className="p-3">
         {t ? (
           <div className="flex items-baseline gap-3 mb-2">
-            <span className="num text-xl">${fmtPrice(t.price)}</span>
-            <span className={cx("num text-[12px]", t.change24hPct >= 0 ? "text-up" : "text-dn")}>{fmtPct(t.change24hPct)}</span>
+            <span className="num text-xl">{fmtPrice(t?.price)}</span>
+            <span className={cx("num text-[12px]", (t?.change24hPct ?? 0) >= 0 ? "text-up" : "text-dn")}>{fmtPct(t?.change24hPct)}</span>
           </div>
         ) : (
           <Skeleton className="h-7 w-40 mb-2" />

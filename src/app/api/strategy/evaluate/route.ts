@@ -1,12 +1,14 @@
+import { toHeikinAshi } from "@/lib/strategy/v2/heikin-ashi";
+import { dispatchNotice } from "@/lib/notifications/service";
 import { getRepo } from "@/lib/repo";
 import { flags } from "@/lib/flags";
 import { getCandles } from "@/lib/market/service";
 import { getSettings, logAudit } from "@/lib/settings";
 import { ALL_STRATEGIES, buildAnalysis } from "@/lib/strategy/engine";
-import { TF_MINUTES, TIMEFRAMES, type Candle, type Timeframe } from "@/lib/types";
+import { TF_MINUTES, TIMEFRAMES, type Timeframe } from "@/lib/types";
 import { analyzeConfluence, gateSignal, type ConfluenceResult } from "@/lib/strategy/quant/confluence";
 import { buildFeatures, toArray, FEATURE_COLUMNS } from "@/lib/strategy/quant/features";
-import { predictProba, gateWithMeta, META_MODEL as META_WEIGHTS, META_MODEL_INFO } from "@/lib/strategy/quant/metaModel";
+import { predictProba, gateWithMeta, META_MODEL as META_WEIGHTS } from "@/lib/strategy/quant/metaModel";
 import { regime } from "@/lib/strategy/quant/diagnostics";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +39,7 @@ interface QuantPayload {
 
 export async function GET(req: Request) {
   if (!flags.strategyEngine()) {
-    return Response.json({ error: "Strategy engine disabled", analysis: null });
+    return Response.json({ error: "Strategy engine disabled", analysis: null, enabled: false });
   }
   const url = new URL(req.url);
   const symbol = (url.searchParams.get("symbol") || "BTCUSD").toUpperCase();
@@ -46,6 +48,9 @@ export async function GET(req: Request) {
     return Response.json({ error: `Unsupported timeframe: ${tf}` }, { status: 400 });
   }
 
+  const chartType = url.searchParams.get("chartType") ?? "candles";
+  if (!["candles", "heikin-ashi"].includes(chartType)) return Response.json({ error: "Unsupported chart type" }, { status: 400 });
+  try {
   const settings = await getSettings();
   const candleRes = await getCandles(
     symbol,
@@ -53,10 +58,11 @@ export async function GET(req: Request) {
     Math.max(settings.srLookback + 80, 260)
   );
 
+  candleRes.candles = candleRes.candles.filter(c => (c.time + TF_MINUTES[tf as Timeframe] * 60) * 1000 <= Date.now());
   const analysis = buildAnalysis(
     symbol,
     tf as Timeframe,
-    candleRes.candles,
+    chartType === "heikin-ashi" ? toHeikinAshi(candleRes.candles) : candleRes.candles,
     {
       sensitivity: settings.srSensitivity,
       minTouches: settings.srMinTouches,
@@ -65,6 +71,12 @@ export async function GET(req: Request) {
     settings.strategiesEnabled,
     ALL_STRATEGIES
   );
+
+  analysis.chartType = chartType === "heikin-ashi" ? "heikin-ashi" : "candles";
+
+  // Smoothed-chart research is independent: never overwrite the raw-candle
+  // signal ledger or send normal-chart alerts with synthetic HA prices.
+  if (chartType === "heikin-ashi") return Response.json({ analysis, quant: null, source: candleRes.source, chartType, enabled: true, notice: "Heikin-Ashi analysis only; smoothed levels are not executable prices." });
 
   // ---- quant confluence + meta gate (port of trader_bot_v2) --------------
   let quant: QuantPayload | null = null;
@@ -77,6 +89,7 @@ export async function GET(req: Request) {
         const want = Math.max(60, Math.min(300, Math.round(
           (candleRes.candles.length * TF_MINUTES[tf as Timeframe]) / TF_MINUTES[htfTf]) + 40));
         const hres = await getCandles(symbol, htfTf, Math.max(settings.srLookback + 80, want));
+        hres.candles = hres.candles.filter(c => (c.time + TF_MINUTES[htfTf] * 60) * 1000 <= Date.now());
         if (hres.candles.length >= 40) { htfCandles = hres.candles; htfSource = htfTf; }
       } catch { /* keep ltf proxy */ }
     }
@@ -160,5 +173,15 @@ export async function GET(req: Request) {
     }
   }
 
-  return Response.json({ analysis, quant, source: candleRes.source, enabled: flags.strategyEngine() });
+  for (const signal of analysis.signals) {
+    if (signal.status !== "LONG_SETUP" && signal.status !== "SHORT_SETUP") continue;
+    await dispatchNotice({ symbol, timeframe: tf, chart: "normal", strategy: signal.strategy,
+      direction: signal.status === "LONG_SETUP" ? "LONG" : "SHORT", barTime: signal.ts,
+      source: candleRes.source, entry: signal.entry, stop: signal.stop, target: signal.target, reasons: signal.reasons });
+  }
+  return Response.json({ analysis, quant, chartType, source: candleRes.source, enabled: flags.strategyEngine() });
+  } catch {
+    return Response.json({ error: "Chart analysis unavailable for the selected data source. No other chart type or simulated analysis was substituted.", analysis: null }, { status: 502 });
+  }
+
 }

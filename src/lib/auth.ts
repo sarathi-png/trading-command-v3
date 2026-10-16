@@ -129,6 +129,31 @@ export async function isAuthenticated(req: NextRequest): Promise<boolean> {
   if (!authConfigured()) return false;
   const bearer = bearerFrom(req.headers.get("authorization"));
   if (bearer && passwordMatches(bearer)) return true;
+  if (process.env.EMBEDDED_PREVIEW_COOKIES === "true") {
+    // Preview gateways may consume/replace Authorization for their own access
+    // control. This application-specific header carries only a signed session,
+    // never the operator password, and is still checked for signature + expiry.
+    const previewToken = req.headers.get("x-tc-preview-session");
+    if (await verifySession(previewToken, sessionSecret())) return true;
+    if (bearer && await verifySession(bearer, sessionSecret())) return true;
+  }
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   return verifySession(token, sessionSecret());
+}
+/**
+ * Embedded HTTPS previews need a partitioned cross-site cookie. Opt in only for
+ * that deployment; ordinary deployments keep Strict same-site sessions. Never
+ * weaken password/signature checks. The opt-in login route also supports a
+ * short-lived signed session fallback when all embedded cookies are blocked.
+ * Login and logout must use identical cookie attributes.
+ */
+export function sessionCookieOptions() {
+  const embedded = process.env.EMBEDDED_PREVIEW_COOKIES === "true";
+  return {
+    httpOnly: true,
+    sameSite: embedded ? "none" as const : "strict" as const,
+    secure: embedded || process.env.NODE_ENV === "production",
+    ...(embedded ? { partitioned: true } : {}),
+    path: "/",
+  };
 }

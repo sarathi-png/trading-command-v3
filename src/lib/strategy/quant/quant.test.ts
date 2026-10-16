@@ -9,8 +9,6 @@ import { analyzeConfluence, gateSignal } from "./confluence";
 import { buildFeatures, FEATURE_COLUMNS, toArray } from "./features";
 import { findSwings, clusterZones, nearestZones, supportResZones } from "./zones";
 import { regime, spearmanIC, neweyWestSE, bhFdr, tToP, purgedSplits } from "./diagnostics";
-import { simulate, summarize } from "./walkForward";
-import { predictProba, gateWithMeta, DEMO_WEIGHTS } from "./metaModel";
 import type { Candle } from "@/lib/types";
 
 /** Deterministic fixture — NO RNG so Python goldens replicate bit-exactly. */

@@ -116,12 +116,16 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     const cookie = login.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie, "login should issue a session cookie");
 
+    assert.equal((await fetch(`${url}/api/account`, { headers: { cookie } })).status, 428);
+    assert.equal((await fetch(`${url}/api/account`, { headers: { cookie, "x-tc-workspace": "paper" } })).status, 200);
+
     const request = (route, options = {}) =>
       fetch(`${url}${route}`, {
         ...options,
         headers: {
           ...options.headers,
           cookie,
+          authorization: "Bearer paper-test-password",
         },
       });
     const json = (route, body) =>
@@ -204,6 +208,44 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.equal(journal.entries[0].source, "paper");
     assert.ok(Number.isFinite(journal.entries[0].pnl));
 
+    assert.ok(journal.entries[0].fees > 0, "automatic paper fees include opening and closing commissions");
+    assert.ok(journal.entries[0].tags.includes("market-source:demo"));
+    assert.deepEqual(journal.entries[0].predictionContext, [], "no invented AI association");
+    assert.equal(journal.sync.configured, false);
+    assert.equal(journal.fills.length, 0, "no invented CoinDCX activity");
+    const known = (await request("/api/market/tickers").then(r=>r.json())).known;
+    assert.deepEqual((await request("/api/settings").then(r=>r.json())).settings.watchlist, known);
+    assert.equal((await json("/api/journal", { action: "seed" })).status, 405);
+    assert.equal((await json("/api/journal", { symbol: "BTCUSD", entry: 1, pnl: 10000 })).status, 405);
+    assert.equal((await request(`/api/journal?id=${journal.entries[0].id}`, { method: "DELETE" })).status, 405);
+    assert.equal((await request("/api/journal", { method: "PATCH", headers: {"content-type":"application/json"}, body: JSON.stringify({ id: journal.entries[0].id, pnl: 10000 }) })).status, 400);
+    const annotated = await request("/api/journal", { method: "PATCH", headers: {"content-type":"application/json"}, body: JSON.stringify({ id: journal.entries[0].id, notes: "Review only", tags: ["market-source:live", "review"] }) }).then(r=>r.json());
+    assert.equal(annotated.entry.pnl, journal.entries[0].pnl);
+    assert.equal(annotated.entry.notes, "Review only");
+    assert.ok(annotated.entry.tags.includes("market-source:demo"));
+    assert.ok(!annotated.entry.tags.includes("market-source:live"));
+    const noLive = await json("/api/journal/sync", {}).then(r=>r.json());
+    assert.equal(noLive.sync.configured, false);
+    assert.equal(noLive.sync.pairs.length, known.length * 2);
+    assert.equal((await json("/api/settings", { usdInrRate: 0 })).status, 400);
+    assert.equal((await json("/api/settings", { displayCurrency: "inr", usdInrRate: 88 })).status, 200);
+    const unchanged = await request("/api/journal").then(r=>r.json());
+    assert.equal(unchanged.entries[0].entry, journal.entries[0].entry, "INR does not change execution units");
+
+    // Partial closes and the remainder must charge each commission/profit once.
+    await json("/api/paper", {action:"place",symbol:"BTCUSD",side:"buy",type:"market",qty:qty*2});
+    await json("/api/paper", {action:"place",symbol:"BTCUSD",side:"sell",type:"market",qty,reduceOnly:true});
+    const remainder = await request("/api/paper").then(r=>r.json());
+    assert.equal(remainder.positions.length, 1);
+    await json("/api/paper", {action:"close",symbol:"BTCUSD",positionId:remainder.positions[0].id});
+    const completed = await request("/api/journal?export=1").then(r=>r.json());
+    assert.equal(completed.entries.length,3);
+    const partialRoundTrip = completed.entries.filter(e=>e.openedAt===remainder.positions[0].openedAt);
+    assert.equal(partialRoundTrip.length,2);
+    for(const row of partialRoundTrip) assert.ok(Math.abs(row.pnl + row.fees - (row.exit-row.entry)*row.qty) < 1e-6, "net plus fees equals that slice's gross profit");
+    assert.equal(completed.paperPositions.length,0);
+    assert.ok(completed.paperOrders.length>=3);
+
     // ---- separation of paper from private/exchange paths -------------------
     // Private CoinDCX reads need credentials; without them they fail closed
     // with a readable message instead of falling back to demo numbers.
@@ -222,6 +264,66 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
 
     const liveMode = await json("/api/settings", { mode: "live" });
     assert.equal(liveMode.status, 403);
+
+    // Workspace separation is request-local, not a mutable shared mode switch.
+    const scoped = (workspace, route, body) => request(route, {
+      method: body ? "POST" : "GET",
+      headers: { "content-type": "application/json", "x-tc-workspace": workspace },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    // request() supplies explicit operator bearer auth; workspace headers still enforce route boundaries.
+    assert.equal((await scoped("paper", "/api/orders")).status, 403);
+    assert.equal((await scoped("live", "/api/paper")).status, 403);
+    const savePaper = await scoped("paper", "/api/settings", { theme: "dark", onboarded: true, dataSource: "demo" });
+    assert.equal(savePaper.status, 200);
+    assert.equal((await savePaper.json()).settings.mode, "paper");
+    const saveLive = await scoped("live", "/api/settings", { theme: "light", onboarded: true });
+    assert.equal(saveLive.status, 200);
+    const liveSettings = (await saveLive.json()).settings;
+    assert.equal(liveSettings.mode, "live");
+    assert.equal(liveSettings.liveArmed, false);
+    const [paperProfile, liveProfile] = await Promise.all([
+      scoped("paper", "/api/settings").then(r => r.json()),
+      scoped("live", "/api/settings").then(r => r.json()),
+    ]);
+    assert.equal(paperProfile.settings.theme, "dark");
+    assert.equal(liveProfile.settings.theme, "light");
+    assert.equal((await scoped("paper", "/api/settings", { mode: "live" })).status, 400);
+    const liveAccount = await scoped("live", "/api/account");
+    assert.equal(liveAccount.status, 500);
+    const liveUnavailable = await liveAccount.json();
+    assert.equal(liveUnavailable.account, undefined, "Live must never fall back to a paper account");
+    assert.match(liveUnavailable.error, /Live account unavailable/);
+    const paperJournal = await scoped("paper", "/api/journal?mode=live").then(r => r.json());
+    assert.ok(paperJournal.entries.every(e => e.mode === "paper"));
+    assert.deepEqual(paperJournal.fills, []);
+    const liveJournal = await scoped("live", "/api/journal?mode=paper").then(r => r.json());
+    assert.ok(liveJournal.entries.every(e => e.mode === "live"));
+    assert.deepEqual(liveJournal.paperOrders, []);
+    assert.deepEqual(liveJournal.paperPositions, []);
+
+    const drawingBody = { symbol: "BTCUSD", timeframe: "5m", type: "hline", points: [{ time: 1000, price: 100 }] };
+    const normalDrawing = await scoped("paper", "/api/drawings", { ...drawingBody, chartType: "candles" }).then(r => r.json());
+    const haDrawing = await scoped("paper", "/api/drawings", { ...drawingBody, chartType: "heikin-ashi" }).then(r => r.json());
+    const drawingsFor = type => scoped("paper", `/api/drawings?symbol=BTCUSD&timeframe=5m&chartType=${type}`).then(r => r.json());
+    const normalDrawings = (await drawingsFor("candles")).drawings;
+    const haDrawings = (await drawingsFor("heikin-ashi")).drawings;
+    assert.ok(normalDrawings.some(d => d.id === normalDrawing.drawing.id));
+    assert.ok(normalDrawings.every(d => d.id !== haDrawing.drawing.id));
+    assert.ok(haDrawings.some(d => d.id === haDrawing.drawing.id));
+    assert.ok(haDrawings.every(d => d.id !== normalDrawing.drawing.id));
+    const crossEdit = await request("/api/drawings", { method: "PATCH", headers: { "content-type": "application/json", "x-tc-workspace": "paper" }, body: JSON.stringify({ ...drawingBody, id: haDrawing.drawing.id, chartType: "candles", label: "Wrong chart" }) });
+    assert.equal(crossEdit.status, 404);
+    const rawAnalysis = await scoped("paper", "/api/strategy/evaluate?symbol=BTCUSD&timeframe=5m&chartType=candles").then(r => r.json());
+    const signalsBeforeHa = await scoped("paper", "/api/signals").then(r => r.json());
+    const haAnalysis = await scoped("paper", "/api/strategy/evaluate?symbol=BTCUSD&timeframe=5m&chartType=heikin-ashi").then(r => r.json());
+    const signalsAfterHa = await scoped("paper", "/api/signals").then(r => r.json());
+    assert.equal(rawAnalysis.analysis.chartType, "candles");
+    assert.equal(haAnalysis.analysis.chartType, "heikin-ashi");
+    assert.notEqual(rawAnalysis.analysis.lastClose, haAnalysis.analysis.lastClose);
+    assert.equal(signalsBeforeHa.signals.length, signalsAfterHa.signals.length, "HA research must not enter the normal candle signal ledger");
+
+
   } finally {
     if (server.exitCode === null) {
       const exited = once(server, "exit");

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { useApp, useMarket } from "@/stores";
 import { logout } from "@/lib/api";
-import { TIMEFRAMES, type Timeframe } from "@/lib/types";
+import { TIMEFRAMES } from "@/lib/types";
 import { cx } from "@/lib/format";
 
 interface Command {
@@ -17,7 +17,7 @@ interface Command {
 
 export default function CommandPalette() {
   const router = useRouter();
-  const { paletteOpen, setPalette, activeSymbol, setSymbol, setTimeframe, applyLayoutPreset, patchSettings, settings } = useApp();
+  const { paletteOpen, setPalette, setSymbol, setTimeframe, applyLayoutPreset, patchSettings, settings } = useApp();
   const tickers = useMarket((s) => s.tickers);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
@@ -27,7 +27,8 @@ export default function CommandPalette() {
     const go = (path: string) => () => { router.push(path); setPalette(false); };
     const nav: Command[] = [
       { id: "go-overview", label: "Open Overview", group: "Navigate", hint: "O", perform: go("/") },
-      { id: "go-chart", label: "Open Chart", group: "Navigate", hint: "C", perform: go("/chart") },
+      { id: "go-heikin-ashi", label: "Open Heikin-Ashi", group: "Navigate", perform: go("/heikin-ashi") },
+      { id: "go-chart", label: "Open Candlestick", group: "Navigate", hint: "C", perform: go("/chart") },
       { id: "go-markets", label: "Open Markets", group: "Navigate", perform: go("/markets") },
       { id: "go-positions", label: "Show Positions", group: "Navigate", hint: "P", perform: go("/positions") },
       { id: "go-orders", label: "Show Orders", group: "Navigate", perform: go("/orders") },
@@ -54,11 +55,6 @@ export default function CommandPalette() {
       perform: () => { void applyLayoutPreset(p); setPalette(false); },
     }));
     const actions: Command[] = [
-      {
-        id: "mode-paper", label: settings.mode === "paper" ? "Switch to Read Only" : "Enable Paper Mode",
-        group: "Actions",
-        perform: () => { void patchSettings({ mode: settings.mode === "paper" ? "read_only" : "paper" }); setPalette(false); },
-      },
       {
         id: "toggle-ob", label: settings.modules.orderbook ? "Hide Order Book" : "Show Order Book",
         group: "Actions",

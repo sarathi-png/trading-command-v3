@@ -1,3 +1,4 @@
+import { validateStrategyConfig } from "@/lib/strategy/v2/types";
 import { exchangeAccountConfigured } from "@/lib/credentials";
 import { flags } from "@/lib/flags";
 import { getSettings, logAudit, updateSettings } from "@/lib/settings";
@@ -36,6 +37,20 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+    return Response.json({ error: "Settings must be an object" }, { status: 400 });
+  }
+  if (patch.dataSource && !["demo", "live"].includes(patch.dataSource)) {
+    return Response.json({ error: "Invalid data source" }, { status: 400 });
+  }
+  if (patch.displayCurrency !== undefined && !["usd", "inr"].includes(patch.displayCurrency))
+    return Response.json({ error: "Invalid display currency" }, { status: 400 });
+  if (patch.usdInrRate !== undefined && (typeof patch.usdInrRate !== "number" || !Number.isFinite(patch.usdInrRate) || patch.usdInrRate <= 0))
+    return Response.json({ error: "USD/INR rate must be a positive finite number" }, { status: 400 });
+  if (patch.chandelierDonchian !== undefined) {
+    try { validateStrategyConfig(patch.chandelierDonchian); }
+    catch (e) { return Response.json({ error: e instanceof Error ? e.message : "Invalid strategy settings" }, { status: 400 }); }
+  }
   let current: Awaited<ReturnType<typeof getSettings>>;
   try {
     current = await getSettings();
@@ -46,6 +61,9 @@ export async function POST(req: Request) {
     );
   }
 
+  if (patch.mode && patch.mode !== current.mode && req.headers.get("x-tc-workspace")) {
+    return Response.json({ error: "Switch workspaces instead of changing execution mode inside this profile." }, { status: 400 });
+  }
   // ---- execution-mode safety gates ---------------------------------------
   if (patch.mode === "live" && !flags.liveExecution()) {
     return Response.json(

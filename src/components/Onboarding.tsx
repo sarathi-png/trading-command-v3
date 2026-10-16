@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { DEFAULT_SETTINGS } from "@/lib/settingsDefaults";
 import { Btn } from "./ui";
 import { cx } from "@/lib/format";
-import type { AppSettings, ExecMode, LayoutPreset } from "@/lib/types";
+import type { AppSettings, LayoutPreset } from "@/lib/types";
 
 const SYMBOLS = ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD"];
 
@@ -23,9 +23,9 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 export default function Onboarding({ capabilities }: {
   capabilities: { liveExecution: boolean; exchangeAccountConfigured: boolean };
 }) {
-  const { applySettings, notify } = useApp();
+  const { applySettings, notify, settings } = useApp();
   const [step, setStep] = useState(0);
-  const [mode, setMode] = useState<ExecMode>("read_only");
+  const mode = settings.mode;
   const [symbol, setSymbol] = useState("BTCUSD");
   const [layout, setLayout] = useState<LayoutPreset>("trading");
   const [finishing, setFinishing] = useState(false);
@@ -33,17 +33,16 @@ export default function Onboarding({ capabilities }: {
   const finish = async () => {
     setFinishing(true);
     const modules = modulesForPreset(layout, DEFAULT_SETTINGS.modules);
-    const watchlist = [symbol, ...["BTCUSD", "ETHUSD", "SOLUSD"].filter((s) => s !== symbol)];
     try {
       const res = await api.post<{ settings: AppSettings }>("/api/settings", {
         onboarded: true,
         mode,
         layout,
         modules,
-        watchlist,
         dataSource: capabilities.exchangeAccountConfigured ? "live" : "demo",
       });
       applySettings(res.settings);
+      setSymbol(symbol);
     } catch (e) {
       notify({
         title: "Could not save workspace",
@@ -82,37 +81,7 @@ export default function Onboarding({ capabilities }: {
         )}
 
         {step === 1 && (
-          <Step n={2} title="Choose your starting mode">
-            <div className="space-y-2">
-              {(
-                [
-                  { id: "read_only", name: "Read Only", desc: "Market data, analysis, journal. No order entry. Recommended start." },
-                  { id: "paper", name: "Paper Trading", desc: "Simulated orders and positions against live-style prices." },
-                  { id: "live", name: "Live Trading", desc: "Real orders via CoinDCX Futures. Requires API credentials and explicit arming." },
-                ] as const
-              ).map((m) => (
-                <button
-                  key={m.id}
-                  disabled={m.id === "live" && !capabilities.liveExecution}
-                  onClick={() => setMode(m.id)}
-                  className={cx(
-                    "w-full text-left panel-2 p-3 transition-colors",
-                    mode === m.id ? "border-accent/60" : "hover:border-edge2",
-                    m.id === "live" && !capabilities.liveExecution && "opacity-45"
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={cx("dot", mode === m.id ? "bg-accent dot-live text-accent" : "bg-dim")} />
-                    <span className="text-[13px] font-medium">{m.name}</span>
-                    {m.id === "live" && !capabilities.liveExecution && (
-                      <span className="text-[10px] text-warn ml-auto">disabled by configuration</span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-dim mt-1 ml-4.5">{m.desc}</p>
-                </button>
-              ))}
-            </div>
-          </Step>
+          <Step n={2} title="Your selected workspace"><p className="text-sm text-mut">{mode === "live" ? "Live account only. Real execution stays disabled until separately armed." : "Paper account only. All funds and executions are simulated."}</p></Step>
         )}
 
         {step === 2 && (

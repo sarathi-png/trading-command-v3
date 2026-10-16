@@ -16,27 +16,37 @@ export function usePoll<T>(
   }, [fetcher]);
   const enabled = opts?.enabled !== false;
 
-  const run = useCallback(async () => {
-    try {
-      const result = await fetchRef.current();
-      setData(result);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Request failed");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  const refreshRef = useRef<() => void>(() => {});
+  const refresh = useCallback(() => refreshRef.current(), []);
   useEffect(() => {
-    if (!enabled) return;
-    if (opts?.immediate !== false) void run();
-    const id = setInterval(() => void run(), intervalMs);
-    return () => clearInterval(id);
+    let active = true;
+    let pending = false;
+    // Clear the previous resource when the subscription identity changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setData(null);
+    setError(null);
+    setLoading(enabled);
+    const run = async () => {
+      if (!active || !enabled || pending) return;
+      pending = true;
+      try {
+        const result = await fetchRef.current();
+        if (active) { setData(result); setError(null); }
+      } catch (e) {
+        if (active) setError(e instanceof Error ? e.message : "Request failed");
+      } finally {
+        pending = false;
+        if (active) setLoading(false);
+      }
+    };
+    refreshRef.current = () => void run();
+    if (enabled && opts?.immediate !== false) void run();
+    const id = enabled ? setInterval(() => void run(), intervalMs) : undefined;
+    return () => { active = false; clearInterval(id); };
+    // Explicit caller deps identify the resource; fetcher identity changes on render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intervalMs, enabled, ...(opts?.deps ?? [])]);
-
-  return { data, error, refresh: () => void run(), loading };
+  }, [intervalMs, enabled, opts?.immediate, ...(opts?.deps ?? [])]);
+  return { data, error, refresh, loading };
 }
 
 export function useIsMobile(): boolean {

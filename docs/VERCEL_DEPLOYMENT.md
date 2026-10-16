@@ -46,6 +46,15 @@ COINDCX_API_SECRET=<shown once at creation>
 LIVE_EXECUTION_ENABLED=false             # keep false until you deliberately go live
 PAPER_TRADING_ENABLED=true
 EXCHANGE_MARKET_ENABLED=true
+
+# ---- AI signal prediction (optional; free tier) ---------------------------
+# Either provider, or both. Without a key the predictor falls back to its
+# built-in rule engine and says so — it never invents a model answer.
+OPENROUTER_API_KEY=<sk-or-v1-… from openrouter.ai/keys>
+NVIDIA_API_KEY=<nvapi-… from build.nvidia.com>
+# Optional overrides
+# OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct:free
+# NVIDIA_MODEL=meta/llama-3.1-8b-instruct
 ```
 
 Variables that are **ignored** by this build and can be deleted if present:
@@ -138,3 +147,26 @@ correct as-is (no `vercel.json` needed).
 | Private reads 502 with an auth message | Key/secret wrong or revoked, or the key is IP-bound to another address (§1 of COINDCX_SETUP) |
 | `daily_pnl_unavailable` when placing a live order | Working as designed: the daily-loss limit cannot be enforced without a provable P&L figure |
 | Order returns 409 with `ORDER_STATUS_UNKNOWN` | An earlier submission is unreconciled. Use `GET /api/orders/status?clientOrderId=…`; do not resubmit |
+
+### Embedded HTTPS preview login
+
+For a dashboard intentionally embedded in a cross-site HTTPS preview, set
+`EMBEDDED_PREVIEW_COOKIES=true` and restart. This opts login/logout into
+`HttpOnly; Secure; SameSite=None; Partitioned` session cookies. Ordinary
+standalone deployments should leave it unset (Strict same-site policy).
+The password and signed-session validation remain mandatory. The login form
+checks that a session was actually retained and explains cookie blocking rather
+than silently returning to the password gate. If the browser blocks embedded
+storage entirely, open the preview in its own tab.
+
+If the embedded browser also blocks partitioned cookies, the same opt-in preview
+login supports a **15-minute signed session** in the response, after validating
+the password. The client sends that session in the X-TC-Preview-Session header to local
+`/api/` routes only. It uses tab-scoped sessionStorage if allowed, otherwise only
+in-memory storage, never the API password or localStorage. Clearing/logout removes
+the client copy; its signature remains valid until expiry, like the cookie token.
+The server does not issue/accept this fallback unless
+`EMBEDDED_PREVIEW_COOKIES=true`. Treat this as a JS-readable SPA session (with the
+associated XSS risk), not an HttpOnly-only production authentication policy.
+
+The preview-specific session header avoids gateways consuming Authorization. It is accepted only with the explicit preview opt-in and a valid, unexpired signature; an arbitrary header value grants no access.

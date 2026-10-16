@@ -1,7 +1,10 @@
 "use client";
-import { useMemo, useRef, useEffect } from "react";
+import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Activity } from "lucide-react";
+import Link from "next/link";
+import DecisionReadiness from "@/components/DecisionReadiness";
+import { Activity, ArrowUpRight } from "lucide-react";
 import ChartPanel from "@/components/chart/ChartPanel";
 import ExchangeAccountPanel from "@/components/ExchangeAccountPanel";
 import { PositionsTable, RiskCard, SignalPanel } from "@/components/panels";
@@ -9,7 +12,8 @@ import { Chip, EmptyState, MetricCard, PremiumPanel, Skeleton } from "@/componen
 import { api } from "@/lib/api";
 import { fmtDateTime, fmtPct, fmtUsd, pnlTone } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
-import { useApp, useAlerts } from "@/stores";
+import { useApp } from "@/stores";
+import { chartHeightFor, useViewport } from "@/lib/useResponsive";
 import type { AccountState, Analysis } from "@/lib/types";
 
 interface AccountRes {
@@ -19,13 +23,15 @@ interface AccountRes {
 }
 
 export default function OverviewPage() {
+  useDisplayCurrency();
   const { activeSymbol, timeframe, settings, patchSettings } = useApp();
   const router = useRouter();
+  const viewport = useViewport();
 
-  const { data: accountRes, loading: accLoading } = usePoll(
+  const { data: accountRes, loading: accLoading, error: accountError, refresh: refreshAccount } = usePoll(
     () => api.get<AccountRes>("/api/account"), 5000
   );
-  const { data: analysisRes } = usePoll(
+  const { data: analysisRes, error: analysisError } = usePoll(
     () => api.get<{ analysis: Analysis }>(`/api/strategy/evaluate?symbol=${activeSymbol}&timeframe=${timeframe}`),
     20000, { deps: [activeSymbol, timeframe] }
   );
@@ -35,52 +41,17 @@ export default function OverviewPage() {
   );
 
   const account = accountRes?.account ?? null;
+  const recentSignals = useMemo(() => {
+    const seen = new Set<string>();
+    return (signalsRes?.signals ?? []).filter((s) => {
+      const key = `${s.symbol}|${s.timeframe}|${s.strategy}|${s.status}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [signalsRes]);
   const analysis = analysisRes?.analysis ?? null;
   const m = settings.modules;
-  const { rules: alertRules } = useAlerts();
-  const notify = useApp((s) => s.notify);
-
-  // Track previous signals to detect new LONG/SHORT setups
-  const prevSignalsRef = useRef<Record<string, string>>({});
-  
-  useEffect(() => {
-    if (!signalsRes || !alertRules.length) return;
-    
-    const strategySignalRules = alertRules.filter((r) => r.kind === "strategy_signal" && r.enabled && !r.triggeredAt);
-    if (strategySignalRules.length === 0) return;
-    
-    for (const signal of signalsRes.signals) {
-      const key = `${signal.symbol}-${signal.timeframe}-${signal.strategy}-${signal.status}`;
-      const wasSeen = prevSignalsRef.current[key];
-      
-      if (!wasSeen && (signal.status === "LONG_SETUP" || signal.status === "SHORT_SETUP")) {
-        // Check if this signal matches any alert rule
-        for (const rule of strategySignalRules) {
-          if (rule.symbol === "ANY" || rule.symbol === signal.symbol) {
-            const side = signal.status === "LONG_SETUP" ? "LONG" : "SHORT";
-            const entry = signal.entry ? `Entry: ${signal.entry.toLocaleString()}` : "Entry: market";
-            const stop = signal.stop ? `SL: ${signal.stop.toLocaleString()}` : "SL: —";
-            const target = signal.target ? `TP: ${signal.target.toLocaleString()}` : "TP: —";
-            const rr = signal.rr ? `RR: 1:${signal.rr.toFixed(1)}` : "RR: —";
-            
-            notify({
-              title: `Strategy Signal: ${side} ${signal.symbol}`,
-              body: `${signal.strategy} | ${entry} | ${stop} | ${target} | ${rr} | ${signal.timeframe}`,
-              tone: side === "LONG" ? "success" : "warn",
-            });
-          }
-        }
-        prevSignalsRef.current[key] = "seen";
-      }
-    }
-    
-    // Clean up old entries (keep last 50)
-    const keys = Object.keys(prevSignalsRef.current);
-    if (keys.length > 50) {
-      const toDelete = keys.slice(0, keys.length - 50);
-      for (const k of toDelete) delete prevSignalsRef.current[k];
-    }
-  }, [signalsRes, alertRules, notify]);
   const marginUsedPct = useMemo(() => {
     if (!account || account.equity <= 0) return 0;
     return (account.marginUsed / account.equity) * 100;
@@ -90,73 +61,82 @@ export default function OverviewPage() {
   const primary = analysis?.signals.find((s) => s.entry !== null) ?? null;
 
   return (
-    <div className="p-3 space-y-3 max-w-[1700px] mx-auto">
+    <div className="p-4 lg:p-6 space-y-5 page-shell">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="microlabel mb-2">WORKSPACE / OVERVIEW</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Your market. In focus.</h1>
+          <p className="text-mut text-xs mt-2">Monitor the market, evaluate the evidence, then manage your risk.</p>
+        </div>
+        <Link href="/chart" className="inline-flex items-center gap-2 bg-accent text-[#071713] rounded-md px-4 py-2.5 text-xs font-semibold">Open workspace <ArrowUpRight size={15} /></Link>
+      </header>
+      <DecisionReadiness analysis={analysis} error={analysisError} />
+      {accountError && <div role="alert" className="panel p-3 text-warn text-xs flex flex-wrap gap-3">Account refresh failed; previous figures may be stale. {accountError}<button onClick={refreshAccount} className="underline">Retry</button></div>}
       {/* metric strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+      <div className="auto-cells">
         {m.balance && (
-          <MetricCard label="ACCOUNT EQUITY" tooltip="Starting balance + realized + unrealized P&L"
+          <MetricCard label="ACCOUNT EQUITY" help="equity"
             value={accLoading ? <Skeleton className="h-6 w-24" /> : fmtUsd(account?.equity)}
-            sub="COINDCX FUTURES"
+            sub={account?.source === "live" ? "EXCHANGE WALLET · SEE DETAILS BELOW" : "SIMULATED ACCOUNT · NOT REAL FUNDS"}
             onHide={hide("balance")} />
         )}
         {m.margin && (
-          <MetricCard label="AVAILABLE MARGIN"
+          <MetricCard label="AVAILABLE MARGIN" help="availableMargin"
             value={accLoading ? <Skeleton className="h-6 w-24" /> : fmtUsd(account?.availableMargin)}
             sub={`USED ${fmtUsd(account?.marginUsed ?? 0)}`}
             onHide={hide("margin")} />
         )}
         {m.pnl && (
-          <MetricCard label="TODAY P&L"
+          <MetricCard label={settings.mode === "live" ? "TODAY FIFO ESTIMATE" : "TODAY P&L"} help="todayPnl"
             value={accLoading ? <Skeleton className="h-6 w-20" /> : fmtUsd(account?.todayPnl, { sign: true })}
             tone={pnlTone(account?.todayPnl ?? 0) === "pos" ? "up" : pnlTone(account?.todayPnl ?? 0) === "neg" ? "dn" : "flat"}
-            sub="REALIZED TODAY" onHide={hide("pnl")} />
+            sub={settings.mode === "live" ? "IMPORTED FILLS · NOT VENUE-BOOKED" : "SIMULATED REALIZED TODAY"} onHide={hide("pnl")} />
         )}
         {m.pnl && (
-          <MetricCard label="OPEN P&L"
+          <MetricCard label="OPEN P&L" help="openPnl"
             value={accLoading ? <Skeleton className="h-6 w-20" /> : fmtUsd(account?.openPnl, { sign: true })}
             tone={pnlTone(account?.openPnl ?? 0) === "pos" ? "up" : pnlTone(account?.openPnl ?? 0) === "neg" ? "dn" : "flat"}
             sub="UNREALIZED" onHide={hide("pnl")} />
         )}
         {m.margin && (
-          <MetricCard label="MARGIN USED"
+          <MetricCard label="MARGIN USED" help="marginUsedPct"
             value={accLoading ? <Skeleton className="h-6 w-16" /> : fmtPct(marginUsedPct, { sign: false })}
             tone={marginUsedPct > 70 ? "dn" : marginUsedPct > 40 ? "accent" : "flat"}
             sub="OF EQUITY" onHide={hide("margin")} />
         )}
       </div>
 
-      <ExchangeAccountPanel />
-
       {/* chart + strategy intelligence */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_310px] gap-3">
+      <div className={`auto-split ${m.strategyScore ? "with-aside" : ""}`}>
         <PremiumPanel title={`${activeSymbol} · ${timeframe}`} right={
           <div className="flex items-center gap-1.5">
-            <button onClick={() => router.push("/chart")} className="text-[10px] text-accent hover:underline tracking-wide">
+            <button onClick={() => router.push("/chart")} className="text-[10px] text-accent hover:underline tracking-wide inline-flex items-center min-h-6">
               FULL CHART →
             </button>
           </div>
         } elevation={1}>
-          <div className="h-[380px]">
-            <ChartPanel symbol={activeSymbol} timeframe={timeframe} analysis={analysis} interactive />
+          <div style={{ height: chartHeightFor(viewport) }}>
+            <ChartPanel symbol={activeSymbol} timeframe={timeframe} analysis={analysis} interactive surfaceHeight={420} />
           </div>
         </PremiumPanel>
         {m.strategyScore && <SignalPanel analysis={analysis} />}
       </div>
 
       {/* bottom row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="auto-panels">
         {m.positions && (
           <PositionsTable
             account={account}
-            source="all"
+            source={settings.mode === "live" ? "live" : "paper"}
             className="lg:col-span-1"
-            onClose={(symbol) => {
+            onClose={settings.mode === "paper" ? (symbol) => {
               void api.post("/api/paper", { action: "close", symbol }).then(() => {
+                refreshAccount();
                 useApp.getState().notify({ title: "Position closed", body: `${symbol} paper position closed`, tone: "info" });
               }).catch((e: Error) => {
                 useApp.getState().notify({ title: "Close failed", body: e.message, tone: "danger" });
               });
-            }}
+            } : undefined}
           />
         )}
         {m.risk && (
@@ -172,16 +152,17 @@ export default function OverviewPage() {
               <div className="p-3 space-y-1.5">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-4" />)}</div>
             ) : signalsRes.signals.length === 0 ? (
               <EmptyState icon={<Activity size={18} />} title="No signals recorded yet"
-                hint="Signals are stored every time the strategy engine detects a setup on any watched timeframe." />
+                hint="Signals are recorded whenever the engine detects a setup. Repeated rows show one entry per condition." />
             ) : (
               <div className="divide-y divide-edge/60 overflow-y-auto max-h-72">
-                {signalsRes.signals.map((s) => (
+                {recentSignals.map((s) => (
                   <div key={s.id} className="px-3 py-1.5 flex items-center gap-2 text-[11px]">
                     <Chip tone={s.status === "LONG_SETUP" ? "up" : s.status === "SHORT_SETUP" ? "dn" : s.status === "WATCH" ? "warn" : "default"}>
                       {s.status.replace("_", " ")}
                     </Chip>
                     <span className="num">{s.symbol}</span>
                     <span className="text-dim">{s.strategy}</span>
+                    {s.timeframe && <span className="text-dim">{s.timeframe}</span>}
                     <span className="ml-auto num text-dim text-[10px]">{fmtDateTime(new Date(s.createdAt).getTime(), settings.timezone)}</span>
                   </div>
                 ))}
@@ -190,6 +171,8 @@ export default function OverviewPage() {
           </PremiumPanel>
         )}
       </div>
+      {settings.mode === "live" && <ExchangeAccountPanel />}
+      <p className="text-[11px] text-dim pb-2">Signals are research candidates, not recommendations. Simulated results do not establish a trading edge.</p>
     </div>
   );
 }

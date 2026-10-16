@@ -196,7 +196,7 @@ export async function walletTransactions(
  */
 export async function fills(
   client: CoinDcxClient,
-  input: { symbol: string; fromMs: number; toMs: number; page?: number; size?: number } = {
+  input: { symbol: string; fromMs: number; toMs: number; page?: number; size?: number; marginCurrency?: "USDT" | "INR" } = {
     symbol: "BTCUSD",
     fromMs: Date.now() - 7 * 86_400_000,
     toMs: Date.now(),
@@ -204,19 +204,20 @@ export async function fills(
 ): Promise<ExchangeFill[]> {
   const pair = toExchangeSymbol(input.symbol, "coindcx");
   const rows = await client.read<
-    { price?: number | string; quantity?: number | string; is_maker?: boolean; fee_amount?: number | string; pair?: string; side?: string; timestamp?: number | string; order_id?: string }[]
+    { price?: number | string; quantity?: number | string; is_maker?: boolean; fee_amount?: number | string; pair?: string; side?: string; timestamp?: number | string; order_id?: string; id?: string; trade_id?: string }[]
   >("/exchange/v1/derivatives/futures/trades", {
     pair,
     from_date: isoDate(input.fromMs),
     to_date: isoDate(input.toMs),
     page: input.page ?? 1,
     size: input.size ?? 100,
-    margin_currency_short_name: [...MARGIN],
+    margin_currency_short_name: input.marginCurrency ? [input.marginCurrency] : [...MARGIN],
   });
 
   return expectArray<(typeof rows)[number]>(rows, "/exchange/v1/derivatives/futures/trades").map((row) => {
     const exchangeSymbol = String(row.pair ?? pair).toUpperCase();
     return {
+      fillId: row.trade_id || row.id ? String(row.trade_id ?? row.id) : null,
       id: row.order_id ? String(row.order_id) : null,
       symbol: toInternalSymbol(exchangeSymbol),
       exchangeSymbol,
@@ -229,7 +230,7 @@ export async function fills(
       // as it did for Delta.
       realizedPnl: null,
       isMaker: row.is_maker === undefined ? null : row.is_maker === true,
-      ts: Math.round(num(row.timestamp, Date.now())),
+      ts: Math.round(num(row.timestamp)),
     } satisfies ExchangeFill;
   });
 }

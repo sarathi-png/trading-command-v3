@@ -1,4 +1,5 @@
 "use client";
+import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
 /**
  * Exchange account panel — live CoinDCX balances and realized trading record.
  *
@@ -12,7 +13,7 @@
 import { Wallet, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { Chip, EmptyState, MetricCard, Panel, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
-import { cx, fmtDateTime, fmtUsd, pnlTone } from "@/lib/format";
+import { cx, fmtDateTime, fmtPrice, fmtUsd, pnlTone } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
 import { useApp } from "@/stores";
 
@@ -52,6 +53,7 @@ interface ExchangeSummary {
 }
 
 export default function ExchangeAccountPanel() {
+  useDisplayCurrency();
   const { settings } = useApp();
   const { data, loading } = usePoll(
     () => api.get<ExchangeSummary>("/api/exchange/summary"),
@@ -88,7 +90,7 @@ export default function ExchangeAccountPanel() {
       ) : (
         <div className="p-3 space-y-3">
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
-            <MetricCard label="BALANCE (USD)" value={fmtUsd(s.balanceUsd)} sub="SPOT WALLET" />
+            <MetricCard label="BALANCE · DISPLAY CURRENCY" value={fmtUsd(s.balanceUsd)} sub="SPOT WALLET" />
             <MetricCard
               label="BALANCE (INR)"
               value={`₹${s.balanceInr.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}
@@ -177,7 +179,7 @@ export default function ExchangeAccountPanel() {
                           </span>
                         </td>
                         <td className="px-2 py-1.5 num text-right">{t.qty}</td>
-                        <td className="px-2 py-1.5 num text-right text-mut">{t.entry} → {t.exit}</td>
+                        <td className="px-2 py-1.5 num text-right text-mut">{fmtPrice(t.entry)} → {fmtPrice(t.exit)}</td>
                         <td
                           className={cx(
                             "px-2 py-1.5 num text-right",

@@ -1,3 +1,6 @@
+import { workspaceSelection, selectWorkspace } from "./workspaceClient";
+import { previewSession, setPreviewSession } from "./previewSession";
+
 /** Client-side fetch helpers with uniform error handling. */
 
 export class ApiError extends Error {
@@ -8,10 +11,12 @@ export class ApiError extends Error {
 
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   let res: Response;
+  const workspace = workspaceSelection();
+  const token = url.startsWith("/api/") ? previewSession() : null;
   try {
     res = await fetch(url, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      headers: { ...(workspace ? { "X-TC-Workspace": workspace } : {}), ...(body !== undefined ? { "Content-Type": "application/json" } : {}), ...(token ? { "X-TC-Preview-Session": token } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       cache: "no-store",
     });
@@ -25,7 +30,10 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     // The login attempt itself is excluded — its 401 just means "wrong password"
     // and is handled by the login form.
     if (res.status === 401 && typeof window !== "undefined" && !url.startsWith("/api/auth/")) {
-      window.dispatchEvent(new Event("auth:unauthorized"));
+      if (token === previewSession()) {
+        setPreviewSession(null);
+        window.dispatchEvent(new Event("auth:unauthorized"));
+      }
     }
     throw new ApiError(String((data as { error?: string }).error ?? `Request failed (${res.status})`), res.status);
   }
@@ -37,6 +45,8 @@ export const api = {
   post: <T>(url: string, body?: unknown) => request<T>("POST", url, body ?? {}),
   patch: <T>(url: string, body?: unknown) => request<T>("PATCH", url, body ?? {}),
   del: <T>(url: string) => request<T>("DELETE", url),
+  /** DELETE with a JSON body (used by /api/ai/keys to name the provider). */
+  delete: <T>(url: string, body?: unknown) => request<T>("DELETE", url, body ?? {}),
 };
 
 /**
@@ -47,6 +57,8 @@ export const api = {
  * `auth:unauthorized` so the shell does not stay on a logged-in screen.
  */
 export async function logout(): Promise<void> {
+  selectWorkspace(null);
+  setPreviewSession(null);
   try {
     await fetch("/api/auth/logout", { method: "POST", cache: "no-store" });
   } catch {

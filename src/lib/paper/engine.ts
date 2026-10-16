@@ -6,10 +6,13 @@
  * tables and journal entries are always tagged mode="paper" — they are never
  * mixed with live exchange records.
  */
+import { allocatePaperClose } from "./accounting";
+import { normalisePaperAccounting, recordPaperClose, snapshotPaperContext } from "../journal/service";
 import { getRepo } from "@/lib/repo";
 import { PAPER_FEE_RATE } from "../flags";
 import { evaluateOrderRisk } from "../risk";
-import { logAudit } from "../settings";
+import { getTickers } from "../market/service";
+import { getSettings, logAudit } from "../settings";
 
 export interface PlaceOrderInput {
   symbol: string;
@@ -58,6 +61,10 @@ export async function placePaperOrder(
   dayStart.setUTCHours(0, 0, 0, 0);
   const todayPnl = await repo.sumJournalPnl({ mode: "paper", closedSince: dayStart });
 
+  const settings = await getSettings();
+  const realized = await repo.sumJournalPnl({ mode: "paper" });
+  const marks = new Map((await getTickers(positions.map(p => p.symbol))).map(t => [t.symbol, t.price]));
+  const openPnl = positions.reduce((sum, p) => sum + ((marks.get(p.symbol) ?? p.entry) - p.entry) * p.qty * (p.side === "long" ? 1 : -1), 0);
   const verdict = evaluateOrderRisk(
     { symbol, qty, price: refPrice, reduceOnly: Boolean(input.reduceOnly) },
     {
@@ -68,8 +75,8 @@ export async function placePaperOrder(
         maxOpenPositions: limits.maxOpenPositions,
       },
       openSymbols: positions.map((p) => p.symbol),
-      currentNotional: positions.reduce((a, p) => a + Math.abs(p.qty) * p.entry, 0),
-      equity: limits.equity ?? 0,
+      currentNotional: positions.reduce((a, p) => a + Math.abs(p.qty) * (marks.get(p.symbol) ?? p.entry), 0),
+      equity: limits.equity ?? settings.startingBalance + realized + openPnl,
       // Paper P&L is fully local, so this is always known — never null here.
       dailyRealizedPnl: todayPnl,
     }
@@ -108,7 +115,8 @@ async function executeFill(orderId: string, fillPrice: number): Promise<PaperEve
   if (!order || order.status !== "open") return events;
   const fees = order.qty * fillPrice * PAPER_FEE_RATE;
 
-  const pos = await repo.getPaperPositionBySymbol(order.symbol);
+  const found = await repo.getPaperPositionBySymbol(order.symbol);
+  const pos = found ? await normalisePaperAccounting(found) : null;
   const orderSide: "long" | "short" = order.side === "buy" ? "long" : "short";
 
   if (!pos) {
@@ -116,13 +124,14 @@ async function executeFill(orderId: string, fillPrice: number): Promise<PaperEve
       await repo.updatePaperOrder(orderId, { status: "rejected" });
       return [{ kind: "blocked", message: `${order.symbol} reduce-only order rejected: no position` }];
     }
-    await repo.insertPaperPosition({
+    const opened = await repo.insertPaperPosition({
       symbol: order.symbol,
       side: orderSide,
       qty: order.qty,
       entry: fillPrice,
       realizedPnl: -fees,
     });
+    await snapshotPaperContext(opened);
     events.push({ kind: "position_opened", message: `${order.symbol} ${orderSide.toUpperCase()} ${order.qty} @ ${fillPrice.toFixed(2)} (paper)` });
   } else if (pos.side === orderSide) {
     const newQty = pos.qty + order.qty;
@@ -136,17 +145,17 @@ async function executeFill(orderId: string, fillPrice: number): Promise<PaperEve
     const dir = pos.side === "long" ? 1 : -1;
     const gross = (fillPrice - pos.entry) * closeQty * dir;
     const remaining = pos.qty - closeQty;
+    const allocation = allocatePaperClose(pos.qty, closeQty, pos.realizedPnl, fillPrice, PAPER_FEE_RATE, gross);
     if (remaining <= EPS) {
-      const net = pos.realizedPnl + gross - fees;
-      await repo.deletePaperPosition(pos.id);
-      await repo.insertJournal({
+      const net = allocation.pnl;
+      await recordPaperClose({
         mode: "paper",
         symbol: order.symbol,
         direction: pos.side,
         entry: pos.entry,
         exit: fillPrice,
         qty: pos.qty,
-        fees: 0,
+        fees: allocation.fees,
         pnl: net,
         strategy: "paper",
         reason: "Position closed by paper order",
@@ -156,22 +165,20 @@ async function executeFill(orderId: string, fillPrice: number): Promise<PaperEve
         openedAt: pos.openedAt ?? new Date(),
         closedAt: new Date(),
         source: "paper",
-      });
+      }, pos.id, order.id);
+      await repo.deletePaperPosition(pos.id);
       events.push({ kind: "position_closed", message: `${order.symbol} ${pos.side.toUpperCase()} closed @ ${fillPrice.toFixed(2)} — net ${net >= 0 ? "+" : ""}$${net.toFixed(2)} (paper)` });
     } else {
-      await repo.updatePaperPosition(pos.id, {
-        qty: remaining, realizedPnl: pos.realizedPnl + gross - fees,
-      });
       // Create journal entry for partial close
-      const partialNet = gross - fees;
-      await repo.insertJournal({
+      const partialNet = allocation.pnl;
+      await recordPaperClose({
         mode: "paper",
         symbol: order.symbol,
         direction: pos.side,
         entry: pos.entry,
         exit: fillPrice,
         qty: closeQty,
-        fees: 0,
+        fees: allocation.fees,
         pnl: partialNet,
         strategy: "paper",
         reason: "Partial position close by paper order",
@@ -181,18 +188,23 @@ async function executeFill(orderId: string, fillPrice: number): Promise<PaperEve
         openedAt: pos.openedAt ?? new Date(),
         closedAt: new Date(),
         source: "paper",
+      }, pos.id, order.id);
+      await repo.updatePaperPosition(pos.id, {
+        qty: remaining, realizedPnl: allocation.remainingCarry,
       });
+
       events.push({ kind: "order_filled", message: `Reduced ${order.symbol} by ${closeQty} @ ${fillPrice.toFixed(2)} (paper)` });
     }
     if (order.qty > closeQty + EPS && !order.reduceOnly) {
       const flipQty = order.qty - closeQty;
-      await repo.insertPaperPosition({
+      const flipped = await repo.insertPaperPosition({
         symbol: order.symbol,
         side: orderSide,
         qty: flipQty,
         entry: fillPrice,
         realizedPnl: -(flipQty * fillPrice * PAPER_FEE_RATE),
       });
+      await snapshotPaperContext(flipped);
       events.push({ kind: "position_opened", message: `${order.symbol} flipped to ${orderSide.toUpperCase()} ${flipQty} @ ${fillPrice.toFixed(2)} (paper)` });
     }
   }
@@ -221,7 +233,8 @@ export async function syncPaper(prices: Map<string, number>): Promise<PaperEvent
   }
 
   const positions = await repo.listPaperPositions();
-  for (const pos of positions) {
+  for (const original of positions) {
+    const pos = await normalisePaperAccounting(original);
     const p = prices.get(pos.symbol);
     if (!p) continue;
     const hitStop = pos.stop !== null && (pos.side === "long" ? p <= pos.stop : p >= pos.stop);
@@ -232,15 +245,14 @@ export async function syncPaper(prices: Map<string, number>): Promise<PaperEvent
       const gross = (exitPrice - pos.entry) * pos.qty * dir;
       const fees = pos.qty * exitPrice * PAPER_FEE_RATE;
       const net = pos.realizedPnl + gross - fees;
-      await repo.deletePaperPosition(pos.id);
-      await repo.insertJournal({
+      await recordPaperClose({
         mode: "paper",
         symbol: pos.symbol,
         direction: pos.side,
         entry: pos.entry,
         exit: exitPrice,
         qty: pos.qty,
-        fees: 0,
+        fees: fees - pos.realizedPnl,
         pnl: net,
         strategy: "paper",
         reason: hitStop ? "Stop-loss hit" : "Take-profit hit",
@@ -250,7 +262,8 @@ export async function syncPaper(prices: Map<string, number>): Promise<PaperEvent
         openedAt: pos.openedAt ?? new Date(),
         closedAt: new Date(),
         source: "paper",
-      });
+      }, pos.id);
+      await repo.deletePaperPosition(pos.id);
       events.push({
         kind: hitStop ? "sl_hit" : "tp_hit",
         message: `${pos.symbol} ${hitStop ? "STOP" : "TARGET"} hit @ ${exitPrice.toFixed(2)} — net ${net >= 0 ? "+" : ""}$${net.toFixed(2)} (paper)`,
@@ -271,21 +284,21 @@ export async function attachBrackets(
 
 export async function closePaperPosition(positionId: string, markPrice: number): Promise<PaperEvent[]> {
   const repo = await getRepo();
-  const pos = (await repo.listPaperPositions()).find((p) => p.id === positionId) ?? null;
+  const original = (await repo.listPaperPositions()).find((p) => p.id === positionId) ?? null;
+  const pos = original ? await normalisePaperAccounting(original) : null;
   if (!pos) return [];
   const dir = pos.side === "long" ? 1 : -1;
   const gross = (markPrice - pos.entry) * pos.qty * dir;
   const fees = pos.qty * markPrice * PAPER_FEE_RATE;
   const net = pos.realizedPnl + gross - fees;
-  await repo.deletePaperPosition(pos.id);
-  await repo.insertJournal({
+  await recordPaperClose({
     mode: "paper",
     symbol: pos.symbol,
     direction: pos.side,
     entry: pos.entry,
     exit: markPrice,
     qty: pos.qty,
-    fees: 0,
+    fees: fees - pos.realizedPnl,
     pnl: net,
     strategy: "paper",
     reason: "Manually closed from dashboard",
@@ -295,7 +308,8 @@ export async function closePaperPosition(positionId: string, markPrice: number):
     openedAt: pos.openedAt ?? new Date(),
     closedAt: new Date(),
     source: "paper",
-  });
+  }, pos.id);
+  await repo.deletePaperPosition(pos.id);
   await logAudit("paper_position_closed", { positionId, symbol: pos.symbol, net });
   return [{ kind: "position_closed", message: `${pos.symbol} closed @ ${markPrice.toFixed(2)} — net ${net >= 0 ? "+" : ""}$${net.toFixed(2)} (paper)` }];
 }

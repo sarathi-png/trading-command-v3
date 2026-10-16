@@ -15,7 +15,7 @@
  *                         shared secret + timestamp window in that handler
  */
 import { NextResponse, type NextRequest } from "next/server";
-import { authConfigured, isAuthenticated } from "./lib/auth";
+import { authConfigured, isAuthenticated, timingSafeEqual } from "./lib/auth";
 
 const PUBLIC_API = new Set([
   "/api/auth/login",
@@ -27,6 +27,11 @@ const PUBLIC_API = new Set([
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  // Scheduler credential grants access ONLY to the two read/synchronization monitor endpoints.
+  if (["/api/notifications/scan", "/api/journal/sync"].includes(pathname) && process.env.CRON_SECRET &&
+      timingSafeEqual(req.headers.get("authorization") ?? "", `Bearer ${process.env.CRON_SECRET}`)) {
+    return NextResponse.next();
+  }
   if (PUBLIC_API.has(pathname)) return NextResponse.next();
 
   // Fail closed: refuse everything rather than serve an unauthenticated API
@@ -42,7 +47,20 @@ export async function proxy(req: NextRequest) {
   }
 
   // Accepts either the bearer token or the signed session cookie.
-  if (await isAuthenticated(req)) return NextResponse.next();
+  if (await isAuthenticated(req)) {
+    const workspace = req.headers.get("x-tc-workspace");
+    const browser = !req.headers.get("authorization");
+    if (browser && pathname !== "/api/settings" && !["paper", "live"].includes(workspace ?? "")) {
+      return NextResponse.json({ error: "Select a Live or Paper workspace first." }, { status: 428 });
+    }
+    if (workspace === "live" && pathname.startsWith("/api/paper")) {
+      return NextResponse.json({ error: "Paper execution is unavailable in the Live workspace." }, { status: 403 });
+    }
+    if (workspace === "paper" && (pathname.startsWith("/api/orders") || pathname === "/api/positions/close" || pathname.startsWith("/api/exchange/") || pathname === "/api/journal/sync")) {
+      return NextResponse.json({ error: "Live account actions are unavailable in the Paper workspace." }, { status: 403 });
+    }
+    return NextResponse.next();
+  }
 
   return NextResponse.json({ error: "Authentication required." }, { status: 401 });
 }

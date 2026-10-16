@@ -1,12 +1,14 @@
 "use client";
+import ConnectionStatus from "@/components/ConnectionStatus";
 import { useState, useSyncExternalStore } from "react";
 import { KeyRound, LogOut, ShieldAlert } from "lucide-react";
-import { Btn, Chip, Input, KV, Panel, Select, StatusDot, Toggle, useConfirm } from "@/components/ui";
+import { Btn, Chip, HelpTip, Input, KV, Panel, Select, StatusDot, Toggle, useConfirm } from "@/components/ui";
+import NotificationSettings from "@/components/NotificationSettings";
 import { api, logout } from "@/lib/api";
 import { cx, fmtDateTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
 import { LAYOUT_PRESETS, useApp } from "@/stores";
-import type { AppSettings, LayoutPreset, SystemStatus } from "@/lib/types";
+import type { AppSettings, LayoutPreset } from "@/lib/types";
 
 const ACCENTS = [
   { id: "teal", color: "#57E6D2", label: "Teal" },
@@ -38,7 +40,7 @@ function getServerOrigin(): string {
 export default function SettingsPage() {
   const { settings, patchSettings, applySettings, applyLayoutPreset, system, notify } = useApp();
   const [confirm, confirmNode] = useConfirm();
-  const { data: caps, refresh: refreshCaps } = usePoll(
+  const { data: caps } = usePoll(
     () => api.get<{ capabilities: Record<string, boolean> }>("/api/settings").then((r) => r.capabilities),
     600000
   );
@@ -99,24 +101,6 @@ export default function SettingsPage() {
     }
   };
 
-  const setMode = async (mode: AppSettings["mode"]) => {
-    if (mode === "live" && !caps?.liveExecution) {
-      notify({ title: "LIVE mode unavailable", body: "Set LIVE_EXECUTION_ENABLED=true in the server environment first.", tone: "warn" });
-      return;
-    }
-    if (mode === "live") {
-      const ok = await confirm({
-        title: "Switch to LIVE mode?",
-        danger: true,
-        confirmLabel: "Switch to LIVE",
-        body: "LIVE mode routes order entry toward the exchange adapter. Orders still cannot execute until the master switch is armed, and live execution additionally requires server configuration.",
-      });
-      if (!ok) return;
-    }
-    await patchSettings({ mode, ...(mode !== "live" ? { liveArmed: false } : {}) });
-    notify({ title: "Mode changed", body: `Execution mode is now ${mode.replace("_", " ").toUpperCase()}`, tone: "info" });
-  };
-
   const toggleArm = async () => {
     if (settings.liveArmed) {
       await patchSettings({ liveArmed: false });
@@ -142,7 +126,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="p-3 max-w-[1100px] mx-auto space-y-3">
+    <div className="p-3 space-y-3 page-shell-narrow">
       <h1 className="text-[15px] font-semibold">Settings</h1>
 
       {/* appearance */}
@@ -174,6 +158,14 @@ export default function SettingsPage() {
               onChange={(v) => void patchSettings({ density: v ? "compact" : "comfortable" })} />
           </div>
           <div className="flex items-center justify-between">
+            <span className="text-[11px] text-mut inline-flex items-center gap-1.5">
+              Colour-blind friendly gain/loss
+              <HelpTip topic="colorblind" />
+            </span>
+            <Toggle checked={settings.colorblindPalette} label="Colour-blind friendly palette"
+              onChange={(v) => void patchSettings({ colorblindPalette: v })} />
+          </div>
+          <div className="flex items-center justify-between">
             <span className="text-[11px] text-mut">Reduce animations</span>
             <Toggle checked={settings.reduceMotion} onChange={(v) => void patchSettings({ reduceMotion: v })} label="Reduce animations" />
           </div>
@@ -200,7 +192,7 @@ export default function SettingsPage() {
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1.5 border-t border-edge pt-3">
+          <div className="auto-panels gap-x-6 border-t border-edge pt-3">
             {Object.entries(MODULE_LABELS).map(([key, label]) => (
               <div key={key} className="flex items-center justify-between">
                 <span className="text-[11px] text-mut">{label}</span>
@@ -217,10 +209,11 @@ export default function SettingsPage() {
         <div className="p-3 space-y-2.5">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="microlabel w-28">SOURCE</span>
-            <button onClick={() => void patchSettings({ dataSource: "live" })}
-              className="h-7 px-3 rounded border text-[10px] tracking-wider uppercase border-accent/60 text-accent bg-accent-dim">
-              CoinDCX Futures
-            </button>
+            {(["demo", "live"] as const).map(source => <button key={source} onClick={() => void patchSettings({ dataSource: source })}
+              aria-pressed={settings.dataSource === source}
+              className={cx("h-9 px-3 rounded-md border text-[11px]", settings.dataSource === source ? "border-accent/60 text-accent bg-accent-dim" : "border-edge text-mut")}>
+              {source === "demo" ? "Demo simulator" : "CoinDCX Futures"}
+            </button>)}
           </div>
           <div className="flex items-center gap-2 text-[11px] text-mut">
             <StatusDot tone={system?.exchangeMarket === "online" ? "ok" : system?.exchangeMarket === "offline" ? "err" : "off"} />
@@ -233,6 +226,9 @@ export default function SettingsPage() {
       </Panel>
 
       {/* execution */}
+      <a className="panel block p-4 text-accent text-sm" href="/ai-connection">AI connection & free-model discovery →</a>
+      <NotificationSettings />
+
       <Panel title="EXECUTION" badge={
         settings.mode === "live" && settings.liveArmed ? <Chip tone="danger" className="pulse-soft">LIVE ARMED</Chip>
         : settings.mode === "paper" ? <Chip tone="warn">PAPER</Chip> : <Chip>READ ONLY</Chip>
@@ -240,19 +236,10 @@ export default function SettingsPage() {
         <div className="p-3 space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="microlabel w-28">MODE</span>
-            {(["read_only", "paper", "live"] as const).map((m) => (
-              <button key={m} onClick={() => void setMode(m)}
-                disabled={m === "live" && !caps?.liveExecution}
-                className={cx("h-7 px-3 rounded border text-[10px] tracking-wider uppercase disabled:opacity-40",
-                  settings.mode === m
-                    ? m === "live" ? "border-dn/60 text-dn bg-dn/10" : m === "paper" ? "border-warn/60 text-warn bg-warn/10" : "border-accent/60 text-accent bg-accent-dim"
-                    : "border-edge text-mut hover:text-ink")}>
-                {m.replace("_", " ")}
-              </button>
-            ))}
+            <span className="text-sm">{settings.mode === "live" ? "Live workspace" : "Paper workspace"} · use Switch workspace to change profiles.</span>
           </div>
           {caps && !caps.liveExecution && (
-            <p className="text-[10px] text-dim">LIVE mode requires <span className="num">LIVE_EXECUTION_ENABLED=true</span> in the server environment.</p>
+            <p className="text-[10px] text-dim">Live order execution requires <span className="num">LIVE_EXECUTION_ENABLED=true</span> in the server environment.</p>
           )}
           <div className="border-t border-edge pt-3 flex items-center justify-between">
             <div>
@@ -287,13 +274,14 @@ export default function SettingsPage() {
             </label>
             {settings.displayCurrency === "inr" && (
               <label className="block space-y-1">
-                <span className="microlabel">USD → ₹ RATE</span>
+                <span className="microlabel">USD → ₹ RATE · MANUAL</span>
                 <Input type="number" className="w-28" value={String(settings.usdInrRate)}
-                  onChange={(e) => void patchSettings({ usdInrRate: parseFloat(e.target.value) || 0 })} />
+                  onChange={(e) => void patchSettings({ usdInrRate: parseFloat(e.target.value) || settings.usdInrRate })} />
               </label>
             )}
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <p className="text-[10px] text-dim">FX provenance: user-configured conversion rate, not a live FX feed. USDT prices are treated as USD-equivalent. Prices, chart axes and monetary totals convert for display; coin quantities and percentages do not.</p>
+          <div className="auto-cells">
             {([
               ["maxDailyLoss", "MAX DAILY LOSS", true],
               ["maxOrderValue", "MAX ORDER VALUE", true],
@@ -324,15 +312,15 @@ export default function SettingsPage() {
       </Panel>
 
       {/* exchange api — credentials live in the deployment environment */}
-      <Panel
+      {settings.mode === "live" && <Panel
         title="EXCHANGE API · COINDCX FUTURES"
         badge={
           creds?.configured ? (
-            <Chip tone="up">CONFIGURED</Chip>
+            <ConnectionStatus configured label="CoinDCX keys" />
           ) : creds?.misconfigured ? (
-            <Chip tone="warn">MISCONFIGURED</Chip>
+            <ConnectionStatus configured={false} label="CoinDCX keys incomplete" />
           ) : (
-            <Chip>NOT CONFIGURED</Chip>
+            <ConnectionStatus configured={creds ? false : null} label="CoinDCX keys" />
           )
         }
       >
@@ -406,7 +394,7 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
-      </Panel>
+      </Panel>}
 
       {/* tradingview */}
       <TradingViewPanel
@@ -419,7 +407,7 @@ export default function SettingsPage() {
 
       {/* feature flags + audit */}
       <Panel title="FEATURE FLAGS (SERVER)">
-        <div className="p-3 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1">
+        <div className="p-3 auto-panels gap-x-6">
           {Object.entries(system?.flags ?? {}).map(([k, v]) => (
             <div key={k} className="flex items-center justify-between">
               <span className="num text-[10px] text-mut">{k}</span>

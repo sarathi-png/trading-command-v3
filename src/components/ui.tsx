@@ -1,10 +1,12 @@
 "use client";
-import { MoreHorizontal, X } from "lucide-react";
+import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
+import { HelpCircle, MoreHorizontal, X } from "lucide-react";
 import {
   useState, type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes,
   type SelectHTMLAttributes,
 } from "react";
-import { cx, pnlTone } from "@/lib/format";
+import { cx, fmtUsd, pnlTone } from "@/lib/format";
+import { GLOSSARY } from "@/lib/glossary";
 
 /* ---------------- primitives ---------------- */
 
@@ -15,9 +17,9 @@ export function Panel({
   className?: string; onHide?: () => void; badge?: ReactNode;
 }) {
   return (
-    <section className={cx("panel flex flex-col min-h-0", className)}>
+    <section className={cx("panel flex flex-col min-h-0 min-w-0", className)}>
       {(title || right || onHide) && (
-        <header className="flex items-center gap-2 border-b border-edge px-3 h-9 flex-none">
+        <header className="flex items-center gap-2 border-b border-edge px-4 min-h-11 py-2 flex-none">
           {title && <h3 className="microlabel">{title}</h3>}
           {badge}
           <div className="ml-auto flex items-center gap-1.5">{right}</div>
@@ -38,6 +40,44 @@ export function Panel({
   );
 }
 
+/**
+ * Inline plain-language help. Keyed into src/lib/glossary.ts so every
+ * explanation lives in one reviewable place.
+ */
+export function HelpTip({ topic, align = "left" }: { topic: string; align?: "left" | "right" }) {
+  const entry = GLOSSARY[topic];
+  const [open, setOpen] = useState(false);
+  if (!entry) return null;
+  return (
+    <span className="relative inline-flex flex-none">
+      <button
+        type="button"
+        aria-label={`What is ${entry.term}?`}
+        aria-expanded={open}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((o) => !o); }}
+        onBlur={() => setOpen(false)}
+        className="text-dim hover:text-accent inline-flex items-center justify-center w-4 h-4 rounded focus-ring"
+      >
+        <HelpCircle size={11} />
+      </button>
+      {open && (
+        <span role="tooltip" className={cx("help-pop", align === "right" ? "right-0" : "left-0")}>
+          <span className="block text-[11px] text-ink font-medium mb-1">{entry.term}</span>
+          <span className="block text-[11px] text-mut leading-snug">{entry.plain}</span>
+          {entry.example && <span className="block text-[10px] text-dim mt-1 leading-snug">{entry.example}</span>}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Direction glyph so gain/loss is readable without relying on colour alone. */
+export function DirGlyph({ value, className }: { value: number | null | undefined; className?: string }) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return null;
+  const glyph = value > 0 ? "▲" : value < 0 ? "▼" : "■";
+  return <span aria-hidden className={cx("text-[9px] leading-none", className)}>{glyph}</span>;
+}
+
 export function StatusDot({
   tone, pulse, label,
 }: { tone: "ok" | "warn" | "err" | "off" | "accent"; pulse?: boolean; label?: string }) {
@@ -46,7 +86,7 @@ export function StatusDot({
     : tone === "accent" ? "text-accent" : "text-dim";
   return (
     <span className={cx("inline-flex items-center gap-1.5", color)} aria-label={label}>
-      <span className={cx("dot bg-current", (pulse ?? tone === "ok") && "dot-live", pulse && "pulse-soft")} />
+      <span className={cx("dot bg-current", (pulse || tone === "ok" || tone === "err") && "dot-live", pulse && "pulse-soft")} />
     </span>
   );
 }
@@ -84,8 +124,8 @@ export function Btn({ variant = "outline", size = "sm", className, ...rest }: Bt
   return (
     <button
       className={cx(
-        "inline-flex items-center justify-center gap-1.5 rounded transition-colors disabled:opacity-40 disabled:pointer-events-none",
-        size === "sm" ? "h-7 px-2.5 text-[11px]" : "h-8.5 px-4 text-[12px]",
+        "tc-button inline-flex items-center justify-center gap-1.5 rounded transition-colors disabled:opacity-40 disabled:pointer-events-none",
+        size === "sm" ? "h-8 px-3 text-[11px]" : "h-10 px-4 text-[12px]",
         variants[variant],
         className
       )}
@@ -99,7 +139,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={cx(
-        "bg-bg2 border border-edge rounded px-2 h-7.5 text-[12px] text-ink placeholder:text-dim w-full focus:border-accent/50 outline-none",
+        "bg-bg2 border border-edge rounded px-2 h-9 text-[12px] text-ink placeholder:text-dim w-full focus:border-accent/50 outline-none",
         props.className
       )}
     />
@@ -111,7 +151,7 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
     <select
       {...props}
       className={cx(
-        "bg-bg2 border border-edge rounded px-1.5 h-7.5 text-[12px] text-ink outline-none focus:border-accent/50",
+        "bg-bg2 border border-edge rounded px-1.5 h-9 text-[12px] text-ink outline-none focus:border-accent/50",
         props.className
       )}
     />
@@ -182,36 +222,41 @@ export function Skeleton({ className }: { className?: string }) {
 }
 
 export function PnlValue({ v, className, signed = true }: { v: number | null | undefined; className?: string; signed?: boolean }) {
+  useDisplayCurrency();
   if (v === null || v === undefined || Number.isNaN(v)) return <span className={cx("num text-dim", className)}>—</span>;
   const tone = pnlTone(v);
   return (
     <span className={cx("num", tone === "pos" ? "text-up" : tone === "neg" ? "text-dn" : "text-ink", className)}>
-      {signed && v > 0 ? "+" : ""}{v < 0 ? "-" : ""}${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}
+      {fmtUsd(v, { sign: signed, decimals: 2 })}
     </span>
   );
 }
 
 export function MetricCard({
-  label, value, sub, tone = "flat", onHide, tooltip,
+  label, value, sub, tone = "flat", onHide, tooltip, help,
 }: {
   label: string; value: ReactNode; sub?: ReactNode;
-  tone?: "flat" | "up" | "dn" | "accent"; onHide?: () => void; tooltip?: string;
+  tone?: "flat" | "up" | "dn" | "accent"; onHide?: () => void; tooltip?: string; help?: string;
 }) {
   return (
-    <div className="panel px-3 py-2.5 relative group min-w-0 metric-card-hover" title={tooltip}>
+    <div className="panel px-4 py-4 relative group min-w-0" title={tooltip}>
       <div className="flex items-center justify-between gap-2">
-        <p className="microlabel truncate">{label}</p>
+        <p className="microlabel truncate flex items-center gap-1.5">
+          {label}
+          {help && <HelpTip topic={help} />}
+        </p>
         {onHide && (
           <button
             onClick={onHide}
             aria-label={`Hide ${label}`}
-            className="opacity-0 group-hover:opacity-100 text-dim hover:text-ink transition-opacity"
+            title={`Hide ${label}`}
+            className="metric-hide opacity-0 group-hover:opacity-100 text-dim hover:text-ink transition-opacity flex items-center justify-center w-6 h-6 rounded"
           >
-            <X size={11} />
+            <X size={12} />
           </button>
         )}
       </div>
-      <div className={cx("num text-lg leading-6 mt-1 truncate",
+      <div className={cx("num metric-value text-[23px] leading-8 mt-2 truncate",
         tone === "up" ? "text-up" : tone === "dn" ? "text-dn" : tone === "accent" ? "text-accent" : "text-ink")}>
         {value}
       </div>
@@ -236,10 +281,13 @@ export function Spark({ data, tone = "accent", width = 96, height = 26 }: {
   );
 }
 
-export function KV({ k, v, mono = true }: { k: ReactNode; v: ReactNode; mono?: boolean }) {
+export function KV({ k, v, mono = true, help }: { k: ReactNode; v: ReactNode; mono?: boolean; help?: string }) {
   return (
     <div className="flex items-center justify-between gap-3 py-1">
-      <span className="text-[11px] text-dim">{k}</span>
+      <span className="text-[11px] text-dim inline-flex items-center gap-1.5">
+        {k}
+        {help && <HelpTip topic={help} align="right" />}
+      </span>
       <span className={cx("text-[11px] text-ink text-right", mono && "num")}>{v}</span>
     </div>
   );
@@ -321,9 +369,9 @@ export function PremiumPanel({
     4: "shadow-[0_8px_32px_rgba(0,0,0,0.2)]",
   };
   return (
-    <section className={cx("panel flex flex-col min-h-0 transition-shadow duration-200 hover:shadow-[0_2px_8px_rgba(0,0,0,0.12)]", shadows[elevation], className)}>
+    <section className={cx("panel flex flex-col min-h-0 min-w-0 transition-shadow duration-200 hover:shadow-[0_2px_8px_rgba(0,0,0,0.12)]", shadows[elevation], className)}>
       {(title || right || badge) && (
-        <header className="flex items-center gap-2 border-b border-edge px-3 h-9 flex-none">
+        <header className="flex items-center gap-2 border-b border-edge px-4 min-h-11 py-2 flex-none">
           {title && <h3 className="microlabel">{title}</h3>}
           {badge}
           <div className="ml-auto flex items-center gap-1.5">{right}</div>
@@ -334,11 +382,26 @@ export function PremiumPanel({
   );
 }
 
+export function PageHeader({ crumb, title, description, actions }: {
+  crumb: string; title: ReactNode; description?: ReactNode; actions?: ReactNode;
+}) {
+  return (
+    <header className="flex flex-wrap items-end justify-between gap-4">
+      <div className="min-w-0">
+        <p className="microlabel mb-2">{crumb}</p>
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        {description && <p className="text-xs text-mut mt-2 max-w-2xl">{description}</p>}
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    </header>
+  );
+}
+
 export function SectionHeader({ title, right, className }: {
   title: ReactNode; right?: ReactNode; className?: string;
 }) {
   return (
-    <div className={cx("flex items-center justify-between border-b border-edge px-3 h-9 flex-none", className)}>
+    <div className={cx("flex items-center justify-between border-b border-edge px-4 min-h-11 py-2 flex-none", className)}>
       <h3 className="microlabel">{title}</h3>
       {right && <div className="flex items-center gap-1.5">{right}</div>}
     </div>
