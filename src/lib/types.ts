@@ -289,4 +289,10 @@ export interface AccountState {
     mark: number;
     source: "paper" | "live";
   }[];
+  /** Live only: currency of the wallet the balance was read from. */
+  balanceCurrency?: "USD" | "INR";
+  /** Live only: wallet asset name, e.g. USDT or INR. */
+  balanceAsset?: string;
+  /** Live only: ₹ per USD used to convert an INR wallet (null for USD wallets). */
+  fxRate?: number | null;
 }

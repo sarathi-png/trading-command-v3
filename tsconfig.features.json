@@ -28,6 +28,7 @@
     "src/lib/journal/core.test.ts",
     "src/lib/displayCurrency*.ts",
     "src/lib/format.ts",
+    "src/lib/exchange/liveWallet*.ts",
     "src/lib/paper/accounting.ts",
     "src/components/chart/labels.ts"
   ]
