@@ -8,6 +8,7 @@
 import { getRepo } from "@/lib/repo";
 import { exchangeAccountConfigured } from "./credentials";
 import { liveBalances, livePositions } from "./exchange/service";
+import { selectLiveWallet, toUsd, type LiveWallet } from "./exchange/liveWallet";
 import { getTickers } from "./market/service";
 import { getPaperState } from "./paper/engine";
 import { getSettings } from "./settings";
@@ -15,19 +16,41 @@ import type { AccountState } from "./types";
 
 const DEMO_LEVERAGE = 10;
 
+/**
+ * Reads the live wallet. If neither a USD-like nor an INR wallet is in the
+ * first response, rechecks once after a short pause before failing.
+ */
+async function readLiveWallet(): Promise<LiveWallet> {
+  let balances = await liveBalances();
+  let wallet = selectLiveWallet(balances);
+  if (!wallet) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    balances = await liveBalances();
+    wallet = selectLiveWallet(balances);
+  }
+  if (!wallet) {
+    const seen = balances.map((b) => b.asset).join(", ") || "none";
+    throw new Error(`Live account balance unavailable: no USD/USDT/USDC or INR futures wallet returned by CoinDCX (assets seen: ${seen}). No simulated balance is substituted.`);
+  }
+  return wallet;
+}
+
 export async function getAccountState(): Promise<AccountState> {
   const settings = await getSettings();
   if (settings.mode === "live") {
     if (!(await exchangeAccountConfigured())) throw new Error("Live account unavailable: configure CoinDCX credentials. No paper balances are shown.");
-    const [balances, positions] = await Promise.all([liveBalances(), livePositions()]);
-    const wallet = balances.find(b => ["USDT", "USD", "USDC"].includes(b.asset));
-    if (!wallet) throw new Error("Live USD account balance unavailable. No simulated balance is substituted.");
+    const [wallet, positions] = await Promise.all([readLiveWallet(), livePositions()]);
+    // Amounts are converted to USD with the manual rate when the wallet is INR;
+    // the rest of the account model is USD-denominated.
+    const balance = toUsd(wallet.balance, wallet, settings.usdInrRate);
+    const available = toUsd(wallet.available, wallet, settings.usdInrRate);
     const openPnl = positions.reduce((sum, p) => sum + p.upl, 0);
     // Use only the live wallet's reported available balance; never paper margin.
     const repo = await getRepo();
     const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
     return {
-      equity: wallet.balance + openPnl, availableMargin: wallet.available, marginUsed: Math.max(0, wallet.balance - wallet.available),
+      equity: balance + openPnl, availableMargin: available, marginUsed: Math.max(0, balance - available),
+      balanceCurrency: wallet.currency, balanceAsset: wallet.asset, fxRate: wallet.currency === "INR" ? settings.usdInrRate : null,
       openPnl, todayPnl: await repo.sumJournalPnl({ mode: "live", closedSince: dayStart }),
       realizedTotal: await repo.sumJournalPnl({ mode: "live" }), startingBalance: 0,
       source: "live", positions: positions.map(p => ({ ...p, source: "live" as const })),
