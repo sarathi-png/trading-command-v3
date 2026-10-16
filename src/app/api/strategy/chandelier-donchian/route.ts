@@ -75,10 +75,10 @@ export async function GET(req: Request) {
 
   let sizing = null;
   let sizingSource: string | null = null;
-  if (signal.entry !== null && signal.stop !== null) {
+  if (signal.entry !== null && signal.stop !== null && settings.mode !== "live") {
     const account = await getAccountState();
     // Never size a live order using fallback paper equity.
-    if (settings.mode !== "live" && account.source === "demo") {
+    if (account.source === "demo") {
       sizing = calculatePositionSize(account.equity, signal.entry, signal.stop, config.risk);
       sizingSource = "Simulated account equity; estimate only";
     }

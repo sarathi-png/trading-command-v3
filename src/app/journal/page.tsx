@@ -26,7 +26,7 @@ function downloadCsv(name: string, rows: unknown[][]) {
 export default function JournalPage() {
   useDisplayCurrency();
   const { settings } = useApp();
-  const [fSymbol, setFSymbol] = useState(""), [fMode, setFMode] = useState(""), [fDir, setFDir] = useState("");
+  const [fSymbol, setFSymbol] = useState(""), [fMode] = useState(settings.mode), [fDir, setFDir] = useState("");
   const [editing, setEditing] = useState<Row | null>(null), [busy, setBusy] = useState(false), [message, setMessage] = useState("");
   const { data, refresh, loading, error } = usePoll(() => api.get<History>(`/api/journal${fSymbol ? `?symbol=${encodeURIComponent(fSymbol)}` : ""}`), 15_000, { deps: [fSymbol] });
   const entries = useMemo(() => (data?.entries ?? []).filter(r => (!fMode || r.mode === fMode) && (!fDir || r.direction === fDir)), [data, fMode, fDir]);
@@ -63,37 +63,37 @@ export default function JournalPage() {
     finally { setBusy(false); }
   }
   async function share() {
-    const text = `Trading log · ${closed.length} displayed closed records\nPaper net: ${fmtUsd(pnlFor("paper"),{sign:true})}\nCoinDCX FIFO estimate: ${fmtUsd(pnlFor("live"),{sign:true})} (not venue-booked; excludes funding/liquidation)\n${closed.filter(e=>e.predictionContext.length).length} records with compatible prior AI context — not proof trades followed AI.\nFX: ${settings.displayCurrency === "inr" ? `manual USD/INR ${settings.usdInrRate}` : "USD-equivalent; USDT treated as USD"}. Coverage may be incomplete. Not investment advice.`;
+    const text = `Trading log · ${closed.length} displayed closed records\n${settings.mode === "paper" ? `Paper net: ${fmtUsd(pnlFor("paper"),{sign:true})} (simulated)` : `CoinDCX FIFO estimate: ${fmtUsd(pnlFor("live"),{sign:true})} (not venue-booked; excludes funding/liquidation)`}\n${closed.filter(e=>e.predictionContext.length).length} records with compatible prior AI context — not proof trades followed AI.\nFX: ${settings.displayCurrency === "inr" ? `manual USD/INR ${settings.usdInrRate}` : "USD-equivalent; USDT treated as USD"}. Coverage may be incomplete. Not investment advice.`;
     try { await navigator.clipboard.writeText(text); setMessage("P&L summary copied. No credentials or recipient details included."); }
     catch { setMessage("Clipboard unavailable in this browser. Use the CSV export instead."); }
   }
   return <div className="p-4 lg:p-6 space-y-4 page-shell">
-    <PageHeader crumb="TRADING / AUTOMATIC JOURNAL" title="Trading journal" description="Paper execution and CoinDCX fills collected automatically. Financial facts are read-only; notes remain editable." />
+    <PageHeader crumb="TRADING / AUTOMATIC JOURNAL" title="Trading journal" description="Automatic trade history for this workspace only. Financial facts are read-only; notes remain editable." />
     {(error || message) && <p role="status" className="text-[12px] text-warn">{error || message}</p>}
     <div className="auto-cells">
       <MetricCard label="DISPLAYED CLOSED RECORDS" value={String(closed.length)} sub={data ? `${data.total} retained automatic records` : "Loading history"}/>
-      <MetricCard label="PAPER NET P&L" value={fmtUsd(pnlFor("paper"),{sign:true})} sub="SIMULATED EXECUTION" />
-      <MetricCard label="LIVE FIFO ESTIMATE" value={fmtUsd(pnlFor("live"),{sign:true})} sub="NOT EXCHANGE-BOOKED P&L" />
+      {settings.mode === "paper" && <MetricCard label="PAPER NET P&L" value={fmtUsd(pnlFor("paper"),{sign:true})} sub="SIMULATED EXECUTION" />}
+      {settings.mode === "live" && <MetricCard label="LIVE FIFO ESTIMATE" value={fmtUsd(pnlFor("live"),{sign:true})} sub="NOT EXCHANGE-BOOKED P&L" />}
       <MetricCard label="PRIOR AI CONTEXT" value={String(closed.filter(e=>e.predictionContext.length).length)} sub="CONTEXT, NOT ATTRIBUTED PROFIT" />
     </div>
-    <Panel title="AUTOMATIC SYNC · READ ONLY" badge={<Chip tone={data?.sync.configured ? "accent" : "warn"}>{data?.sync.configured ? "API CONFIGURED · CHECK COVERAGE" : "NO LIVE API"}</Chip>}>
+    {settings.mode === "live" && <Panel title="AUTOMATIC SYNC · READ ONLY" badge={<Chip tone={data?.sync?.configured ? "accent" : "warn"}>{data?.sync?.configured ? "API CONFIGURED · CHECK COVERAGE" : "NO LIVE API"}</Chip>}>
       <div className="p-3 space-y-2 text-[11px] text-mut">
-        <p>{data?.sync.note ?? "Loading import status…"}</p>
+        <p>{data?.sync?.note ?? "Loading import status…"}</p>
         <p>{data?.notice}</p>
         {data && <p>{data.sync.pairs.filter(p=>p.coveredThrough).length}/{data.sync.pairs.length} symbol/margin streams have a completed window · {data.sync.pairs.filter(p=>p.error).length} errors · {data.legacyCount} legacy manual/sample rows excluded, not deleted.</p>}
         <details><summary className="cursor-pointer text-accent">Coverage by symbol and margin currency</summary>
-          <div className="mt-2 auto-cells gap-2">{data?.sync.pairs.map(p=><div key={`${p.symbol}:${p.margin}`} className="border border-edge rounded p-2">
+          <div className="mt-2 auto-cells gap-2">{data?.sync?.pairs.map(p=><div key={`${p.symbol}:${p.margin}`} className="border border-edge rounded p-2">
             <strong>{p.symbol} · {p.margin}</strong><p>{p.fills} retained fills · {p.coveredThrough ? `scanned to ${fmtDateTime(p.coveredThrough,settings.timezone)}` : "not yet complete"}{p.pendingPage ? ` · pending page ${p.pendingPage}` : ""}</p>
             <p className="text-dim">{p.historyFrom ? `History starts ${new Date(p.historyFrom).toISOString().slice(0,10)}` : "Not initialized"}</p>{p.error&&<p className="text-warn">{p.error}</p>}
           </div>)}</div>
         </details>
         <Btn disabled={busy} onClick={()=>void sync()}><RefreshCw size={12}/> SYNC NEXT BATCH</Btn>
       </div>
-    </Panel>
+    </Panel>}
     <Panel title="CLOSED TRADE LOG · RECENT 800">
       <div className="flex items-center gap-2 flex-wrap px-3 py-2 border-b border-edge">
         <Input aria-label="Filter symbol" placeholder="symbol" value={fSymbol} onChange={e=>setFSymbol(e.target.value.toUpperCase())} className="w-24"/>
-        <Select aria-label="Filter mode" value={fMode} onChange={e=>setFMode(e.target.value)}><option value="">paper + live (separate totals)</option><option value="paper">paper</option><option value="live">CoinDCX FIFO</option></Select>
+        <Chip>{settings.mode === "live" ? "LIVE HISTORY ONLY" : "PAPER HISTORY ONLY"}</Chip>
         <Select aria-label="Filter direction" value={fDir} onChange={e=>setFDir(e.target.value)}><option value="">all directions</option><option value="long">long</option><option value="short">short</option></Select>
         <Btn disabled={busy||!data?.total} onClick={()=>void exportHistory()}><Download size={12}/> EXPORT P&L + AI CONTEXT</Btn>
         <Btn disabled={!closed.length} onClick={()=>void share()}><Share2 size={12}/> COPY SUMMARY</Btn>

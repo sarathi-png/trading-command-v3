@@ -19,6 +19,9 @@ import type { AlertRule, SystemStatus, Ticker } from "@/lib/types";
 import CommandPalette from "./CommandPalette";
 import JournalMonitor from "./JournalMonitor";
 import { NotificationMonitor } from "./NotificationSettings";
+import ConnectionStatus from "./ConnectionStatus";
+import WorkspaceGate from "./WorkspaceGate";
+import { selectWorkspace, workspaceSelection } from "@/lib/workspaceClient";
 import LoginGate from "./LoginGate";
 import Onboarding, { Logo } from "./Onboarding";
 import { Btn, Chip, StatusDot } from "./ui";
@@ -26,7 +29,8 @@ import { Btn, Chip, StatusDot } from "./ui";
 
 const NAV = [
   { href: "/", label: "OVERVIEW", icon: LayoutDashboard },
-  { href: "/chart", label: "CHART", icon: LineChart },
+  { href: "/chart", label: "CANDLESTICK", icon: LineChart },
+  { href: "/heikin-ashi", label: "HEIKIN-ASHI", icon: LineChart },
   { href: "/markets", label: "MARKETS", icon: CandlestickChart },
   { href: "/positions", label: "POSITIONS", icon: Layers },
   { href: "/orders", label: "ORDERS", icon: ArrowUpDown },
@@ -35,6 +39,7 @@ const NAV = [
   { href: "/analytics", label: "ANALYTICS", icon: BarChart3 },
   { href: "/alerts", label: "ALERTS", icon: Bell },
   { href: "/automation", label: "AUTOMATION", icon: Bot, tag: "OFF" },
+  { href: "/ai-connection", label: "AI CONNECTION", icon: Bot },
   { href: "/settings", label: "SETTINGS", icon: Settings },
 ];
 
@@ -46,6 +51,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   } = useApp();
   const [capabilities, setCapabilities] = useState({ liveExecution: false, exchangeAccountConfigured: false });
   const [reconnectNonce, setReconnectNonce] = useState(0);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
   const [authDenied, setAuthDenied] = useState(false);
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
   const [settingsNonce, setSettingsNonce] = useState(0);
@@ -56,6 +62,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       .then((res) => {
         setSettingsLoadError(null);
         applySettings(res.settings);
+        setWorkspaceReady(Boolean(workspaceSelection()));
         setCapabilities(res.capabilities);
       })
       .catch((e) => {
@@ -274,12 +281,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
     return (
       <LoginGate
         onLoggedIn={() => {
+          selectWorkspace(null);
+          setWorkspaceReady(false);
           setAuthDenied(false);
           setSettingsNonce((n) => n + 1); // refetch settings with the fresh cookie
         }}
       />
     );
   }
+
+  if (!workspaceReady && settingsLoaded) return <WorkspaceGate onSelected={async () => { const res = await api.post<{ settings: typeof settings }>("/api/settings", { liveArmed: false }); applySettings(res.settings); setWorkspaceReady(true); }} />;
 
   if (settingsLoadError) {
     return (
@@ -312,6 +323,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="h-dvh flex flex-col overflow-hidden">
       <a href="#main-content" className="skip-link">Skip to workspace</a>
+      <button className="bg-panel text-accent text-xs py-2 border-b border-edge" onClick={() => { selectWorkspace(null); window.location.reload(); }}>Workspace: {settings.mode === "live" ? "Live · real account" : "Paper · simulated funds"} · Switch workspace</button>
       <TopBar onReconnect={() => setReconnectNonce((n) => n + 1)} />
       <div className="flex flex-1 min-h-0">
         <Sidebar />
@@ -320,7 +332,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <StatusBar />
       <MobileNav />
       <NotificationMonitor />
-      <JournalMonitor enabled={capabilities.exchangeAccountConfigured} />
+      <JournalMonitor enabled={settings.mode === "live" && capabilities.exchangeAccountConfigured} />
       {paletteOpen && <CommandPalette />}
       <HelpModal open={helpOpen} onClose={() => setHelp(false)} />
     </div>
@@ -413,13 +425,7 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
               <StatusDot tone={system?.db ? "ok" : "err"} /> SYSTEM {system?.db ? "ONLINE" : "DEGRADED"}
             </span>
           )}
-          <Chip className="hidden sm:inline-flex">
-            {settings.dataSource === "live"
-              ? system?.exchangeAccount === "configured"
-                ? "COINDCX · ACCOUNT UNVERIFIED"
-                : "COINDCX · NOT CONFIGURED"
-              : "DEMO / SIMULATED"}
-          </Chip>
+          {settings.mode === "live" && <span className="hidden sm:inline-flex"><ConnectionStatus configured={system ? system.exchangeAccount === "configured" : null} label="CoinDCX keys" /></span>}
           {modeBadge}
           <button type="button" className="theme-toggle" aria-label={settings.theme === "dark" ? "Switch to day theme" : "Switch to night theme"}
             title={settings.theme === "dark" ? "Day theme" : "Night theme"}
@@ -468,7 +474,8 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
                 { href: "/strategy", label: "Strategy", icon: Zap },
                 { href: "/automation", label: "Automation", icon: Bot },
                 { href: "/alerts", label: "Alerts", icon: Bell },
-                { href: "/settings", label: "Settings", icon: Settings },
+                { href: "/ai-connection", label: "AI CONNECTION", icon: Bot },
+  { href: "/settings", label: "Settings", icon: Settings },
               ].map((item) => (
                 <Link key={item.href} href={item.href} onClick={() => setMobileMenuOpen(false)}
                   className={cx("flex items-center gap-3 px-3 py-2.5 rounded text-[11px] text-mut hover:text-ink hover:bg-panel2/50 transition-colors",

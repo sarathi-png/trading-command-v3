@@ -81,6 +81,8 @@ export interface SRLevel {
 }
 
 export interface Analysis {
+  /** Missing on historical raw-candle analysis; HA must be explicitly tagged. */
+  chartType?: "candles" | "heikin-ashi";
   symbol: string;
   timeframe: Timeframe;
   trend: TrendState;

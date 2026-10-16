@@ -4,7 +4,7 @@ import { matchJournalFills, stableUuid, type JournalFill } from "./fifo";
 import { priorPredictionContext, csvCell } from "./context";
 import { annotationPatch, reservedJournalTag } from "./annotations";
 import { allocatePaperClose } from "../paper/accounting";
-import { groupLegendRows, donchianBound, type LegendRow } from "../../components/chart/labels";
+import { groupLegendRows, groupDonchianBounds, donchianBound, type LegendRow } from "../../components/chart/labels";
 import type { AiPrediction } from "../ai/types";
 const fill = (key: string, side: "buy"|"sell", price: number, quantity=1, fee=1, ts=1000): JournalFill => ({key,side,price,quantity,fee,ts,symbol:"BTCUSD",margin:"USDT",nativeFee:fee,fxRate:1,orderId:key});
 const prediction = (patch: Partial<AiPrediction> = {}): AiPrediction => ({ id:"prior",symbol:"BTCUSD",timeframe:"5m",chartType:"candles",provider:"rules",model:"rules",direction:"LONG",createdAt:700_000,barTime:300_000,horizonBars:3,context:{dataSource:"live"},rationale:"closed-candle context",...patch } as AiPrediction);
@@ -27,4 +27,33 @@ describe("automatic journal and honest prediction context",()=>{
   it("keeps reserved provenance tags separate from personal annotations",()=>{assert.equal(reservedJournalTag("market-source:live"),true);assert.equal(reservedJournalTag("fifo-estimate"),true);assert.equal(reservedJournalTag("my-setup"),false);});
   it("CSV escapes quotes, commas and spreadsheet formulas without changing numeric losses",()=>{assert.equal(csvCell('a,"b"'),'"a,""b"""');assert.equal(csvCell('=HYPERLINK("x")'),'"\'=HYPERLINK(""x"")"');assert.equal(csvCell(-12),'"-12"');});
   it("chart legend describes one resistance and one bound concept instead of every price/period",()=>{const rows:LegendRow[]=[{id:"r1",kind:"resistance",label:"RESISTANCE 1",token:"R",value:100},{id:"r2",kind:"resistance",label:"RESISTANCE 2",token:"R",value:110},...[20,50,100].map(p=>({id:`d${p}`,kind:"donchian" as const,label:donchianBound(p,"upper").full,token:donchianBound(p,"upper").compact,value:p}))];const groups=groupLegendRows(rows);assert.equal(groups.length,2);assert.equal(groups[0].rows.length,2);assert.equal(groups[1].rows.length,3);});
+  it("merges equal Donchian axis bounds without merging distinct prices or upper/lower meanings",()=>{
+    const groups=groupDonchianBounds({20:{upper:110,lower:90},50:{upper:110,lower:90},100:{upper:120,lower:90}});
+    assert.equal(groups.length,3);
+    assert.deepEqual(groups.find(g=>g.bound==="lower")?.periods,[20,50,100]);
+    assert.deepEqual(groups.find(g=>g.bound==="upper"&&g.price===110)?.periods,[20,50]);
+    assert.equal(groups.find(g=>g.price===120)?.periods.length,1);
+  });
+});
+
+import { drawingBelongsToChart, chartDrawingLayout, analysisBelongsToChart, activeChartSignal } from "../chartScope";
+import type { Analysis, StrategySignal } from "../types";
+describe("chart-type research isolation", () => {
+  it("keeps legacy drawings on normal candles, never Heikin-Ashi", () => {
+    assert.equal(drawingBelongsToChart("default", "candles"), true);
+    assert.equal(drawingBelongsToChart("default", "heikin-ashi"), false);
+    assert.equal(drawingBelongsToChart(chartDrawingLayout("heikin-ashi"), "candles"), false);
+    assert.equal(drawingBelongsToChart(chartDrawingLayout("heikin-ashi"), "heikin-ashi"), true);
+  });
+  it("requires explicitly tagged HA analysis on smoothed charts", () => {
+    assert.equal(analysisBelongsToChart({} as Analysis, "heikin-ashi"), false);
+    assert.equal(analysisBelongsToChart({ chartType: "heikin-ashi" } as Analysis, "candles"), false);
+    assert.equal(analysisBelongsToChart({ chartType: "heikin-ashi" } as Analysis, "heikin-ashi"), true);
+  });
+  it("does not draw entry/stop/target or signal arrows for WAIT/WATCH candidates", () => {
+    const signals = [{ entry: 100, status: "WATCH" }, { entry: 100, status: "WAIT" }] as StrategySignal[];
+    assert.equal(activeChartSignal(signals), undefined);
+    signals.push({ entry: 100, status: "SHORT_SETUP" } as StrategySignal);
+    assert.equal(activeChartSignal(signals)?.status, "SHORT_SETUP");
+  });
 });

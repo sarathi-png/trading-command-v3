@@ -15,13 +15,15 @@ import { api } from "@/lib/api";
 import { cx, fmtPrice } from "@/lib/format";
 import { useApp } from "@/stores";
 import { useViewport } from "@/lib/useResponsive";
+import { activeChartSignal, analysisBelongsToChart } from "@/lib/chartScope";
+import { TIMEFRAMES } from "@/lib/types";
 import type { Analysis, Candle, Drawing, DrawingType, Timeframe } from "@/lib/types";
 import { DrawLayer, type HitResult } from "./drawLayer";
 import { toHeikinAshi } from "@/lib/strategy/v2/heikin-ashi";
 import ChartLegend from "./ChartLegend";
 import {
   CHANDELIER_LONG, CHANDELIER_SHORT, ENTRY, STOP, TARGET, donchianBound, drawingTitle, levelTitle,
-  type LabelMode, type LegendRow,
+  groupDonchianBounds, type LabelMode, type LegendRow,
 } from "./labels";
 
 type Tool = "cursor" | DrawingType;
@@ -44,8 +46,8 @@ const COLORS = ["#57E6D2", "#2FD388", "#F0524F", "#F5B84D", "#9AB2CE"];
 const SINGLE_POINT: DrawingType[] = ["hline", "vline", "text", "entry", "stop", "target"];
 
 export default function ChartPanel({
-  symbol, timeframe, analysis, interactive = true, showObjectTree = false, className,
-  chartType: initialChartType = "candlestick", lockChartType = false,
+  symbol, timeframe, analysis: suppliedAnalysis, interactive = true, showObjectTree = false, className,
+  chartType: initialChartType = "candlestick", surfaceHeight,
 }: {
   symbol: string;
   timeframe: Timeframe;
@@ -54,11 +56,11 @@ export default function ChartPanel({
   showObjectTree?: boolean;
   className?: string;
   chartType?: ChartType;
-  /** True when the page renders two charts (candles + Heikin-Ashi) side by side. */
-  lockChartType?: boolean;
+  /** Fixed plot allocation; legend expansion flows below instead of shrinking candles. */
+  surfaceHeight?: number;
 }) {
   useDisplayCurrency();
-  const { settings, patchSettings } = useApp();
+  const { settings, patchSettings, setTimeframe } = useApp();
   const viewport = useViewport();
   const containerRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
@@ -69,11 +71,12 @@ export default function ChartPanel({
   const [tool, setTool] = useState<Tool>("cursor");
   const [color, setColor] = useState(COLORS[0]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [treeOpen, setTreeOpen] = useState(showObjectTree);
-  const [chartTypeChoice, setChartTypeChoice] = useState<ChartType>(initialChartType);
-  // When a page owns the split view the prop wins, so the panel never drifts
-  // away from the chart it is predicting for.
-  const chartType: ChartType = lockChartType ? initialChartType : chartTypeChoice;
+  const [treeOpen, setTreeOpen] = useState(false);
+  const chartType = initialChartType;
+  const analysis = suppliedAnalysis && suppliedAnalysis.symbol === symbol && suppliedAnalysis.timeframe === timeframe &&
+    analysisBelongsToChart(suppliedAnalysis, chartType === "heikin-ashi" ? "heikin-ashi" : "candles") ? suppliedAnalysis : null;
+  const drawingLayout = chartType === "heikin-ashi" ? "chart:heikin-ashi" : "chart:candles";
+  const [showAllLabels, setShowAllLabels] = useState(false);
   const labelMode: LabelMode = settings.chartLabelMode ?? "compact";
   const labelModeRef = useRef<LabelMode>(labelMode);
   useEffect(() => { labelModeRef.current = labelMode; }, [labelMode]);
@@ -89,6 +92,7 @@ export default function ChartPanel({
   const markersRef = useRef<{ setMarkers: (m: SeriesMarker<LTime>[]) => void } | null>(null);
   const layerRef = useRef<DrawLayer | null>(null);
   const linesRef = useRef<IPriceLine[]>([]);
+  const overlayLinesRef = useRef<IPriceLine[]>([]);
   const candlesRef = useRef<Candle[]>([]);
   const drawingsRef = useRef<Drawing[]>(drawings);
   const toolRef = useRef<Tool>(tool);
@@ -255,8 +259,8 @@ export default function ChartPanel({
         );
         if (stop) return;
         candlesRef.current = res.candles;
-        setLastCandle(res.candles.at(-1) ?? null);
         const displayCandles = chartType === "heikin-ashi" ? toHeikinAshi(res.candles) : res.candles;
+        setLastCandle(displayCandles.at(-1) ?? null);
         applyCandles(displayCandles);
         setError(null);
       } catch (e) {
@@ -271,11 +275,14 @@ export default function ChartPanel({
   /* ---------------- drawings load ---------------- */
   useEffect(() => {
     let stop = false;
-    api.get<{ drawings: Drawing[] }>(`/api/drawings?symbol=${symbol}&timeframe=${timeframe}`)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDrawings([]);
+    setSelectedId(null);
+    api.get<{ drawings: Drawing[] }>(`/api/drawings?symbol=${symbol}&timeframe=${timeframe}&chartType=${chartType === "heikin-ashi" ? "heikin-ashi" : "candles"}`)
       .then((res) => { if (!stop) setDrawings(res.drawings as Drawing[]); })
       .catch(() => undefined);
     return () => { stop = true; };
-  }, [symbol, timeframe]);
+  }, [symbol, timeframe, chartType]);
 
   useEffect(() => { redraw(); }, [drawings, selectedId, redraw]);
 
@@ -288,20 +295,20 @@ export default function ChartPanel({
     linesRef.current = [];
 
     const mode: LabelMode = labelModeRef.current;
-    const add = (price: number, colorV: string, style: 0 | 1 | 2, title: string) => {
+    const add = (price: number, colorV: string, style: 0 | 1 | 2, title: string, essential = false) => {
       if (!Number.isFinite(price) || price <= 0) return;
       linesRef.current.push(series.createPriceLine({
         price, color: colorV, lineWidth: 1, lineStyle: style,
-        axisLabelVisible: true, title,
+        axisLabelVisible: essential || showAllLabels, title,
       }));
     };
 
     for (const d of drawingsRef.current) {
       if (d.hidden) continue;
-      if (d.type === "hline") add(d.points[0]?.price ?? NaN, d.color, 0, drawingTitle("hline", d.label, mode));
-      if (d.type === "entry") add(d.points[0]?.price ?? NaN, d.color, 0, drawingTitle("entry", d.label, mode));
-      if (d.type === "stop") add(d.points[0]?.price ?? NaN, d.color, 2, drawingTitle("stop", d.label, mode));
-      if (d.type === "target") add(d.points[0]?.price ?? NaN, d.color, 2, drawingTitle("target", d.label, mode));
+      if (d.type === "hline") add(d.points[0]?.price ?? NaN, d.color, 0, drawingTitle("hline", d.label, mode), true);
+      if (d.type === "entry") add(d.points[0]?.price ?? NaN, d.color, 0, drawingTitle("entry", d.label, mode), true);
+      if (d.type === "stop") add(d.points[0]?.price ?? NaN, d.color, 2, drawingTitle("stop", d.label, mode), true);
+      if (d.type === "target") add(d.points[0]?.price ?? NaN, d.color, 2, drawingTitle("target", d.label, mode), true);
     }
 
     if (analysis && settings.srAuto && settings.modules.supportResistance !== false) {
@@ -315,14 +322,14 @@ export default function ChartPanel({
       }
     }
 
-    const primary = analysis?.signals.find((s) => s.entry !== null);
+    const primary = activeChartSignal(analysis?.signals);
     if (primary) {
-      if (primary.entry) add(primary.entry, "#57E6D2", 0, mode === "full" ? ENTRY.full : ENTRY.compact);
-      if (primary.stop) add(primary.stop, "#F0524F", 2, mode === "full" ? STOP.full : STOP.compact);
-      if (primary.target) add(primary.target, "#2FD388", 2, mode === "full" ? TARGET.full : TARGET.compact);
+      if (primary.entry) add(primary.entry, "#57E6D2", 0, mode === "full" ? ENTRY.full : ENTRY.compact, true);
+      if (primary.stop) add(primary.stop, "#F0524F", 2, mode === "full" ? STOP.full : STOP.compact, true);
+      if (primary.target) add(primary.target, "#2FD388", 2, mode === "full" ? TARGET.full : TARGET.compact, true);
     }
     redraw();
-  }, [drawings, analysis, ready, labelMode, settings.srAuto, settings.modules.supportResistance, redraw]);
+  }, [drawings, analysis, ready, labelMode, settings.srAuto, settings.modules.supportResistance, showAllLabels, redraw]);
 
   const [showStrategyOverlay, setShowStrategyOverlay] = useState(true);
   const [strategyOverlay, setStrategyOverlay] = useState<StrategyOverlay | null>(null);
@@ -357,14 +364,11 @@ export default function ChartPanel({
   useEffect(() => {
     const series = seriesRef.current as unknown as ISeriesApi<"Candlestick"> | null;
     if (!series) return;
-    for (const l of linesRef.current) {
-      if ((l as unknown as { title?: string }).title?.startsWith("CD:")) {
-        series.removePriceLine(l);
-      }
-    }
-    linesRef.current = linesRef.current.filter(
-      (l) => !(l as unknown as { title?: string }).title?.startsWith("CD:")
-    );
+    // Price-line objects expose options(), not a public `title` property.
+    // Own overlay lines separately so refreshes never accumulate old badges
+    // or remove drawings/support-resistance from the unrelated base layer.
+    for (const line of overlayLinesRef.current) series.removePriceLine(line);
+    overlayLinesRef.current = [];
 
     if (!showStrategyOverlay || !strategyOverlay) return;
     const cdMode: LabelMode = labelModeRef.current;
@@ -373,9 +377,9 @@ export default function ChartPanel({
       if (!Number.isFinite(price) || price <= 0) return;
       const line = series.createPriceLine({
         price, color: colorV, lineWidth: 1, lineStyle: style,
-        axisLabelVisible: true, title,
+        axisLabelVisible: showAllLabels, title,
       });
-      linesRef.current.push(line);
+      overlayLinesRef.current.push(line);
     };
 
     if (strategyOverlay.chandelierLongStop !== null) {
@@ -384,18 +388,19 @@ export default function ChartPanel({
     if (strategyOverlay.chandelierShortStop !== null) {
       addCd(strategyOverlay.chandelierShortStop, "rgba(240,82,79,0.7)", 2, cdMode === "full" ? CHANDELIER_SHORT.axisFull ?? CHANDELIER_SHORT.full : CHANDELIER_SHORT.compact);
     }
-    for (const [period, data] of Object.entries(strategyOverlay.donchianPeriods)) {
-      const upper = donchianBound(Number(period), "upper");
-      const lower = donchianBound(Number(period), "lower");
-      if (Number.isFinite(data.upper)) addCd(data.upper, "rgba(87,230,210,0.4)", 0, cdMode === "full" ? upper.axisFull ?? upper.full : upper.compact);
-      if (Number.isFinite(data.lower)) addCd(data.lower, "rgba(154,178,206,0.4)", 0, cdMode === "full" ? lower.axisFull ?? lower.full : lower.compact);
+    for (const group of groupDonchianBounds(strategyOverlay.donchianPeriods)) {
+      const suffix = group.bound === "upper" ? "U" : "L";
+      const periods = group.periods.join("/");
+      const title = cdMode === "full" ? `DONCHIAN ${periods} ${group.bound.toUpperCase()}` : `CD:D${periods}-${suffix}`;
+      addCd(group.price, group.bound === "upper" ? "rgba(87,230,210,0.4)" : "rgba(154,178,206,0.4)", 0, title);
     }
-  }, [strategyOverlay, showStrategyOverlay, ready, labelMode]);
+  }, [strategyOverlay, showStrategyOverlay, ready, labelMode, showAllLabels]);
 
   /* ---------------- markers (structure + signal) ---------------- */
   useEffect(() => {
     const series = seriesRef.current as unknown as ISeriesApi<"Candlestick"> | null;
-    if (!series || !analysis || !markersRef.current) return;
+    if (!series || !markersRef.current) return;
+    if (!analysis) { markersRef.current.setMarkers([]); return; }
     const markers: SeriesMarker<LTime>[] = [];
     if (settings.modules.marketStructure !== false) {
       for (const s of analysis.swings.slice(-6)) {
@@ -410,7 +415,7 @@ export default function ChartPanel({
         });
       }
     }
-    const primary = analysis.signals.find((s) => s.entry !== null);
+    const primary = activeChartSignal(analysis.signals);
     const candles = candlesRef.current;
     if (primary && candles.length > 1) {
       const lastClosed = candles[candles.length - 2];
@@ -548,7 +553,7 @@ export default function ChartPanel({
       const onUp = () => {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
-        void api.patch("/api/drawings", { id: orig.id, points: moved }).catch(() => undefined);
+        void api.patch("/api/drawings", { id: orig.id, points: moved, symbol, timeframe, chartType: chartType === "heikin-ashi" ? "heikin-ashi" : "candles" }).catch(() => undefined);
       };
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
@@ -570,7 +575,7 @@ export default function ChartPanel({
       el.removeEventListener("pointermove", onHoverMove);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, interactive]);
+  }, [ready, interactive, symbol, timeframe, chartType]);
 
   function setDrawingsLive(id: string, points: { time: number; price: number }[]) {
     setDrawings((prev) => prev.map((d) => (d.id === id ? { ...d, points } : d)));
@@ -578,7 +583,7 @@ export default function ChartPanel({
 
   function baseDrawing(type: DrawingType, points: Drawing["points"]): Drawing {
     return {
-      symbol, timeframe, layout: "default", type, points,
+      symbol, timeframe, layout: drawingLayout, type, points,
       color: colorRef.current, width: 2, opacity: 1,
       locked: false, hidden: false, label: "", note: "",
     };
@@ -596,12 +601,12 @@ export default function ChartPanel({
   async function deleteDrawing(id: string) {
     setDrawings((prev) => prev.filter((d) => d.id !== id));
     if (selectedId === id) setSelectedId(null);
-    await api.del(`/api/drawings?id=${id}`).catch(() => undefined);
+    await api.del(`/api/drawings?id=${id}&symbol=${symbol}&timeframe=${timeframe}&chartType=${chartType === "heikin-ashi" ? "heikin-ashi" : "candles"}`).catch(() => undefined);
   }
 
   async function patchDrawing(id: string, patch: Partial<Drawing>) {
     setDrawings((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
-    await api.patch("/api/drawings", { id, ...patch }).catch(() => undefined);
+    await api.patch("/api/drawings", { id, ...patch, symbol, timeframe, chartType: chartType === "heikin-ashi" ? "heikin-ashi" : "candles" }).catch(() => undefined);
   }
 
   // Delete key removes the selected object
@@ -626,11 +631,19 @@ export default function ChartPanel({
   );
 
   return (
-    <div className={cx("flex flex-col min-h-0 h-full", className)}>
-      <div className="flex flex-col md:flex-row min-h-0 flex-1">
+    <div data-chart-type={chartType} data-price-labels={showAllLabels ? "all" : "essential"} className={cx("flex flex-col min-h-0", surfaceHeight === undefined && "h-full", className)}>
+      <div className="chart-local-controls">
+        <label className="inline-flex items-center gap-2">Timeframe
+          <select aria-label="Chart timeframe" value={timeframe} onChange={event => setTimeframe(event.target.value as Timeframe)} className="bg-panel2 border border-edge rounded px-2 py-1 text-ink">
+            {TIMEFRAMES.map(tf => <option key={tf} value={tf}>{tf}</option>)}
+          </select>
+        </label>
+        <button type="button" className="text-accent" aria-pressed={showAllLabels} onClick={() => setShowAllLabels(value => !value)}>{showAllLabels ? "Essential price labels" : "All price labels"}</button>
+      </div>
+      <div className={cx("chart-plot-frame flex flex-col md:flex-row min-h-0", surfaceHeight === undefined ? "flex-1" : "flex-none")} style={surfaceHeight === undefined ? undefined : { height: surfaceHeight }}>
       {/* tool strip: a scrollable bar above the chart on phones, a rail from md up */}
       {interactive && (
-        <div className="flex md:flex-col gap-1 p-1.5 border-b md:border-b-0 md:border-r border-edge flex-none overflow-x-auto md:overflow-y-auto max-w-full" role="toolbar" aria-label="Drawing tools">
+        <div className="flex md:flex-col md:w-11 md:min-w-11 gap-1 p-1.5 border-b md:border-b-0 md:border-r border-edge flex-none overflow-x-auto md:overflow-y-auto max-w-full" role="toolbar" aria-label="Drawing tools">
           {TOOL_DEFS.map((t) => {
             const Icon = t.icon;
             return (
@@ -672,33 +685,6 @@ export default function ChartPanel({
           >
             <CandlestickChart size={14} />
           </button>
-          <div className="hidden md:block border-t border-edge my-1 mx-1" />
-          <button
-            onClick={() => setShowStrategyOverlay((v) => !v)}
-            title="Toggle Chandelier + Donchian overlay"
-            aria-label="Toggle strategy overlay"
-            aria-pressed={showStrategyOverlay}
-            className={cx(
-              "p-1.5 rounded flex-none",
-              showStrategyOverlay ? "bg-accent-dim text-accent" : "text-dim hover:text-ink hover:bg-panel2"
-            )}
-          >
-            <CandlestickChart size={14} />
-          </button>
-          <div className="hidden md:block border-t border-edge my-1 mx-1" />
-          {!lockChartType && (
-          <div className="flex items-center gap-1 p-1">
-            <span className="text-[9px] text-dim">CHART</span>
-            <select
-              value={chartType}
-              onChange={(e) => setChartTypeChoice(e.target.value as ChartType)}
-              className="bg-bg2 border border-edge rounded px-1.5 h-6 text-[10px] text-ink outline-none focus:border-accent/50"
-            >
-              <option value="candlestick">Candlestick</option>
-              <option value="heikin-ashi">Heikin Ashi</option>
-            </select>
-          </div>
-          )}
           <div className="hidden md:block border-t border-edge my-1 mx-1" />
           <button
             onClick={() => selectedId && void deleteDrawing(selectedId)}
@@ -771,7 +757,7 @@ export default function ChartPanel({
           once when the viewport is first measured so a phone starts collapsed. */}
       <ChartLegend
         key={viewport.ready ? viewport.device : "initial"}
-        defaultOpen={!viewport.ready || !(viewport.device === "mobile" && viewport.orientation === "portrait")}
+        defaultOpen={false}
         rows={legendRows}
         mode={labelMode}
         onModeChange={(mode) => void patchSettings({ chartLabelMode: mode })}
@@ -830,7 +816,7 @@ function buildLegendRows(
       });
     }
   }
-  const primary = analysis?.signals.find((sig) => sig.entry !== null);
+  const primary = activeChartSignal(analysis?.signals);
   if (primary) {
     if (primary.entry) rows.push({ id: "sig-entry", kind: "signal", label: ENTRY.full, value: primary.entry, help: "entryLevel" });
     if (primary.stop) rows.push({ id: "sig-stop", kind: "signal", label: STOP.full, value: primary.stop, help: "stopLevel" });

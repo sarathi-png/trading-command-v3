@@ -19,7 +19,7 @@ export default function OrdersPage() {
   const ticker = useMarket((s) => s.tickers[activeSymbol]);
   const { data, refresh } = usePoll(
     () => api.get<{ orders: PaperOrder[]; positions: (PaperPosition & { upl: number })[] }>("/api/paper"),
-    5000
+    5000, { enabled: settings.mode === "paper" }
   );
 
   const [side, setSide] = useState<"buy" | "sell">("buy");
@@ -95,7 +95,7 @@ export default function OrdersPage() {
   return (
     <div className="p-4 lg:p-6 space-y-4 page-shell">
       <PageHeader crumb="TRADING / ORDERS" title="Order desk"
-        description="Place paper orders, review the working book and keep the ticket separate from your analysis." />
+        description="Order entry for your selected workspace only. Review the execution mode before submitting." />
       <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-4">
       {/* order ticket */}
       <PremiumPanel title="ORDER TICKET" badge={
@@ -191,6 +191,7 @@ export default function OrdersPage() {
 
       {/* open orders + history */}
       <div className="space-y-3 min-w-0">
+        {liveMode ? <PremiumPanel title="LIVE EXECUTION"><div className="p-4 text-sm text-mut">Live submissions are sent only after confirmation and safety checks. Review imported CoinDCX fills in the Live journal; paper orders are not displayed here. This panel does not provide a complete live working-order book.</div></PremiumPanel> : <>
         <PremiumPanel title="OPEN ORDERS" badge={<span className="text-[9px] num text-dim">{openOrders.length}</span>}>
           {settings.mode === "read_only" ? (
             <EmptyState title="No order entry in read-only mode" hint="Switch to PAPER mode to place simulated orders." />
@@ -215,6 +216,7 @@ export default function OrdersPage() {
             <OrderRows orders={history} />
           )}
         </PremiumPanel>
+        </>}
       </div>
 
       {/* live confirmation */}

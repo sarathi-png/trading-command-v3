@@ -338,7 +338,7 @@ test("Vercel ↔ CoinDCX boundary, paper isolation and live-order safety", { tim
     assert.ok(cookie);
 
     const request = (route, options = {}) =>
-      fetch(`${url}${route}`, { ...options, headers: { ...options.headers, cookie } });
+      fetch(`${url}${route}`, { ...options, headers: { ...options.headers, cookie, authorization: "Bearer boundary-test-password" } });
     const json = async (route, body, method = "POST") =>
       (
         await request(route, {

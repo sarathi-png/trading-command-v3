@@ -20,7 +20,7 @@ export type AiFailureKind = "not-configured" | "rate-limited" | "auth" | "networ
 
 export type AiCallResult =
   | { ok: true; raw: unknown; model: string; latencyMs: number }
-  | { ok: false; kind: AiFailureKind; error: string; model: string; latencyMs: number };
+  | { ok: false; kind: AiFailureKind; error: string; model: string; latencyMs: number; retryableModel?: boolean };
 
 export interface CallOptions {
   apiKey: string;
@@ -31,12 +31,13 @@ export interface CallOptions {
 }
 
 function classifyStatus(status: number, body: string): { kind: AiFailureKind; error: string } {
-  const snippet = body.replace(/\s+/g, " ").slice(0, 200);
-  if (status === 401 || status === 403) return { kind: "auth", error: `Provider rejected the API key (HTTP ${status}). ${snippet}` };
-  if (status === 429) return { kind: "rate-limited", error: `Provider rate limit reached (HTTP 429). ${snippet}` };
-  if (status === 402) return { kind: "auth", error: `Provider reports insufficient credit (HTTP 402). ${snippet}` };
-  if (status >= 500) return { kind: "network", error: `Provider error (HTTP ${status}). ${snippet}` };
-  return { kind: "bad-output", error: `Unexpected provider response (HTTP ${status}). ${snippet}` };
+  // Never expose upstream bodies: they can include account IDs and request metadata.
+  if (status === 401 || status === 403) return { kind: "auth", error: `Provider rejected the API key (HTTP ${status}). Check credentials.` };
+  if (status === 429) return { kind: "rate-limited", error: "Provider quota reached. Waiting before another request." };
+  if (status === 402) return { kind: "auth", error: "Provider credit unavailable. Paid fallback is disabled." };
+  if (status >= 500) return { kind: "network", error: `Provider temporarily unavailable (HTTP ${status}).` };
+  void body;
+  return { kind: "bad-output", error: `Model unavailable or incompatible (HTTP ${status}).` };
 }
 
 /** Call one provider and return the raw parsed JSON the model produced. */
@@ -75,6 +76,7 @@ export async function callProvider(
     // Free endpoints honour this on some models and ignore it on others; the
     // validator is what actually guarantees shape, so this is a hint only.
     response_format: { type: "json_object" },
+    ...(provider === "openrouter" ? { provider: { max_price: { prompt: 0, completion: 0 } } } : {}),
   };
 
   const controller = new AbortController();
@@ -90,7 +92,7 @@ export async function callProvider(
     const latencyMs = Date.now() - started;
     if (!res.ok) {
       const { kind, error } = classifyStatus(res.status, text);
-      return { ok: false, kind, error, model, latencyMs };
+      return { ok: false, kind, error, model, latencyMs, retryableModel: [404, 410].includes(res.status) || (res.status === 429 && /model/i.test(text) && !/account|daily|credit|global/i.test(text)) };
     }
     let payload: unknown;
     try {
@@ -119,7 +121,7 @@ export async function callProvider(
     return {
       ok: false,
       kind: aborted ? "timeout" : "network",
-      error: aborted ? "Provider did not answer in time" : `Network error: ${e instanceof Error ? e.message : "unknown"}`,
+      error: aborted ? "Provider did not answer in time" : "Provider network unavailable. Using technical rules.",
       model,
       latencyMs,
     };

@@ -1,9 +1,9 @@
 "use client";
+import ConnectionStatus from "@/components/ConnectionStatus";
 import { useState, useSyncExternalStore } from "react";
 import { KeyRound, LogOut, ShieldAlert } from "lucide-react";
 import { Btn, Chip, HelpTip, Input, KV, Panel, Select, StatusDot, Toggle, useConfirm } from "@/components/ui";
 import NotificationSettings from "@/components/NotificationSettings";
-import AiSettingsPanel from "@/components/AiSettingsPanel";
 import { api, logout } from "@/lib/api";
 import { cx, fmtDateTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -99,24 +99,6 @@ export default function SettingsPage() {
     } finally {
       setCredBusy(false);
     }
-  };
-
-  const setMode = async (mode: AppSettings["mode"]) => {
-    if (mode === "live" && !caps?.liveExecution) {
-      notify({ title: "LIVE mode unavailable", body: "Set LIVE_EXECUTION_ENABLED=true in the server environment first.", tone: "warn" });
-      return;
-    }
-    if (mode === "live") {
-      const ok = await confirm({
-        title: "Switch to LIVE mode?",
-        danger: true,
-        confirmLabel: "Switch to LIVE",
-        body: "LIVE mode routes order entry toward the exchange adapter. Orders still cannot execute until the master switch is armed, and live execution additionally requires server configuration.",
-      });
-      if (!ok) return;
-    }
-    await patchSettings({ mode, ...(mode !== "live" ? { liveArmed: false } : {}) });
-    notify({ title: "Mode changed", body: `Execution mode is now ${mode.replace("_", " ").toUpperCase()}`, tone: "info" });
   };
 
   const toggleArm = async () => {
@@ -244,7 +226,7 @@ export default function SettingsPage() {
       </Panel>
 
       {/* execution */}
-      <AiSettingsPanel />
+      <a className="panel block p-4 text-accent text-sm" href="/ai-connection">AI connection & free-model discovery →</a>
       <NotificationSettings />
 
       <Panel title="EXECUTION" badge={
@@ -254,19 +236,10 @@ export default function SettingsPage() {
         <div className="p-3 space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="microlabel w-28">MODE</span>
-            {(["read_only", "paper", "live"] as const).map((m) => (
-              <button key={m} onClick={() => void setMode(m)}
-                disabled={m === "live" && !caps?.liveExecution}
-                className={cx("h-7 px-3 rounded border text-[10px] tracking-wider uppercase disabled:opacity-40",
-                  settings.mode === m
-                    ? m === "live" ? "border-dn/60 text-dn bg-dn/10" : m === "paper" ? "border-warn/60 text-warn bg-warn/10" : "border-accent/60 text-accent bg-accent-dim"
-                    : "border-edge text-mut hover:text-ink")}>
-                {m.replace("_", " ")}
-              </button>
-            ))}
+            <span className="text-sm">{settings.mode === "live" ? "Live workspace" : "Paper workspace"} · use Switch workspace to change profiles.</span>
           </div>
           {caps && !caps.liveExecution && (
-            <p className="text-[10px] text-dim">LIVE mode requires <span className="num">LIVE_EXECUTION_ENABLED=true</span> in the server environment.</p>
+            <p className="text-[10px] text-dim">Live order execution requires <span className="num">LIVE_EXECUTION_ENABLED=true</span> in the server environment.</p>
           )}
           <div className="border-t border-edge pt-3 flex items-center justify-between">
             <div>
@@ -339,15 +312,15 @@ export default function SettingsPage() {
       </Panel>
 
       {/* exchange api — credentials live in the deployment environment */}
-      <Panel
+      {settings.mode === "live" && <Panel
         title="EXCHANGE API · COINDCX FUTURES"
         badge={
           creds?.configured ? (
-            <Chip tone="up">CONFIGURED</Chip>
+            <ConnectionStatus configured label="CoinDCX keys" />
           ) : creds?.misconfigured ? (
-            <Chip tone="warn">MISCONFIGURED</Chip>
+            <ConnectionStatus configured={false} label="CoinDCX keys incomplete" />
           ) : (
-            <Chip>NOT CONFIGURED</Chip>
+            <ConnectionStatus configured={creds ? false : null} label="CoinDCX keys" />
           )
         }
       >
@@ -421,7 +394,7 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
-      </Panel>
+      </Panel>}
 
       {/* tradingview */}
       <TradingViewPanel

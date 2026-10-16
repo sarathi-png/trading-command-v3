@@ -23,7 +23,7 @@ function cumulativePnl(entries: Row[]): number[] {
 
 export default function AnalyticsPage() {
   useDisplayCurrency();
-  const { data, loading } = usePoll(() => api.get<{ entries: Row[] }>("/api/journal?mode=paper"), 60000);
+  const { data, loading } = usePoll(() => api.get<{ entries: Row[] }>("/api/journal"), 60000);
 
   const closed = useMemo(
     () => (data?.entries ?? []).filter((e) => e.exit !== null && e.closedAt).sort(

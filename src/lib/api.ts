@@ -1,3 +1,4 @@
+import { workspaceSelection, selectWorkspace } from "./workspaceClient";
 import { previewSession, setPreviewSession } from "./previewSession";
 
 /** Client-side fetch helpers with uniform error handling. */
@@ -10,11 +11,12 @@ export class ApiError extends Error {
 
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   let res: Response;
+  const workspace = workspaceSelection();
   const token = url.startsWith("/api/") ? previewSession() : null;
   try {
     res = await fetch(url, {
       method,
-      headers: { ...(body !== undefined ? { "Content-Type": "application/json" } : {}), ...(token ? { "X-TC-Preview-Session": token } : {}) },
+      headers: { ...(workspace ? { "X-TC-Workspace": workspace } : {}), ...(body !== undefined ? { "Content-Type": "application/json" } : {}), ...(token ? { "X-TC-Preview-Session": token } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       cache: "no-store",
     });
@@ -55,6 +57,7 @@ export const api = {
  * `auth:unauthorized` so the shell does not stay on a logged-in screen.
  */
 export async function logout(): Promise<void> {
+  selectWorkspace(null);
   setPreviewSession(null);
   try {
     await fetch("/api/auth/logout", { method: "POST", cache: "no-store" });

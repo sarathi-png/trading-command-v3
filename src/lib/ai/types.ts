@@ -84,6 +84,8 @@ export interface AiPrediction {
   provider: AiProviderId;
   model: string;
   direction: AiDirection;
+  /** Validated model answer before the technical safety veto. Absent on legacy rows/rule fallback. */
+  modelDecision?: { direction: AiDirection; rationale: string; confidence: number };
   /** Self-reported confidence, 0-100. Not a probability. */
   confidence: number;
   /** How many 5m candles ahead the call is meant to hold. */

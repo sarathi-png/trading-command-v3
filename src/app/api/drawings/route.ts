@@ -1,3 +1,4 @@
+import { chartDrawingLayout, drawingBelongsToChart, type ChartScope } from "@/lib/chartScope";
 import { getRepo } from "@/lib/repo";
 import type { DrawingRow } from "@/lib/repo";
 import type { Drawing, DrawingType, Timeframe } from "@/lib/types";
@@ -17,10 +18,11 @@ function parseDrawing(body: Record<string, unknown>): Omit<Drawing, "id"> | null
   for (const p of points) {
     if (typeof p?.time !== "number" || typeof p?.price !== "number") return null;
   }
+  const chartType = body.chartType === "heikin-ashi" || body.layout === "chart:heikin-ashi" ? "heikin-ashi" : "candles";
   return {
     symbol: String(body.symbol ?? "").toUpperCase(),
     timeframe: String(body.timeframe ?? "15m") as Timeframe,
-    layout: String(body.layout ?? "default"),
+    layout: chartDrawingLayout(chartType),
     type,
     points,
     color: typeof body.color === "string" ? body.color : "#57E6D2",
@@ -40,7 +42,9 @@ export async function GET(req: Request) {
   if (!symbol || !timeframe) {
     return Response.json({ error: "symbol and timeframe are required" }, { status: 400 });
   }
-  const rows = await (await getRepo()).listDrawings(symbol, timeframe);
+  const chartType = url.searchParams.get("chartType") ?? "candles";
+  if (chartType !== "candles" && chartType !== "heikin-ashi") return Response.json({ error: "Unsupported chart type" }, { status: 400 });
+  const rows = (await (await getRepo()).listDrawings(symbol, timeframe)).filter(row => drawingBelongsToChart(row.layout, chartType));
   return Response.json({ drawings: rows });
 }
 
@@ -69,6 +73,11 @@ export async function PATCH(req: Request) {
   }
   const id = String(body.id ?? "");
   if (!id) return Response.json({ error: "id required" }, { status: 400 });
+  if (typeof body.symbol === "string" && typeof body.timeframe === "string") {
+    const scope: ChartScope = body.chartType === "heikin-ashi" ? "heikin-ashi" : "candles";
+    const own = (await (await getRepo()).listDrawings(body.symbol, body.timeframe)).some(row => row.id === id && drawingBelongsToChart(row.layout, scope));
+    if (!own) return Response.json({ error: "Drawing not found in this chart" }, { status: 404 });
+  }
   const patch: Partial<DrawingRow> = {};
   for (const k of ["color", "label", "note"] as const) {
     if (typeof body[k] === "string") patch[k] = body[k];
@@ -92,6 +101,12 @@ export async function DELETE(req: Request) {
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
   if (!id) return Response.json({ error: "id required" }, { status: 400 });
+  const symbol = url.searchParams.get("symbol"), timeframe = url.searchParams.get("timeframe");
+  if (symbol && timeframe) {
+    const scope = url.searchParams.get("chartType") === "heikin-ashi" ? "heikin-ashi" : "candles";
+    const own = (await (await getRepo()).listDrawings(symbol, timeframe)).some(row => row.id === id && drawingBelongsToChart(row.layout, scope));
+    if (!own) return Response.json({ error: "Drawing not found in this chart" }, { status: 404 });
+  }
   await (await getRepo()).deleteDrawing(id);
   return Response.json({ ok: true });
 }

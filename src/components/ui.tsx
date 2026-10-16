@@ -86,7 +86,7 @@ export function StatusDot({
     : tone === "accent" ? "text-accent" : "text-dim";
   return (
     <span className={cx("inline-flex items-center gap-1.5", color)} aria-label={label}>
-      <span className={cx("dot bg-current", (pulse ?? tone === "ok") && "dot-live", pulse && "pulse-soft")} />
+      <span className={cx("dot bg-current", (pulse || tone === "ok" || tone === "err") && "dot-live", pulse && "pulse-soft")} />
     </span>
   );
 }

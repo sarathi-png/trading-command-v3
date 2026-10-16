@@ -17,6 +17,22 @@ const DEMO_LEVERAGE = 10;
 
 export async function getAccountState(): Promise<AccountState> {
   const settings = await getSettings();
+  if (settings.mode === "live") {
+    if (!(await exchangeAccountConfigured())) throw new Error("Live account unavailable: configure CoinDCX credentials. No paper balances are shown.");
+    const [balances, positions] = await Promise.all([liveBalances(), livePositions()]);
+    const wallet = balances.find(b => ["USDT", "USD", "USDC"].includes(b.asset));
+    if (!wallet) throw new Error("Live USD account balance unavailable. No simulated balance is substituted.");
+    const openPnl = positions.reduce((sum, p) => sum + p.upl, 0);
+    // Use only the live wallet's reported available balance; never paper margin.
+    const repo = await getRepo();
+    const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
+    return {
+      equity: wallet.balance + openPnl, availableMargin: wallet.available, marginUsed: Math.max(0, wallet.balance - wallet.available),
+      openPnl, todayPnl: await repo.sumJournalPnl({ mode: "live", closedSince: dayStart }),
+      realizedTotal: await repo.sumJournalPnl({ mode: "live" }), startingBalance: 0,
+      source: "live", positions: positions.map(p => ({ ...p, source: "live" as const })),
+    };
+  }
   const symbolsInUse = new Set<string>();
   const paperPre = await getPaperState(new Map());
   for (const p of paperPre.positions) symbolsInUse.add(p.symbol);
@@ -52,47 +68,6 @@ export async function getAccountState(): Promise<AccountState> {
     source: "paper" as const,
   }));
 
-  let source: "demo" | "live" = "demo";
-  if (settings.dataSource === "live" && (await exchangeAccountConfigured())) {
-    // Wallet and positions are fetched independently: if the positions query
-    // fails (no open positions / endpoint hiccup) the real balance must still
-    // show — previously one failure in Promise.all dropped everything to demo.
-    // CoinDCX futures balances are denominated in the margin currency (USDT);
-    // INR-margined accounts report INR, which is surfaced rather than converted
-    // silently.
-    let usdBalance: number | null = null;
-    try {
-      const balances = await liveBalances();
-      const margin = balances.find((b) => b.asset === "USDT" || b.asset === "USD" || b.asset === "USDC");
-      if (margin) usdBalance = margin.balance;
-    } catch {
-      usdBalance = null;
-    }
-    if (usdBalance !== null) {
-      let livePos: Awaited<ReturnType<typeof livePositions>> = [];
-      try {
-        livePos = await livePositions();
-      } catch {
-        livePos = []; // wallet still valid; positions shown as unavailable
-      }
-      source = "live";
-      const liveUpl = livePos.reduce((a, p) => a + p.upl, 0);
-      return {
-        equity: usdBalance + liveUpl,
-        availableMargin: Math.max(0, usdBalance - marginUsed),
-        marginUsed,
-        openPnl: openPnl + liveUpl,
-        todayPnl,
-        realizedTotal,
-        startingBalance: settings.startingBalance,
-        source,
-        positions: [
-          ...positions,
-          ...livePos.map((p) => ({ ...p, source: "live" as const })),
-        ],
-      };
-    }
-  }
 
   return {
     equity,
@@ -102,7 +77,7 @@ export async function getAccountState(): Promise<AccountState> {
     todayPnl,
     realizedTotal,
     startingBalance: settings.startingBalance,
-    source,
+    source: "demo",
     positions,
   };
 }
