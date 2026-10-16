@@ -117,7 +117,7 @@ export default function AiSettingsPanel() {
             />
           </div>
           <div className="flex items-center justify-between">
-            <span>Run automatically once per 5m bar</span>
+            <span>Run automatically when the chart or symbol changes</span>
             <Toggle
               checked={ai.autoRun}
               onChange={(v) => void patchSettings({ aiPrediction: { ...ai, autoRun: v } })}
