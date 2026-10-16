@@ -11,6 +11,8 @@ import type {
   Timeframe, TrendState,
 } from "../types";
 
+export interface Cluster { price: number; touches: number; strength: number; lastTouch: number }
+
 export interface StrategyContext {
   symbol: string;
   timeframe: Timeframe;
@@ -18,6 +20,7 @@ export interface StrategyContext {
   trend: TrendState;
   structure: StructurePoint[];
   levels: SRLevel[];
+  clusters: Cluster[];
   breakoutLevels?: SRLevel[];
   emaFast: number;
   emaSlow: number;
@@ -153,10 +156,11 @@ export function buildAnalysis(
   else if (bear >= 2 && bull === 0 && emaFast < emaSlow) trend = "BEARISH";
   else if (bull >= 1 && bear >= 1) trend = "RANGE";
 
-  const levels = findLevels(window, swingsRaw, lastClose, opts);
+  const clusters = clusterLevels(window, swingsRaw, opts);
+  const levels = classifyLevels(clusters, lastClose);
 
   const ctx: StrategyContext = {
-    symbol, timeframe, candles, trend, structure, levels,
+    symbol, timeframe, candles, trend, structure, levels, clusters,
     breakoutLevels: findLevels(window.slice(0, -1), detectSwings(window.slice(0, -1), 2), candles.at(-2)?.close ?? 0, opts),
     emaFast, emaSlow, lastClose, lastTime: last?.time ?? Math.floor(Date.now() / 1000),
   };
@@ -177,13 +181,14 @@ export function buildAnalysis(
   };
 }
 
-export function findLevels(
+/** Side-agnostic price clusters from confirmed swings. */
+export function clusterLevels(
   window: Candle[],
   swings: Swing[],
-  price: number,
   opts: StructureOptions
-): SRLevel[] {
-  const tol = price * opts.sensitivity;
+): Cluster[] {
+  const ref = window[window.length - 1]?.close ?? 0;
+  const tol = ref * opts.sensitivity;
   const clusters: { sum: number; n: number; last: number }[] = [];
   for (const s of swings) {
     let hit = false;
@@ -199,28 +204,38 @@ export function findLevels(
     if (!hit) clusters.push({ sum: s.price, n: 1, last: s.time });
   }
   const lastTime = window[window.length - 1]?.time ?? 0;
-  const levels: SRLevel[] = clusters
+  return clusters
     .filter((c) => c.n >= opts.minTouches)
-    .map((c) => {
-      const lvl = c.sum / c.n;
-      const recency = Math.max(0.35, 1 - (lastTime - c.last) / (40 * 3600));
-      return {
-        price: lvl,
-        kind: lvl < price ? ("support" as const) : ("resistance" as const),
-        touches: c.n,
-        strength: Math.min(1, (c.n / 4) * 0.6 + recency * 0.4),
-        lastTouch: c.last,
-      };
-    });
-  const support = levels
-    .filter((l) => l.kind === "support")
-    .sort((a, b) => b.strength - a.strength)
-    .slice(0, 3);
-  const resistance = levels
-    .filter((l) => l.kind === "resistance")
-    .sort((a, b) => b.strength - a.strength)
-    .slice(0, 3);
+    .map((c) => ({
+      price: c.sum / c.n,
+      touches: c.n,
+      strength: Math.min(1, (c.n / 4) * 0.6 + Math.max(0.35, 1 - (lastTime - c.last) / (40 * 3600)) * 0.4),
+      lastTouch: c.last,
+    }));
+}
+
+/** Classify clusters as support/resistance relative to a reference price; keep the 3 strongest per side. */
+export function classifyLevels(clusters: Cluster[], price: number): SRLevel[] {
+  const toLevel = (c: Cluster): SRLevel => ({
+    price: c.price,
+    kind: c.price < price ? "support" : "resistance",
+    touches: c.touches,
+    strength: c.strength,
+    lastTouch: c.lastTouch,
+  });
+  const all = clusters.map(toLevel);
+  const support = all.filter((l) => l.kind === "support").sort((a, b) => b.strength - a.strength).slice(0, 3);
+  const resistance = all.filter((l) => l.kind === "resistance").sort((a, b) => b.strength - a.strength).slice(0, 3);
   return [...support, ...resistance].sort((a, b) => b.price - a.price);
+}
+
+export function findLevels(
+  window: Candle[],
+  swings: Swing[],
+  price: number,
+  opts: StructureOptions
+): SRLevel[] {
+  return classifyLevels(clusterLevels(window, swings, opts), price);
 }
 
 /* ---------------- strategies ---------------- */
@@ -283,41 +298,60 @@ export const trendStrategy: StrategyDef = {
 export const breakoutStrategy: StrategyDef = {
   id: "breakout",
   name: "Level Breakout",
-  description: "Detects closes beyond the strongest detected support/resistance clusters.",
+  description: "Fires when a closed candle crosses a detected cluster (prev close on one side, last close on the other). Rejects chases beyond 0.5%.",
   evaluate(ctx) {
     const c = ctx.lastClose;
-    const priorClose = ctx.candles.at(-2)?.close ?? c;
-    const levels = ctx.breakoutLevels ?? ctx.levels;
-    const res = levels.filter((l) => l.kind === "resistance").sort((a, b) => a.price - b.price)[0];
-    const sup = levels.filter((l) => l.kind === "support").sort((a, b) => b.price - a.price)[0];
-    if (res && priorClose <= res.price && c > res.price) {
-      const stop = res.price * 0.998;
+    const n = ctx.candles.length;
+    const prev = n >= 2 ? ctx.candles[n - 2].close : c;
+    const maxChase = 0.005;
+
+    // Upward cross: prev <= level < last close. Strongest qualifying cluster wins.
+    const up = ctx.clusters
+      .filter((l) => prev <= l.price && l.price < c)
+      .sort((a, b) => b.strength - a.strength)[0];
+    if (up) {
+      if ((c - up.price) / up.price > maxChase) {
+        return sig(ctx, "breakout", "WATCH", [
+          `Crossed ${up.price.toFixed(2)} but price already ${(((c - up.price) / up.price) * 100).toFixed(2)}% beyond it — chase rejected`,
+        ]);
+      }
+      const stop = up.price * 0.998;
       const entry = c;
-      const target = entry + 1.5 * (entry - stop);
+      const target = entry + 2 * (entry - stop);
       return sig(ctx, "breakout", "LONG_SETUP", [
-        `Close above resistance ${res.price.toFixed(2)} (${res.touches} touches)`,
-        "Breakout condition met on a closed candle",
+        `Closed above resistance ${up.price.toFixed(2)} (${up.touches} touches) — crossed on the last bar`,
       ], { entry, stop, target });
     }
-    if (res && near(c, res.price, 0.0035) && c <= res.price) {
+
+    // Downward cross: prev >= level > last close.
+    const down = ctx.clusters
+      .filter((l) => prev >= l.price && l.price > c)
+      .sort((a, b) => b.strength - a.strength)[0];
+    if (down) {
+      if ((down.price - c) / down.price > maxChase) {
+        return sig(ctx, "breakout", "WATCH", [
+          `Crossed ${down.price.toFixed(2)} downward but price already beyond it — chase rejected`,
+        ]);
+      }
+      const stop = down.price * 1.002;
+      const entry = c;
+      const target = entry - 2 * (stop - entry);
+      return sig(ctx, "breakout", "SHORT_SETUP", [
+        `Closed below support ${down.price.toFixed(2)} (${down.touches} touches) — crossed on the last bar`,
+      ], { entry, stop, target });
+    }
+
+    // Pressing a level without crossing yet.
+    const nearAbove = ctx.clusters.filter((l) => l.price >= c && near(c, l.price, 0.0035)).sort((a, b) => a.price - b.price)[0];
+    if (nearAbove) {
       return sig(ctx, "breakout", "WATCH", [
-        `Price is pressing resistance ${res.price.toFixed(2)} (${res.touches} touches)`,
-        "Breakout not confirmed — no close above the level yet",
+        `Pressing resistance ${nearAbove.price.toFixed(2)} (${nearAbove.touches} touches) — no close through it yet`,
       ]);
     }
-    if (sup && priorClose >= sup.price && c < sup.price) {
-      const stop = sup.price * 1.002;
-      const entry = c;
-      const target = entry - 1.5 * (stop - entry);
-      return sig(ctx, "breakout", "SHORT_SETUP", [
-        `Close below support ${sup.price.toFixed(2)} (${sup.touches} touches)`,
-        "Breakdown condition met on a closed candle",
-      ], { entry, stop, target });
-    }
-    if (sup && near(c, sup.price, 0.0035) && c >= sup.price) {
+    const nearBelow = ctx.clusters.filter((l) => l.price <= c && near(c, l.price, 0.0035)).sort((a, b) => b.price - a.price)[0];
+    if (nearBelow) {
       return sig(ctx, "breakout", "WATCH", [
-        `Price is testing support ${sup.price.toFixed(2)} (${sup.touches} touches)`,
-        "Breakdown not confirmed — no close below the level yet",
+        `Testing support ${nearBelow.price.toFixed(2)} (${nearBelow.touches} touches) — no close through it yet`,
       ]);
     }
     return sig(ctx, "breakout", "WAIT", ["Price is inside the detected range"]);
