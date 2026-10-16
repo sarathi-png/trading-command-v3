@@ -27,7 +27,7 @@ export function SignalPanel({ analysis, className }: { analysis: Analysis | null
   useDisplayCurrency();
   const primary = analysis?.signals.find((s) => s.entry !== null) ?? analysis?.signals[0] ?? null;
   return (
-    <Panel title="STRATEGY SIGNAL" className={className} badge={analysis && (
+    <Panel title="STRATEGY SIGNAL · TREND / BREAKOUT / S&R" className={className} badge={analysis && (
       <span className="text-[9px] text-dim num">EVAL {new Date(analysis.evaluatedAt).toLocaleTimeString("en-GB", { hour12: false })}</span>
     )}>
       {!analysis ? (

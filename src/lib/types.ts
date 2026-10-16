@@ -222,7 +222,7 @@ export interface AiPredictionSettings {
   enabled: boolean;
   /** Which engine to try first. "auto" prefers a configured provider. */
   provider: "auto" | "openrouter" | "nvidia" | "rules";
-  /** Run the predictor predict-on-view (once per 5m bar) or only on demand. */
+  /** Run the predictor automatically when the chart/symbol changes, or only on demand. */
   autoRun: boolean;
 }
 
