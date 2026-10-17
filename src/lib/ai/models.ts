@@ -16,6 +16,13 @@ export function freeModels(payload: unknown): FreeModel[] {
     if (!Object.values(pricing).every(v => (typeof v === "string" || typeof v === "number") && String(v).trim() !== "" && Number(v) === 0)) continue;
     if (row.architecture?.output_modalities && !row.architecture.output_modalities.includes("text")) continue;
     if (!Number.isFinite(Number(row.context_length)) || Number(row.context_length ?? 0) < 4096) continue;
+    // Skip pre-release "preview" models. In live testing these did not return a
+    // usable chat completion for signals: reasoning-only previews left the final
+    // `content` field empty (only chain-of-thought in `reasoning`), and the
+    // lyria-*-preview entries are music models that reject a chat request
+    // (HTTP 400). They sort to the top (structured + huge context cap) and were
+    // the primary cause of the "No JSON object in model response" fallback.
+    if (row.id.toLowerCase().includes("preview")) continue;
     unique.set(row.id, { id: row.id, name: typeof row.name === "string" ? row.name : row.id,
       contextLength: Number(row.context_length), structured: Array.isArray(row.supported_parameters) && row.supported_parameters.includes("response_format") });
   }

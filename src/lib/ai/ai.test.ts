@@ -310,16 +310,28 @@ describe("provider client (fake fetch, no network)", () => {
     if (!result.ok) assert.equal(result.kind, "not-configured");
   });
 
-  it("omits JSON response mode and gives reasoning models a larger budget", async () => {
+  it("uses a larger budget for reasoning models and omits JSON mode by default", async () => {
     const fetchImpl: typeof fetch = async (_url, init) => {
       const body = JSON.parse(String(init?.body));
-      assert.equal(body.max_tokens, 1500);
+      assert.equal(body.max_tokens, 2048);
       assert.equal("response_format" in body, false);
       assert.deepEqual(body.provider.max_price, { prompt: 0, completion: 0 });
       return new Response(JSON.stringify({ choices: [{ message: { content: '{"direction":"LONG"}' } }] }));
     };
     const result = await callProvider("openrouter", ctx, { apiKey: "test-key", fetchImpl });
     assert.equal(result.ok, true);
+  });
+
+  it("forces JSON object mode only for models that declare response_format support", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      seen.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"direction":"SHORT"}' } }] }));
+    };
+    await callProvider("openrouter", ctx, { apiKey: "test-key", fetchImpl });
+    await callProvider("openrouter", ctx, { apiKey: "test-key", structured: true, fetchImpl });
+    assert.equal("response_format" in seen[0]!, false);
+    assert.deepEqual(seen[1]!.response_format, { type: "json_object" });
   });
 
   it("accepts alternate text envelopes and prefers final answers over reasoning", () => {

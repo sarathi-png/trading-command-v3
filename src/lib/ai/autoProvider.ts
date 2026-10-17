@@ -3,6 +3,9 @@ import { callProvider, type AiCallResult } from "./providers";
 import { budgetState, recordCall } from "./store";
 import type { AiContext, AiProviderId } from "./types";
 const cooldowns = new Map<string, number>();
+/** Cap in-request model attempts so a flaky catalog cannot burn the whole day. */
+const MAX_ATTEMPTS = 3;
+
 /** Every completion, including failed attempts, is charged to the local budget. */
 export async function callFreeProvider(provider: Exclude<AiProviderId, "rules">, context: AiContext, apiKey: string, fetchImpl: typeof fetch = fetch): Promise<AiCallResult> {
   const fail = (error: string): AiCallResult => ({ ok: false, kind: "not-configured", error, model: "auto-free", latencyMs: 0 });
@@ -10,17 +13,46 @@ export async function callFreeProvider(provider: Exclude<AiProviderId, "rules">,
   try { models = await discoverFreeModels(provider, apiKey, fetchImpl); }
   catch { return fail("Could not verify the provider's current free-model catalog. Paid fallback is disabled."); }
   if (!models.length) return fail("No models with verifiable zero-cost pricing were returned by this provider. Trial credit is not proof of free eligibility. Using technical rules.");
-  const eligible = models.filter(m => (cooldowns.get(`${modelCacheKey(provider, apiKey)}:${m.id}`) ?? 0) <= Date.now());
-  if (!eligible.length) return fail("All verified free models are cooling down. Using technical rules.");
-  const model = eligible[0];
-  const budget = budgetState(provider);
-  if (budget.blockedReason) return fail(budget.blockedReason);
-  await recordCall(provider);
-  const result = await callProvider(provider, context, { apiKey, model: model.id, fetchImpl });
-  if (!result.ok && result.retryableModel) {
-    cooldowns.set(`${modelCacheKey(provider, apiKey)}:${model.id}`, Date.now() + 15 * 60_000);
+  const cacheKey = modelCacheKey(provider, apiKey);
+  const cool = (id: string) => {
+    cooldowns.set(`${cacheKey}:${id}`, Date.now() + 15 * 60_000);
     if (cooldowns.size > 512) cooldowns.clear();
-    return { ...result, error: `${result.error} Another verified free model will be selected after the provider request interval.` };
+  };
+  let lastModelIssue: AiCallResult | null = null;
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const eligible = models.filter(m => (cooldowns.get(`${cacheKey}:${m.id}`) ?? 0) <= Date.now());
+    if (!eligible.length) return lastModelIssue ?? fail("All verified free models are cooling down. Using technical rules.");
+    const model = eligible[0];
+    const budget = budgetState(provider);
+    // The daily free-tier budget is always enforced.
+    if (budget.callsToday >= budget.dailyLimit) {
+      return lastModelIssue ?? fail(`Daily free-tier budget reached (${budget.callsToday}/${budget.dailyLimit} calls today).`);
+    }
+    // Min-interval spacing throttles separate predict() calls, but a retry inside
+    // THIS request moves to a DIFFERENT model — not the hammering the spacing gate
+    // exists to prevent — so only the first attempt honours it.
+    if (attempt === 0 && budget.waitSeconds > 0) {
+      return lastModelIssue ?? fail(`Free-tier spacing: next call allowed in ${budget.waitSeconds}s.`);
+    }
+    await recordCall(provider);
+    const result = await callProvider(provider, context, { apiKey, model: model.id, structured: model.structured, fetchImpl });
+    if (result.ok) return result;
+
+    // Model-specific failure — per-model rate limit, retired model, or unusable
+    // non-JSON content. Cool this model down and try the next verified model in
+    // the SAME request: the free catalog routinely has several such models in a
+    // row and one bad model must not defeat the whole predict() call.
+    if (result.retryableModel || result.kind === "bad-output") {
+      cool(model.id);
+      lastModelIssue = { ...result, error: `${result.error} Trying another verified free model.` };
+      continue;
+    }
+    // Account-level quota / auth / credit / network / timeout: a different model
+    // will not help — surface it and let the rule engine answer.
+    return result;
   }
-  return result;
+  return lastModelIssue
+    ? { ...lastModelIssue, error: `${lastModelIssue.error} No other verified free model produced a usable answer in this request.` }
+    : fail("No verified free model produced a usable answer. Using technical rules.");
 }

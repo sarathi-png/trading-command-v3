@@ -26,6 +26,8 @@ export interface CallOptions {
   apiKey: string;
   model?: string;
   timeoutMs?: number;
+  /** True when the model declares response_format support (JSON object mode). */
+  structured?: boolean;
   /** Caller-provided fetch, so tests never touch the network. */
   fetchImpl?: typeof fetch;
 }
@@ -72,15 +74,19 @@ export async function callProvider(
       { role: "user", content: userPrompt(context) },
     ],
     temperature: 0.2,
-    // Leave room for reasoning models to produce their final JSON answer.
-    max_tokens: 1500,
-    // Some free models return empty content with response_format. The prompt
-    // requests JSON; extractJson and the downstream validator enforce it.
+    // Give reasoning models room to think AND then emit their final JSON answer.
+    max_tokens: 2048,
+    // Force JSON output for models that declare response_format support. This
+    // keeps reasoning/thinking models from leaving an empty `content` field and
+    // stops prose (chain-of-thought) from being mistaken for the answer. Models
+    // without support simply skip this field and rely on the prompt + validator.
+    ...(options.structured ? { response_format: { type: "json_object" } } : {}),
     ...(provider === "openrouter" ? { provider: { max_price: { prompt: 0, completion: 0 } } } : {}),
   };
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 25_000);
+  // Free models can be slow (thinking + JSON); 25s was timing out on several.
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 50_000);
   try {
     const res = await doFetch(catalog.baseUrl, {
       method: "POST",
@@ -92,7 +98,16 @@ export async function callProvider(
     const latencyMs = Date.now() - started;
     if (!res.ok) {
       const { kind, error } = classifyStatus(res.status, text);
-      return { ok: false, kind, error, model, latencyMs, retryableModel: [404, 410].includes(res.status) || (res.status === 429 && /model/i.test(text) && !/account|daily|credit|global/i.test(text)) };
+      // A failure is model-specific (safe to rotate in-request) when it names the
+      // model we called or the word "model", and is not an account-level limit.
+      // OpenRouter per-model rate-limit bodies embed the model id; account/credit
+      // limits do not and are flagged by the keyword exclusion.
+      const modelSpecific = text.includes(model) || /model/i.test(text);
+      const accountLevel = /account|daily|credit|global|insufficient/i.test(text);
+      return {
+        ok: false, kind, error, model, latencyMs,
+        retryableModel: [404, 410].includes(res.status) || (res.status === 429 && modelSpecific && !accountLevel),
+      };
     }
     let payload: unknown;
     try {

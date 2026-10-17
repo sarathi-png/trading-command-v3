@@ -30,7 +30,7 @@ export function systemPrompt(): string {
     "Respond with a single JSON object and nothing else. No markdown, no prose outside the JSON.",
     "Schema:",
     '{"direction":"LONG"|"SHORT"|"NEUTRAL","confidence":<integer 0-100>,"horizonBars":<integer 1-20>,',
-    '"rationale":"<max 400 chars, plain English, name the indicators you used>",',
+    '"rationale":"<max 600 chars, plain English, name the indicators you used>",',
     '"invalidation":<price that proves the call wrong>|null,"keyLevels":{"support":<price>|null,"resistance":<price>|null}}',
     "Rules:",
     "- Technical pattern matches are hypotheses, not guaranteed reversals. Use the explicit strategy checks, state conflicts and missing values. ADX is strength, not direction.",
@@ -113,7 +113,12 @@ export function validatePrediction(raw: unknown, context: AiContext): Validation
 
   const rationale = typeof r.rationale === "string" ? r.rationale.trim().replace(/\s+/g, " ") : "";
   if (rationale.length < 20) return { ok: false, error: "Rationale too short to be reviewable" };
-  if (rationale.length > 400) return { ok: false, error: "Rationale exceeds 400 characters" };
+  // 600, not 400: a genuine multi-indicator technical rationale (Chandelier +
+  // Donchian + Heikin-Ashi + EMA/MACD conflicts) routinely runs past 400 chars.
+  // Rejecting a well-reasoned call over a tight length cap threw away good
+  // predictions; the cap still bounds runaway output and keeps the text
+  // reviewable in the UI.
+  if (rationale.length > 600) return { ok: false, error: "Rationale exceeds 600 characters" };
 
   const support = num(r.keyLevels?.support ?? null);
   const resistance = num(r.keyLevels?.resistance ?? null);
