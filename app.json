@@ -22,7 +22,8 @@
     },
     "web": {
       "bundler": "metro",
-      "output": "static"
+      "output": "single",
+      "favicon": "./assets/favicon.png"
     },
     "scheme": "tradingcommand",
     "backgroundColor": "#0b0e14",

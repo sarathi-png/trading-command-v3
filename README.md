@@ -27,6 +27,31 @@ A physical device needs the backend to be reachable from the phone: use your
 machine's LAN address (`http://192.168.x.x:3000`) or a deployed URL — not
 `localhost`, which on a phone means the phone itself.
 
+### Running it in a browser (development)
+
+The real backend needs Postgres and exchange credentials, so a **mock backend**
+ships with the app for development:
+
+```bash
+npm run web:serve      # builds the web bundle and serves it with the mock API
+```
+
+Then open the printed address, sign in with
+
+* **Server** — the same address the page is served from (the API is same-origin)
+* **Password** — `demo`
+* **Workspace** — paper
+
+The mock (`tools/mock-server.mjs`) serves the same routes as the real server
+with deterministic synthetic candles, so every screen can be clicked through.
+It holds no credentials and never talks to an exchange.
+
+The web build is a development convenience, not a supported deployment:
+`react-native-webview` has no web implementation, so the chart is hosted in an
+iframe there (`src/chart/ChartView.web.tsx`) and the operator password is kept
+in local storage instead of the device keystore. The device build is the
+supported one.
+
 ### Checks
 
 ```bash
