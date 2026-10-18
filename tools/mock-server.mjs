@@ -1,7 +1,7 @@
 /**
  * A development stand-in for the Trading Command backend.
  *
- * The real server lives in the parent repository and needs Postgres and
+ * The real server lives in trading-command-v3 and needs Postgres and
  * exchange credentials. This mock serves the same routes with deterministic
  * synthetic data, so the mobile app can be run and clicked through without
  * either. It is a development tool: it is NOT a trading system, it holds no

@@ -1,15 +1,16 @@
 # Trading Command — mobile app
 
-This package is a **self-contained Expo/React Native client** for the Trading
-Command terminal that lives in the parent directory. Read this before changing
-anything here.
+This repository is a **self-contained Expo/React Native client** for the Trading
+Command terminal (`sarathi-png/trading-command-v3`), which is a separate project.
+Read this before changing anything here.
 
 ## Hard rules
 
-* **Never modify the parent repository.** The server is a finished product; the
+* **Never modify the server repository.** The server is a finished product; the
   mobile app is a client of its existing `/api` routes. If the app needs
   something the server does not expose, add it to the app, not to the server.
-  The only exception is adding *new* files under `mobile/`.
+  Nothing in this repository may change the server's behaviour, and the server
+  is never edited from here.
 * **The server is the safety boundary.** Never work around a server gate in the
   client: no client-side "force live", no retry of an order whose outcome the
   server reported as unknown, no paper order sent while the live workspace is
