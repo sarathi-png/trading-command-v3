@@ -66,10 +66,15 @@ and install it with `npm install --legacy-peer-deps`.
 ## Charts
 
 The chart library is bundled at
-`assets/charts/lightweight-charts.standalone.production.js` and inlined into
+`assets/charts/lightweight-charts.standalone.production.txt` and inlined into
 the WebView page. Do not point the WebView at a CDN — the chart has to work
 without a network, and the inlined copy is what makes that true. After
 upgrading `lightweight-charts`, copy the new standalone build over that file.
+
+The file is a **text asset on purpose**: Metro treats `.js` as a source
+extension, and this library assigns to `window`, so it must not be executed in
+the React Native runtime. `metro.config.js` registers `txt` as an asset
+extension. Renaming it to `.js` would silently break the chart.
 
 ## Authentication
 

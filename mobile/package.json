@@ -38,8 +38,9 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:pine": "tsc -p tsconfig.pine.json && node --test output/pine-js/pine/__tests__/*.test.js",
-    "test": "npm run test:pine && npm run test:api && npm run typecheck",
-    "test:api": "tsc -p tsconfig.pine.json && node --test output/pine-js/api/__tests__/*.test.js"
+    "test": "npm run test:pine && npm run test:api && npm run test:chart && npm run typecheck",
+    "test:api": "tsc -p tsconfig.pine.json && node --test output/pine-js/api/__tests__/*.test.js",
+    "test:chart": "tsc -p tsconfig.pine.json && node --test output/pine-js/chart/__tests__/*.test.js"
   },
   "private": true
 }

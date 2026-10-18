@@ -53,8 +53,10 @@ let libraryPromise: Promise<string> | null = null;
 function loadLibrary(): Promise<string> {
   if (!libraryPromise) {
     libraryPromise = (async () => {
+      // The library is an asset, not a module: it is browser JavaScript that
+      // assigns to `window`, so it must not run in the React Native runtime.
       const asset = Asset.fromModule(
-        require("../../assets/charts/lightweight-charts.standalone.production.js")
+        require("../../assets/charts/lightweight-charts.standalone.production.txt")
       );
       await asset.downloadAsync();
       const uri = asset.localUri ?? asset.uri;
