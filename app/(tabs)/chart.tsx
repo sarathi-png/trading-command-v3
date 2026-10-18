@@ -301,6 +301,21 @@ export default function ChartScreen() {
               </>
             ) : null}
 
+            {pine?.ok && pine.alertConditions.length ? (
+              <>
+                <SectionTitle>Pine signals</SectionTitle>
+                <View style={styles.inlineStats}>
+                  {pine.alertConditions.map((condition) => (
+                    <Badge
+                      key={condition.title}
+                      label={`${condition.title.replace("Confluence ", "")} ${condition.active ? "●" : "○"}`}
+                      tone={condition.active ? "up" : "muted"}
+                    />
+                  ))}
+                </View>
+              </>
+            ) : null}
+
             {pine && !pine.ok ? (
               <View style={styles.pineError}>
                 <Text style={styles.pineErrorTitle}>Pine script error</Text>
