@@ -19,6 +19,8 @@
   },
   "include": [
     "src/pine/**/*.ts",
-    "src/api/**/*.ts"
+    "src/api/**/*.ts",
+    "src/chart/chartHtml.ts",
+    "src/chart/__tests__/**/*.ts"
   ]
 }

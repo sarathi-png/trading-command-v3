@@ -12,6 +12,8 @@
  * the exact charting library the desktop terminal uses.
  */
 export function buildChartHtml(librarySource: string): string {
+  // A literal `</script` inside the library would end the tag early.
+  const library = librarySource.replace(/<\/script/gi, "<\\/script");
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -29,7 +31,7 @@ export function buildChartHtml(librarySource: string): string {
 <body>
 <div id="chart"></div>
 <div id="status">Waiting for market data…</div>
-<script>${librarySource}</script>
+<script>${library}</script>
 <script>
 (function () {
   var LWC = window.LightweightCharts;
@@ -41,6 +43,7 @@ export function buildChartHtml(librarySource: string): string {
   var markerSeries = null;
   var priceLines = [];
   var lastPayload = null;
+  var lastCandleCount = -1;
 
   function showStatus(text) {
     if (!text) { statusEl.style.display = 'none'; return; }
@@ -176,9 +179,11 @@ export function buildChartHtml(librarySource: string): string {
       markerSeries.setMarkers(markers);
     }
 
-    if (payload.fit !== false) {
+    var candleCount = (payload.candles || []).length;
+    if (payload.fit !== false && candleCount !== lastCandleCount) {
       chart.timeScale().fitContent();
     }
+    lastCandleCount = candleCount;
   }
 
   window.__tcChart = {

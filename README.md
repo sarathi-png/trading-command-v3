@@ -33,6 +33,7 @@ machine's LAN address (`http://192.168.x.x:3000`) or a deployed URL — not
 npm run typecheck   # tsc --noEmit over the whole app
 npm run test:pine   # 18 tests for the Pine runtime
 npm run test:api    # 7 tests for the API client against a mock server
+npm run test:chart  # 3 tests for the chart page
 npm test            # all of the above
 ```
 
@@ -123,7 +124,10 @@ regression test in `src/pine/__tests__/pine.test.ts`.
 
 `src/chart/chartHtml.ts` builds a self-contained HTML page: the bundled
 `lightweight-charts` build is inlined, so the WebView never reaches out to a
-CDN. React calls `window.__tcChart.setData(json)` with candles, line overlays,
+CDN. The library is shipped as a **text asset**
+(`assets/charts/lightweight-charts.standalone.production.txt`), not as a module:
+it is browser JavaScript that assigns to `window`, so it must never run inside
+the React Native runtime. React calls `window.__tcChart.setData(json)` with candles, line overlays,
 price lines (support/resistance) and series markers (signals, Pine trades);
 crosshair moves are posted back to React.
 
