@@ -18,6 +18,9 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Compiled test output (tsc -p tsconfig.pine.json)
+output/
+
 # Metro
 .metro-health-check*
 
