@@ -1,8 +1,10 @@
 # Trading Command — Mobile
 
-A native mobile client for the Trading Command terminal. It is a **pure API client**:
-it talks to the same Next.js backend the desktop app uses and adds nothing to the
-server. No file in the parent repository is modified by this package.
+A native mobile client for the Trading Command terminal
+([`sarathi-png/trading-command-v3`](https://github.com/sarathi-png/trading-command-v3)).
+It is a **pure API client**: it talks to that server's existing `/api` routes and
+adds nothing to it. This repository is self-contained — the server is a separate
+project and is never modified from here.
 
 Two things make it more than a thin wrapper:
 
@@ -18,7 +20,8 @@ Two things make it more than a thin wrapper:
 ## Running it
 
 ```bash
-cd mobile
+git clone https://github.com/sarathi-png/trading-command-mobile.git
+cd trading-command-mobile
 npm install                 # already done in this checkout
 npx expo start             # then press "a" for Android, "i" for iOS, or scan the QR code
 ```
@@ -44,7 +47,9 @@ Then open the printed address, sign in with
 
 The mock (`tools/mock-server.mjs`) serves the same routes as the real server
 with deterministic synthetic candles, so every screen can be clicked through.
-It holds no credentials and never talks to an exchange.
+It holds no credentials and never talks to an exchange. The server lives in
+`trading-command-v3`; this mock is a development stand-in for it, not a copy
+of it.
 
 The web build is a development convenience, not a supported deployment:
 `react-native-webview` has no web implementation, so the chart is hosted in an
@@ -67,7 +72,7 @@ npm test            # all of the above
 ## How it fits together
 
 ```
-mobile/
+trading-command-mobile/
   app/                     expo-router screens
     _layout.tsx            root stack, session restore
     index.tsx              the gate: saved session → workspace, otherwise sign-in
