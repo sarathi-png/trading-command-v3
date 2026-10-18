@@ -52,7 +52,7 @@ export default function ChartScreen() {
     useCallback(() => {
       void candles.reload();
       void analysis.reload();
-    }, [candles, analysis])
+    }, [candles.reload, analysis.reload])
   );
 
   const rawCandles = candles.data?.candles ?? [];
