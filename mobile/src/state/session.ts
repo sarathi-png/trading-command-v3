@@ -6,7 +6,7 @@
  * plain storage. Everything else is ordinary app state.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as SecureStore from "expo-secure-store";
+import { deleteItemAsync, getItemAsync, setItemAsync } from "./secureStore";
 import { create } from "zustand";
 
 import { api, ApiError, configureApi, type Workspace } from "../api/client";
@@ -49,7 +49,7 @@ export const useSession = create<SessionState>((set, get) => ({
     try {
       const [url, password, workspace] = await Promise.all([
         AsyncStorage.getItem(URL_KEY),
-        SecureStore.getItemAsync(PASSWORD_KEY),
+        getItemAsync(PASSWORD_KEY),
         AsyncStorage.getItem(WORKSPACE_KEY),
       ]);
       if (!url || !password) return false;
@@ -82,7 +82,7 @@ export const useSession = create<SessionState>((set, get) => ({
       const [settings, system] = await Promise.all([api.settings(), api.system()]);
       await Promise.all([
         AsyncStorage.setItem(URL_KEY, baseUrl),
-        SecureStore.setItemAsync(PASSWORD_KEY, password),
+        setItemAsync(PASSWORD_KEY, password),
         AsyncStorage.setItem(WORKSPACE_KEY, workspace),
       ]);
       set({
@@ -107,7 +107,7 @@ export const useSession = create<SessionState>((set, get) => ({
     await api.logout().catch(() => undefined);
     await Promise.all([
       AsyncStorage.removeItem(URL_KEY),
-      SecureStore.deleteItemAsync(PASSWORD_KEY).catch(() => undefined),
+      deleteItemAsync(PASSWORD_KEY).catch(() => undefined),
       AsyncStorage.removeItem(WORKSPACE_KEY),
     ]);
     configureApi({ baseUrl: "", password: "", workspace: null });

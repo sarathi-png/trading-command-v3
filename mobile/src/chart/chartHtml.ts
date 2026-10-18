@@ -111,7 +111,12 @@ export function buildChartHtml(librarySource: string): string {
   function post(message) {
     if (window.ReactNativeWebView) {
       window.ReactNativeWebView.postMessage(JSON.stringify(message));
+      return;
     }
+    // The web build hosts this page in an iframe and listens on the window.
+    try {
+      window.parent.postMessage(Object.assign({ source: 'tc-chart' }, message), '*');
+    } catch (e) {}
   }
 
   function toSeriesData(points) {
@@ -196,6 +201,13 @@ export function buildChartHtml(librarySource: string): string {
       if (chart) chart.resize(width, height);
     }
   };
+
+  // The web build cannot inject JavaScript, so data arrives by message.
+  window.addEventListener('message', function (event) {
+    var data = event && event.data;
+    if (!data || data.type !== 'tc:data') return;
+    try { setData(data.payload); } catch (error) { post({ type: 'error', message: String(error) }); }
+  });
 
   window.addEventListener('resize', function () {
     if (chart) chart.resize(container.clientWidth, container.clientHeight);
