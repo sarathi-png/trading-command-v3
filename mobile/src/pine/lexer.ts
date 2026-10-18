@@ -11,7 +11,7 @@
  * lines exactly like in TradingView.
  */
 
-export type TokenType = "number" | "string" | "ident" | "punct" | "keyword" | "newline" | "eof";
+export type TokenType = "number" | "string" | "color" | "ident" | "punct" | "keyword" | "newline" | "eof";
 
 export interface Token {
   type: TokenType;
@@ -154,6 +154,20 @@ export function tokenize(source: string): Token[] {
       if (i >= src.length) throw new PineSyntaxError("Unterminated string literal", line, startCol);
       advance(1); // closing quote
       push("string", out, undefined, startLine, startCol);
+      continue;
+    }
+
+    // ---- hex colour literals: #ff9800 ----
+    if (ch === "#" && /[0-9a-fA-F]/.test(src[i + 1] ?? "")) {
+      const startCol = col;
+      const startLine = line;
+      advance(1);
+      let hex = "";
+      while (i < src.length && /[0-9a-fA-F]/.test(src[i])) {
+        hex += src[i];
+        advance(1);
+      }
+      push("color", `#${hex}`, undefined, startLine, startCol);
       continue;
     }
 

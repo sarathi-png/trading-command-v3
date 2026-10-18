@@ -13,6 +13,7 @@ import * as FileSystem from "expo-file-system/legacy";
 
 import { buildChartHtml } from "./chartHtml";
 import type { Candle } from "../api/types";
+import type { PineDrawingResult } from "../pine";
 
 export interface ChartOverlay {
   id: string;
@@ -42,6 +43,8 @@ export interface ChartPayload {
   overlays: ChartOverlay[];
   levels: ChartLevel[];
   markers: ChartMarker[];
+  /** Boxes, labels and tables created by the Pine script. */
+  drawings: PineDrawingResult[];
   chartType: "candles" | "heikin-ashi";
   error?: string;
   fit?: boolean;

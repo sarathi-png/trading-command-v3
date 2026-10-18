@@ -10,9 +10,10 @@
  *   - a per-variable history for global variables,
  *   - a per-call-site history for function parameters.
  */
+import { normaliseDrawing, type PineDrawingResult } from "./drawings";
 import {
   type Block, type CallExpr, type Expression, type FunctionDecl, type ProgramNode,
-  type Statement, type TupleAssignStmt, type VarDecl,
+  type Statement, type TupleAssignStmt, type TypeDecl, type VarDecl,
 } from "./ast";
 import {
   type BuiltinContext, type BuiltinFn, type NamespaceEntry, NAMESPACES, isBuiltinFn,
@@ -23,8 +24,10 @@ import type {
 import { type BarData, type StreamContext, TA_FUNCTIONS } from "./ta";
 import { StrategySimulator, type StrategyStats, type StrategyTrade, strategyNamespace } from "./strategy";
 import {
-  type PineValue, isBoundMethod, isCallable, isProperty, toBoolean, toDisplayString, toNumber,
-  truthy, type PineBoundMethod, type PineCallable, type PineObject, type PineProperty,
+  type PineValue, isArray, isBoundMethod, isCallable, isDrawing, isProperty, isUserObject,
+  newArray, toBoolean, toDisplayString, toNumber, truthy, unwrap,
+  type PineArray, type PineBoundMethod, type PineCallable, type PineDrawing, type PineObject,
+  type PineProperty, type PineUserObject,
 } from "./values";
 
 export interface PineError {
@@ -80,6 +83,8 @@ export interface PineRunResult {
   inputs: PineInput[];
   plots: PinePlotResult[];
   shapes: PineShapeResult[];
+  /** Box / label / table objects created by the script, ready for the chart. */
+  drawings: PineDrawingResult[];
   hlines: PineHLine[];
   alerts: PineAlertEvent[];
   alertConditions: { title: string; message: string; active: boolean; time: number }[];
@@ -112,6 +117,16 @@ const isNamespace = (value: PineValue): value is PineValue & NamespaceMarker =>
 
 const isMethodMarker = (value: PineValue): value is PineValue & MethodMarker =>
   !!value && typeof value === "object" && !Array.isArray(value) && "__method" in value;
+
+/** Thrown by `break`; caught by the loop that owns it. */
+class BreakSignal {
+  readonly __break = true;
+}
+
+/** Thrown by `continue`; caught by the loop that owns it. */
+class ContinueSignal {
+  readonly __continue = true;
+}
 
 const isPlainObject = (value: PineValue): value is PineObject =>
   !!value &&
@@ -180,6 +195,14 @@ export class PineEvaluator implements PineHost {
   /** The bar each variable's history was last written on. */
   private historyBar = new Map<string, number>();
   private functions = new Map<string, FunctionDecl>();
+  /** User-declared types: `type SRZone`. */
+  private types = new Map<string, TypeDecl>();
+  /** History for plain (non-var) locals, so `dcMid[1]` means the previous bar. */
+  private localHistory = new Map<string, PineValue[]>();
+  private localHistoryBar = new Map<string, number>();
+  /** Drawing objects created by the script. */
+  private drawings: PineDrawing[] = [];
+  private nextDrawingId = 1;
   private namespaces: Record<string, Record<string, NamespaceEntry>>;
   private sim = new StrategySimulator();
 
@@ -311,6 +334,10 @@ export class PineEvaluator implements PineHost {
     this.alerts.push(alert);
   }
 
+  recordDrawing(drawing: PineDrawing): void {
+    this.drawings.push(drawing);
+  }
+
   strategyCall(name: string, args: PineValue[], named: Map<string, PineValue>): PineValue {
     const entry = this.namespaces.strategy[name];
     if (!entry) {
@@ -337,6 +364,11 @@ export class PineEvaluator implements PineHost {
 
   bar(): BarData {
     return this.currentBar;
+  }
+
+  previousBarTime(): number | null {
+    if (this.barIndexValue <= 0) return null;
+    return this.bars[this.barIndexValue - 1]?.time ?? null;
   }
 
   barIndex(): number {
@@ -395,6 +427,11 @@ export class PineEvaluator implements PineHost {
           linewidth: plot.linewidth,
           points: plot.points.filter((point) => Number.isFinite(point.value)),
         })),
+      drawings: this.drawings
+        .map((drawing) =>
+          normaliseDrawing(drawing, (barIndex) => this.bars[barIndex]?.time ?? null)
+        )
+        .filter((drawing): drawing is PineDrawingResult => drawing !== null),
       shapes: this.shapes.map((shape) => ({
         title: shape.title,
         shape: shape.shape,
@@ -425,10 +462,11 @@ export class PineEvaluator implements PineHost {
     };
   }
 
-  /** First pass: register functions. */
+  /** First pass: register functions and user-declared types. */
   private collectDeclarations(): void {
     for (const statement of this.program.body.statements) {
       if (statement.kind === "function") this.functions.set(statement.name, statement);
+      if (statement.kind === "typeDecl") this.types.set(statement.name, statement);
     }
   }
 
@@ -525,6 +563,13 @@ export class PineEvaluator implements PineHost {
       case "function":
         this.functions.set(statement.name, statement);
         return;
+      case "typeDecl":
+        this.types.set(statement.name, statement);
+        return;
+      case "break":
+        throw new BreakSignal();
+      case "continue":
+        throw new ContinueSignal();
       default:
         return;
     }
@@ -547,6 +592,27 @@ export class PineEvaluator implements PineHost {
     }
     const value = declaration.value ? this.evalExpression(declaration.value, scope) : null;
     scope.vars.set(declaration.name, value);
+    this.pushLocalHistory(declaration.name, value);
+  }
+
+  /**
+   * Record a local variable's value for the current bar. Pine only guarantees
+   * history for `var` variables, but scripts read `x[1]` on plain locals all
+   * the time, so the history is kept for them as well.
+   */
+  private pushLocalHistory(name: string, value: PineValue): void {
+    if (this.localHistoryBar.get(name) === this.barIndexValue) {
+      const history = this.localHistory.get(name);
+      if (history && history.length) {
+        history[history.length - 1] = value;
+        return;
+      }
+    }
+    const history = this.localHistory.get(name) ?? [];
+    history.push(value);
+    if (history.length > 2000) history.splice(0, history.length - 2000);
+    this.localHistory.set(name, history);
+    this.localHistoryBar.set(name, this.barIndexValue);
   }
 
   /**
@@ -602,6 +668,7 @@ export class PineEvaluator implements PineHost {
     if (target.kind === "ident") {
       if (scope.vars.has(target.name)) {
         scope.vars.set(target.name, value);
+        this.pushLocalHistory(target.name, value);
         return;
       }
       if (scope === this.globalScope) {
@@ -610,10 +677,17 @@ export class PineEvaluator implements PineHost {
         return;
       }
       scope.vars.set(target.name, value);
+      this.pushLocalHistory(target.name, value);
       return;
     }
     if (target.kind === "member") {
       const base = this.evalExpression(target.object, scope);
+      if (isUserObject(base)) {
+        // A user object is a reference: writing a field mutates the instance
+        // that the array holds.
+        (base as PineUserObject)[target.property] = value;
+        return;
+      }
       if (isNamespace(base)) {
         const entry = this.namespaces[base.__namespace]?.[target.property];
         if (isProperty(entry)) {
@@ -676,7 +750,13 @@ export class PineEvaluator implements PineHost {
         break;
       }
       scope.vars.set(statement.variable, value);
-      this.executeBlock(statement.body, scope);
+      try {
+        this.executeBlock(statement.body, scope);
+      } catch (error) {
+        if (error instanceof BreakSignal) break;
+        if (error instanceof ContinueSignal) continue;
+        throw error;
+      }
     }
   }
 
@@ -687,7 +767,13 @@ export class PineEvaluator implements PineHost {
         this.warnings.push("A while loop exceeded 100000 iterations and was stopped.");
         break;
       }
-      this.executeBlock(statement.body, scope);
+      try {
+        this.executeBlock(statement.body, scope);
+      } catch (error) {
+        if (error instanceof BreakSignal) break;
+        if (error instanceof ContinueSignal) continue;
+        throw error;
+      }
     }
   }
 
@@ -703,6 +789,8 @@ export class PineEvaluator implements PineHost {
         return node.value;
       case "na":
         return null;
+      case "color":
+        return node.value;
       case "ident":
         return this.evalIdentifier(node.name, node.line, scope);
       case "member":
@@ -775,7 +863,7 @@ export class PineEvaluator implements PineHost {
         this.errors.push({ message: `Unknown function or variable '${base.__namespace}.${property}'.`, line });
         return null;
       }
-      if (isProperty(entry)) return entry.get();
+      if (isProperty(entry)) return entry.get(this);
       if (isBuiltinFn(entry)) return { __method: entry } as unknown as PineValue;
       return entry as PineValue;
     }
@@ -796,7 +884,7 @@ export class PineEvaluator implements PineHost {
         this.errors.push({ message: `Unknown property '${property}'.`, line });
         return null;
       }
-      if (isProperty(entry)) return entry.get();
+      if (isProperty(entry)) return entry.get(this);
       if (isBuiltinFn(entry)) return { __method: entry } as unknown as PineValue;
       return entry;
     }
@@ -816,6 +904,14 @@ export class PineEvaluator implements PineHost {
 
     // A callee that is a member of a namespace / object.
     if (node.callee.kind === "member") {
+      // `SRZone.new(...)` — constructing a user-declared type.
+      if (
+        node.callee.object.kind === "ident" &&
+        node.callee.property === "new" &&
+        this.types.has(node.callee.object.name)
+      ) {
+        return this.constructType(node.callee.object.name, positional, named, node.line);
+      }
       const base = this.evalExpression(node.callee.object, scope);
       if (isNamespace(base)) {
         const entry = this.namespaces[base.__namespace]?.[node.callee.property];
@@ -828,7 +924,7 @@ export class PineEvaluator implements PineHost {
           return null;
         }
         if (isBuiltinFn(entry)) {
-          return this.invokeBuiltin(entry, positional, named, node.site, node.line);
+          return this.invokeBuiltin(entry, positional, named, node.site, node.line, node.typeArgs);
         }
         if (isCallable(entry)) return entry.value;
       }
@@ -837,6 +933,9 @@ export class PineEvaluator implements PineHost {
         if (method) return method(...positional);
         this.errors.push({ message: `Unknown method '${node.callee.property}'.`, line: node.line });
         return null;
+      }
+      if (isArray(base)) {
+        return this.arrayMethod(base, node.callee.property, positional, node.line);
       }
       if (isPlainObject(base)) {
         const entry = base[node.callee.property];
@@ -873,18 +972,138 @@ export class PineEvaluator implements PineHost {
     return null;
   }
 
+  /**
+   * `SRZone.new(top = 1, bot = 2)` — build an instance of a user type.
+   * Fields not supplied keep their declared default.
+   */
+  private constructType(
+    typeName: string,
+    positional: PineValue[],
+    named: Map<string, PineValue>,
+    line: number
+  ): PineValue {
+    const declaration = this.types.get(typeName);
+    if (!declaration) {
+      this.errors.push({ message: `Unknown type '${typeName}'.`, line });
+      return null;
+    }
+    const instance: PineUserObject = { __userType: typeName } as PineUserObject;
+    declaration.fields.forEach((field, index) => {
+      if (named.has(field.name)) {
+        instance[field.name] = named.get(field.name) ?? null;
+        return;
+      }
+      if (index < positional.length) {
+        instance[field.name] = positional[index];
+        return;
+      }
+      instance[field.name] = field.defaultValue
+        ? this.evalExpression(field.defaultValue, this.globalScope)
+        : null;
+    });
+    return instance as unknown as PineValue;
+  }
+
+  /**
+   * The methods of a Pine array: `push`, `get`, `set`, `remove`, ...
+   */
+  private arrayMethod(
+    array: PineArray,
+    method: string,
+    positional: PineValue[],
+    line: number
+  ): PineValue {
+    const items = array.items;
+    switch (method) {
+      case "size":
+        return items.length;
+      case "get": {
+        const index = Math.floor(toNumber(positional[0] ?? null) ?? -1);
+        return index >= 0 && index < items.length ? items[index] : null;
+      }
+      case "set": {
+        const index = Math.floor(toNumber(positional[0] ?? null) ?? -1);
+        if (index < 0 || index >= items.length) {
+          this.errors.push({ message: "Array index out of bounds.", line });
+          return null;
+        }
+        items[index] = positional[1] ?? null;
+        return null;
+      }
+      case "push":
+        items.push(positional[0] ?? null);
+        return null;
+      case "pop":
+        return items.length ? (items.pop() ?? null) : null;
+      case "shift":
+        return items.length ? (items.shift() ?? null) : null;
+      case "unshift":
+        items.unshift(positional[0] ?? null);
+        return null;
+      case "insert": {
+        const index = Math.floor(toNumber(positional[0] ?? null) ?? 0);
+        items.splice(index, 0, positional[1] ?? null);
+        return null;
+      }
+      case "remove": {
+        const index = Math.floor(toNumber(positional[0] ?? null) ?? -1);
+        if (index < 0 || index >= items.length) {
+          this.errors.push({ message: "Array index out of bounds.", line });
+          return null;
+        }
+        const removed = items.splice(index, 1)[0];
+        return removed ?? null;
+      }
+      case "clear":
+        items.length = 0;
+        return null;
+      case "slice": {
+        const from = Math.floor(toNumber(positional[0] ?? null) ?? 0);
+        const to = positional[1] === undefined ? items.length : Math.floor(toNumber(positional[1]) ?? items.length);
+        return newArray(array.typeName);
+      }
+      case "concat": {
+        const other = positional[0];
+        if (isArray(other)) {
+          items.push(...other.items);
+        }
+        return null;
+      }
+      case "indexof": {
+        const target = positional[0] ?? null;
+        return items.findIndex((item) => this.looseEqual(item, target));
+      }
+      case "lastindexof": {
+        const target = positional[0] ?? null;
+        for (let index = items.length - 1; index >= 0; index--) {
+          if (this.looseEqual(items[index], target)) return index;
+        }
+        return -1;
+      }
+      case "includes": {
+        const target = positional[0] ?? null;
+        return items.some((item) => this.looseEqual(item, target));
+      }
+      default:
+        this.errors.push({ message: `Unknown array method '${method}'.`, line });
+        return null;
+    }
+  }
+
   private invokeBuiltin(
     fn: BuiltinFn,
     positional: PineValue[],
     named: Map<string, PineValue>,
     site: number,
-    line: number
+    line: number,
+    typeArgs?: string[]
   ): PineValue {
     const context: BuiltinContext = {
       site,
       named,
       host: this,
       nextId: (prefix) => `${prefix}_${site}`,
+      typeArgs: typeArgs ?? undefined,
     };
     try {
       return fn(positional, context);
@@ -969,6 +1188,12 @@ export class PineEvaluator implements PineHost {
         const index = globalHistory.length - 1 - offset;
         return index >= 0 ? globalHistory[index] : null;
       }
+      // A plain local: history is recorded per bar as well.
+      const localHistory = this.localHistory.get(object.name);
+      if (localHistory) {
+        const index = localHistory.length - 1 - offset;
+        return index >= 0 ? localHistory[index] : null;
+      }
     }
 
     const collection = this.evalExpression(object, scope);
@@ -992,8 +1217,22 @@ export class PineEvaluator implements PineHost {
   }
 
   private evalUnary(node: { op: "not" | "-" | "+"; argument: Expression }, scope: Scope): PineValue {
+    if (node.op === "not") {
+      // `not na(x)` is Pine's idiom for "x has a value". `na(x)` itself
+      // evaluates to the value, so the negation is handled here.
+      const argument = node.argument;
+      if (
+        argument.kind === "call" &&
+        argument.callee.kind === "ident" &&
+        argument.callee.name === "na" &&
+        argument.args.length === 1 &&
+        argument.args[0].name === null
+      ) {
+        return hasValue(this.evalExpression(argument.args[0].value, scope));
+      }
+      return !truthy(this.evalExpression(node.argument, scope));
+    }
     const value = this.evalExpression(node.argument, scope);
-    if (node.op === "not") return !truthy(value);
     const numeric = toNumber(value);
     if (numeric === null) return null;
     return node.op === "-" ? -numeric : numeric;
@@ -1065,6 +1304,9 @@ export class PineEvaluator implements PineHost {
 function plotBuiltin(args: PineValue[], ctx: BuiltinContext): PineValue {
   const host = ctx.host;
   const value = args[0] ?? null;
+  // `display = display.none` hides the plot without removing it.
+  const display = ctx.named.get("display");
+  if (typeof display === "string" && display === "none") return null;
   const title = (ctx.named.get("title") as string) ?? (typeof args[1] === "string" ? args[1] : `Plot ${ctx.site}`);
   const color = ctx.named.get("color") ?? args[2] ?? "#2962ff";
   const linewidth = toNumber(ctx.named.get("linewidth") ?? args[3]) ?? 1;
@@ -1140,7 +1382,57 @@ function hlineBuiltin(args: PineValue[], ctx: BuiltinContext): PineValue {
   return null;
 }
 
+/** `nz(value)` — the value, or zero when it is na. */
+function nzBuiltin(args: PineValue[]): PineValue {
+  const value = args[0] ?? null;
+  if (value === null || value === undefined) return args.length > 1 ? args[1] : 0;
+  if (typeof value === "number" && !Number.isFinite(value)) return args.length > 1 ? args[1] : 0;
+  return value;
+}
+
+/** `na(value)` — the value, or na when the value is missing. */
+function naBuiltin(args: PineValue[]): PineValue {
+  const value = args[0] ?? null;
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && !Number.isFinite(value)) return null;
+  return value;
+}
+
+/** True when a value is present (not na). */
+function hasValue(value: PineValue): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "number" && !Number.isFinite(value)) return false;
+  return true;
+}
+
+/** `hour(time, "UTC")` — the hour of the bar. */
+function hourBuiltin(args: PineValue[], ctx: BuiltinContext): PineValue {
+  const time = toNumber(args[0] ?? null) ?? ctx.host.bar().time;
+  return new Date(time * 1000).getUTCHours();
+}
+
+function minuteBuiltin(args: PineValue[], ctx: BuiltinContext): PineValue {
+  const time = toNumber(args[0] ?? null) ?? ctx.host.bar().time;
+  return new Date(time * 1000).getUTCMinutes();
+}
+
+function dayofweekBuiltin(args: PineValue[], ctx: BuiltinContext): PineValue {
+  const time = toNumber(args[0] ?? null) ?? ctx.host.bar().time;
+  return new Date(time * 1000).getUTCDay() + 1;
+}
+
+function dayofmonthBuiltin(args: PineValue[], ctx: BuiltinContext): PineValue {
+  const time = toNumber(args[0] ?? null) ?? ctx.host.bar().time;
+  return new Date(time * 1000).getUTCDate();
+}
+
 const GLOBAL_BUILTINS: Record<string, BuiltinFn> = {
+  nz: nzBuiltin,
+  na: naBuiltin,
+  hour: hourBuiltin,
+  minute: minuteBuiltin,
+  dayofweek: dayofweekBuiltin,
+  dayofmonth: dayofmonthBuiltin,
   plot: plotBuiltin,
   plotshape: plotshapeBuiltin,
   plotchar: plotshapeBuiltin,

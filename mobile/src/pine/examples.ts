@@ -4,12 +4,18 @@
  * They double as documentation of what the runtime supports: inputs, the
  * ta.* library, plots, plotshapes, alerts and the strategy simulator.
  */
+import { CONFLUENCE_SOURCE } from "./scripts/confluence";
+
 export interface PineExample {
   name: string;
   source: string;
 }
 
 export const EXAMPLES: PineExample[] = [
+  {
+    name: "Crypto Confluence Signals [8x]",
+    source: CONFLUENCE_SOURCE,
+  },
   {
     name: "EMA Ribbon",
     source: `//@version=5

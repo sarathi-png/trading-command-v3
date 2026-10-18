@@ -19,6 +19,11 @@ export interface NumberLiteral extends Pos { kind: "number"; value: number; int:
 export interface StringLiteral extends Pos { kind: "string"; value: string }
 export interface BoolLiteral extends Pos { kind: "bool"; value: boolean }
 export interface NaLiteral extends Pos { kind: "na" }
+/** A hex colour literal: `#ff9800`. */
+export interface ColorLiteral extends Pos {
+  kind: "color";
+  value: { r: number; g: number; b: number; a: number };
+}
 export interface Identifier extends Pos { kind: "ident"; name: string }
 export interface MemberExpr extends Pos { kind: "member"; object: Expression; property: string }
 export interface CallExpr extends Pos {
@@ -27,6 +32,8 @@ export interface CallExpr extends Pos {
   args: CallArg[];
   /** Stable id used to key per-call-site runtime state (Pine series semantics). */
   site: number;
+  /** Explicit type arguments: `array.new<SRZone>()`. */
+  typeArgs?: string[];
 }
 export interface IndexExpr extends Pos { kind: "index"; object: Expression; offset: Expression }
 export interface UnaryExpr extends Pos { kind: "unary"; op: "not" | "-" | "+"; argument: Expression }
@@ -51,7 +58,7 @@ export interface CallArg {
 }
 
 export type Expression =
-  | NumberLiteral | StringLiteral | BoolLiteral | NaLiteral | Identifier
+  | NumberLiteral | StringLiteral | BoolLiteral | NaLiteral | ColorLiteral | Identifier
   | MemberExpr | CallExpr | IndexExpr | UnaryExpr | BinaryExpr | TernaryExpr
   | TupleExpr | ArrayLiteral;
 
@@ -105,6 +112,28 @@ export interface WhileStmt extends Pos {
 
 export interface ExprStmt extends Pos { kind: "exprStmt"; expression: Expression }
 
+/** `break` — leaves the innermost loop. */
+export interface BreakStmt extends Pos { kind: "break" }
+/** `continue` — skips to the next iteration of the innermost loop. */
+export interface ContinueStmt extends Pos { kind: "continue" }
+
+/** A field of a user-declared type. */
+export interface TypeField extends Pos {
+  name: string;
+  typeName: string | null;
+  defaultValue: Expression | null;
+}
+
+/**
+ * `type SRZone` — a user-declared type. Pine v5/v6 uses these for the
+ * object shapes a script keeps in arrays.
+ */
+export interface TypeDecl extends Pos {
+  kind: "typeDecl";
+  name: string;
+  fields: TypeField[];
+}
+
 export interface FunctionDecl extends Pos {
   kind: "function";
   name: string;
@@ -130,13 +159,13 @@ export interface ProgramNode extends Pos {
 
 export type Statement =
   | VarDecl | AssignStmt | TupleAssignStmt | IfStmt | ForStmt | WhileStmt | ExprStmt
-  | FunctionDecl;
+  | FunctionDecl | TypeDecl | BreakStmt | ContinueStmt;
 
 /* ---------------- helpers ---------------- */
 
 export function isExpressionNode(node: Node): node is Expression {
   return (node as Expression).kind !== undefined &&
-    !["varDecl", "assign", "if", "for", "while", "exprStmt", "function", "program"].includes(
+    !["varDecl", "assign", "tupleAssign", "if", "for", "while", "exprStmt", "function", "typeDecl", "program"].includes(
       (node as { kind: string }).kind
     );
 }

@@ -62,6 +62,19 @@ and install it with `npm install --legacy-peer-deps`.
    close the opposite position first, and an open position is closed at the
    last close of the data. New strategy behaviour must match, and be covered
    by a test in `src/pine/__tests__/pine.test.ts`.
+4. **The user's script is the acceptance test.**
+   `src/pine/scripts/confluence.ts` is the "Crypto Confluence Signals [8x]"
+   indicator, verbatim. It must always run without errors, and it is covered
+   by `src/pine/__tests__/confluence.test.ts`. A change that makes that script
+   fail is a regression, not a new limitation.
+
+## Drawings
+
+`box.*`, `label.*` and `table.*` create live objects inside the runtime; after
+the run they are normalised (`src/pine/drawings.ts`) into plain data with bar
+times and prices, and the chart page draws them in an HTML overlay
+(`renderDrawings` in `src/chart/chartHtml.ts`). Keep the runtime side free of
+chart concerns: it hands over data, the chart page turns it into pixels.
 
 ## Charts
 

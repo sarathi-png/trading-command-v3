@@ -8,8 +8,8 @@
  */
 import type { PineHost, PineInput } from "./host";
 import {
-  type PineValue, isColor, toBoolean, toDisplayString, toNumber, truthy,
-  type PineColor, type PineCallable, type PineProperty,
+  type PineValue, isArray, isColor, toBoolean, toDisplayString, toNumber, truthy,
+  type PineArray, type PineColor, type PineCallable, type PineDrawing, type PineProperty,
 } from "./values";
 
 export interface BuiltinContext {
@@ -18,6 +18,8 @@ export interface BuiltinContext {
   host: PineHost;
   /** Unique-ish id generator for input ids. */
   nextId(prefix: string): string;
+  /** Explicit type arguments: `array.new<SRZone>()`. */
+  typeArgs?: string[];
 }
 
 export type BuiltinFn = (args: PineValue[], ctx: BuiltinContext) => PineValue;
@@ -231,7 +233,31 @@ const str: Record<string, BuiltinFn> = {
     return args[0].slice(from, to);
   },
   tonumber: (args) => toNumber(args[0]),
-  tostring: (args) => toDisplayString(args[0] ?? null),
+  /**
+   * `str.tostring(value, format)`. The format is a number pattern such as
+   * "#.#" (one decimal) or a named format such as "mintick".
+   */
+  tostring: (args) => {
+    const value = args[0] ?? null;
+    const format = typeof args[1] === "string" ? args[1] : null;
+    if (!format) return toDisplayString(value);
+    const number = toNumber(value);
+    if (number === null) return toDisplayString(value);
+    if (format === "mintick" || format === "price") return number.toFixed(2);
+    if (format === "percent") return `${number.toFixed(2)}%`;
+    if (format === "volume") return number.toFixed(0);
+    const pattern = /^#(\.#*)?$/.exec(format);
+    if (pattern) {
+      const decimals = (pattern[1] ?? "").length - 1;
+      return number.toFixed(Math.max(0, decimals));
+    }
+    const integerPattern = /^#+(\.#*)?$/.exec(format);
+    if (integerPattern) {
+      const decimals = (integerPattern[1] ?? "").length - 1;
+      return number.toFixed(Math.max(0, decimals));
+    }
+    return toDisplayString(value);
+  },
   replace_all: (args) => {
     if (typeof args[0] !== "string") return null;
     return args[0].split(String(args[1] ?? "")).join(String(args[2] ?? ""));
@@ -281,7 +307,11 @@ const color: Record<string, NamespaceEntry> = {
   g: (args) => (isColor(args[0]) ? args[0].g : null),
   b: (args) => (isColor(args[0]) ? args[0].b : null),
   new: (args) => {
-    const base = isColor(args[0]) ? args[0] : { r: 0, g: 0, b: 0, a: 1 };
+    const base = isColor(args[0])
+      ? args[0]
+      : typeof args[0] === "string" && args[0].startsWith("#")
+        ? hexToColor(args[0])
+        : { r: 0, g: 0, b: 0, a: 1 };
     const transparency = n(args[1], 0);
     return { ...base, a: Math.max(0, Math.min(1, 1 - transparency / 100)) } satisfies PineColor;
   },
@@ -297,87 +327,130 @@ function asArray(value: PineValue): PineValue[] | null {
   return Array.isArray(value) ? value : null;
 }
 
+/** The elements of a Pine array (`array.new<T>()`) or a plain array. */
+function itemsOf(value: PineValue): PineValue[] | null {
+  if (isArray(value)) return value.items;
+  return Array.isArray(value) ? value : null;
+}
+
+/** A hex colour literal, as produced by the lexer (`#ff9800`). */
+export function hexToColor(hex: string): PineColor {
+  const value = hex.replace("#", "");
+  const full = value.length === 3 ? value.split("").map((c) => c + c).join("") : value;
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) {
+    return { r: 128, g: 128, b: 128, a: 1 };
+  }
+  return { r, g, b, a: 1 };
+}
+
 const array: Record<string, BuiltinFn> = {
+  /** `array.new<T>()` — an empty array, optionally typed. */
+  new: (_args, ctx) => {
+    const created: PineArray = { __array: true, typeName: ctx.typeArgs?.[0] ?? null, items: [] };
+    return created as unknown as PineValue;
+  },
+  from: (args) => {
+    const source = itemsOf(args[0]);
+    const created: PineArray = { __array: true, typeName: null, items: source ? [...source] : [] };
+    return created as unknown as PineValue;
+  },
+  concat: (args) => {
+    const target = itemsOf(args[0]);
+    const other = itemsOf(args[1]);
+    if (target && other) target.push(...other);
+    return null;
+  },
   new_float: (args) => new Array(Math.max(0, Math.floor(n(args[0])))).fill(0),
   new_int: (args) => new Array(Math.max(0, Math.floor(n(args[0])))).fill(0),
   new_bool: (args) => new Array(Math.max(0, Math.floor(n(args[0])))).fill(false),
   new_string: (args) => new Array(Math.max(0, Math.floor(n(args[0])))).fill(""),
   push: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     if (!target) return null;
     target.push(args[1] ?? null);
     return null;
   },
   pop: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     if (!target || !target.length) return null;
     return target.pop() ?? null;
   },
   get: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     if (!target) return null;
     const index = Math.floor(n(args[1]));
     return index >= 0 && index < target.length ? target[index] : null;
   },
   set: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     if (!target) return null;
     const index = Math.floor(n(args[1]));
     if (index >= 0 && index < target.length) target[index] = args[2] ?? null;
     return null;
   },
   size: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     return target ? target.length : null;
   },
   shift: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     if (!target || !target.length) return null;
     return target.shift() ?? null;
   },
   unshift: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     if (!target) return null;
     target.unshift(args[1] ?? null);
     return null;
   },
   insert: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     if (!target) return null;
     const index = Math.floor(n(args[1]));
     target.splice(index, 0, args[2] ?? null);
     return null;
   },
   remove: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     if (!target) return null;
     const index = Math.floor(n(args[1]));
     if (index >= 0 && index < target.length) return target.splice(index, 1)[0] ?? null;
     return null;
   },
   clear: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     if (target) target.length = 0;
     return null;
   },
   slice: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     if (!target) return null;
     return target.slice(Math.floor(n(args[1], 0)), args.length > 2 ? Math.floor(n(args[2])) : undefined);
   },
   includes: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     if (!target) return false;
     return target.some((value) => value === args[1]);
   },
   indexof: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     if (!target) return null;
     const index = target.indexOf(args[1]);
     return index === -1 ? null : index;
   },
+  lastindexof: (args) => {
+    const target = itemsOf(args[0]);
+    if (!target) return null;
+    for (let index = target.length - 1; index >= 0; index--) {
+      if (target[index] === args[1]) return index;
+    }
+    return null;
+  },
   copy: (args) => {
-    const target = asArray(args[0]);
+    const target = itemsOf(args[0]);
     return target ? [...target] : null;
   },
   sort: (args) => {
@@ -473,6 +546,19 @@ const syminfo: Record<string, BuiltinFn> = {
 
 const timeframe: Record<string, BuiltinFn> = {
   in_seconds: (_args, ctx) => timeframeSeconds(ctx.host.timeframe()),
+  /**
+   * `timeframe.change("1D")` — true on the first bar of a new period. It is
+   * what an anchored VWAP resets on.
+   */
+  change: (args, ctx) => {
+    const requested = typeof args[0] === "string" ? args[0] : ctx.host.timeframe();
+    const period = timeframeSeconds(requested);
+    if (period <= 0) return false;
+    const current = Math.floor(ctx.host.bar().time / period);
+    const previous = ctx.host.previousBarTime();
+    if (previous === null) return true;
+    return current !== Math.floor(previous / period);
+  },
   multiplier: (_args, ctx) => timeframeMultiplier(ctx.host.timeframe()),
   period: (_args, ctx) => ctx.host.timeframe(),
   isintraday: (_args, ctx) => timeframeSeconds(ctx.host.timeframe()) < 86400,
@@ -483,13 +569,32 @@ const timeframe: Record<string, BuiltinFn> = {
   isminutes: (_args, ctx) => timeframeSeconds(ctx.host.timeframe()) === 60,
 };
 
-const barstate: Record<string, BuiltinFn> = {
-  isconfirmed: () => true,
-  islast: (_args, ctx) => ctx.host.barIndex() === ctx.host.lastBarIndex(),
-  isfirst: (_args, ctx) => ctx.host.barIndex() === 0,
-  isnew: (_args, ctx) => ctx.host.barIndex() === 0,
-  isrealtime: () => false,
-  ishistory: (_args, ctx) => ctx.host.barIndex() < ctx.host.lastBarIndex(),
+/**
+ * `barstate.*` are values, not functions: `barstate.islast` is read directly.
+ */
+const barstate: Record<string, NamespaceEntry> = {
+  isconfirmed: { __property: true, get: () => true, set: () => undefined },
+  islast: {
+    __property: true,
+    get: (host) => !!host && host.barIndex() === host.lastBarIndex(),
+    set: () => undefined,
+  },
+  isfirst: {
+    __property: true,
+    get: (host) => !!host && host.barIndex() === 0,
+    set: () => undefined,
+  },
+  isnew: {
+    __property: true,
+    get: (host) => !!host && host.barIndex() === 0,
+    set: () => undefined,
+  },
+  isrealtime: { __property: true, get: () => false, set: () => undefined },
+  ishistory: {
+    __property: true,
+    get: (host) => !!host && host.barIndex() < host.lastBarIndex(),
+    set: () => undefined,
+  },
 };
 
 const request: Record<string, BuiltinFn> = {
@@ -504,6 +609,264 @@ const request: Record<string, BuiltinFn> = {
   financial: () => null,
   economic: () => null,
   seed: (_args, ctx) => ctx.host.bar().time,
+};
+
+/* ------------------------------------------------------------------ */
+/* Drawing objects: box, label, table                                 */
+/* ------------------------------------------------------------------ */
+
+
+/**
+ * A drawing is a live object: the script keeps the reference and mutates it
+ * (`box.set_top(id, price)`), and the app draws the final state.
+ */
+function drawing(id: number, kind: PineDrawing["__drawing"], fields: Record<string, unknown>): PineDrawing {
+  return { __drawing: kind, id, deleted: false, ...fields } as PineDrawing;
+}
+
+/** Read a numeric field of a drawing. */
+function drawingNumber(value: PineValue, field: string): number | null {
+  const target = asDrawing(value);
+  if (!target) return null;
+  return toNumber(target[field] as PineValue);
+}
+
+function asDrawing(value: PineValue): PineDrawing | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as PineDrawing;
+  return "__drawing" in candidate ? candidate : null;
+}
+
+const box: Record<string, BuiltinFn> = {
+  new: (args, ctx) => {
+    const id = ctx.nextId("box");
+    // Pine allows both positional and named arguments here:
+    //   box.new(left, top, right, bottom, border_color, border_width, bgcolor, ...)
+    const created = drawing(Number(id.replace(/\D/g, "")) || id.length, "box", {
+      left: n(arg(args, ctx.named, 0, "left", null)),
+      top: n(arg(args, ctx.named, 1, "top", null)),
+      right: n(arg(args, ctx.named, 2, "right", null)),
+      bottom: n(arg(args, ctx.named, 3, "bottom", null)),
+      borderColor: arg(args, ctx.named, 4, "border_color", null),
+      borderWidth: n(arg(args, ctx.named, 5, "border_width", null), 1),
+      bgcolor: arg(args, ctx.named, 6, "bgcolor", null),
+      text: String(arg(args, ctx.named, 7, "text", "")),
+      textColor: arg(args, ctx.named, 8, "text_color", null),
+      xloc: (ctx.named.get("xloc") as string) ?? "bar_index",
+    });
+    ctx.host.recordDrawing(created);
+    return created as unknown as PineValue;
+  },
+  set_top: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.top = n(args[1]);
+    return null;
+  },
+  set_bottom: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.bottom = n(args[1]);
+    return null;
+  },
+  set_left: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.left = n(args[1]);
+    return null;
+  },
+  set_right: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.right = n(args[1]);
+    return null;
+  },
+  set_bgcolor: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.bgcolor = args[1] ?? null;
+    return null;
+  },
+  set_border_color: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.borderColor = args[1] ?? null;
+    return null;
+  },
+  set_border_width: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.borderWidth = n(args[1], 1);
+    return null;
+  },
+  set_text: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.text = typeof args[1] === "string" ? args[1] : "";
+    return null;
+  },
+  set_text_color: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.textColor = args[1] ?? null;
+    return null;
+  },
+  delete: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.deleted = true;
+    return null;
+  },
+  get_top: (args) => drawingNumber(args[0], "top"),
+  get_bottom: (args) => drawingNumber(args[0], "bottom"),
+  get_left: (args) => drawingNumber(args[0], "left"),
+  get_right: (args) => drawingNumber(args[0], "right"),
+};
+
+const label: Record<string, NamespaceEntry> = {
+  new: (args, ctx) => {
+    const id = ctx.nextId("label");
+    // label.new(x, y, text, xloc, yloc, color, style, textcolor, size, ...)
+    const created = drawing(Number(id.replace(/\D/g, "")) || id.length, "label", {
+      x: n(arg(args, ctx.named, 0, "x", null)),
+      y: n(arg(args, ctx.named, 1, "y", null)),
+      text: String(arg(args, ctx.named, 2, "text", "")),
+      xloc: (arg(args, ctx.named, 3, "xloc", null) as string) ?? "bar_index",
+      yloc: (arg(args, ctx.named, 4, "yloc", null) as string) ?? "price",
+      color: arg(args, ctx.named, 5, "color", null),
+      style: (arg(args, ctx.named, 6, "style", null) as string) ?? "label_down",
+      textcolor: arg(args, ctx.named, 7, "textcolor", null),
+      size: (arg(args, ctx.named, 8, "size", null) as string) ?? "normal",
+    });
+    ctx.host.recordDrawing(created);
+    return created as unknown as PineValue;
+  },
+  set_x: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.x = n(args[1]);
+    return null;
+  },
+  set_y: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.y = n(args[1]);
+    return null;
+  },
+  set_text: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.text = typeof args[1] === "string" ? args[1] : "";
+    return null;
+  },
+  set_color: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.color = args[1] ?? null;
+    return null;
+  },
+  set_textcolor: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.textColor = args[1] ?? null;
+    return null;
+  },
+  set_style: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.style = args[1] ?? "label_down";
+    return null;
+  },
+  set_size: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.size = args[1] ?? "normal";
+    return null;
+  },
+  delete: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.deleted = true;
+    return null;
+  },
+  // Label styles.
+  style_none: "none",
+  style_normal: "normal",
+  style_label_up: "label_up",
+  style_label_down: "label_down",
+  style_label_left: "label_left",
+  style_label_right: "label_right",
+  style_label_lower_left: "label_lower_left",
+  style_label_lower_right: "label_lower_right",
+  style_label_upper_left: "label_upper_left",
+  style_label_upper_right: "label_upper_right",
+  style_label_center: "label_center",
+  style_circle: "circle",
+  style_square: "square",
+  style_text_outline: "text_outline",
+  style_xcross: "xcross",
+  style_cross: "cross",
+  style_triangleup: "triangleup",
+  style_triangledown: "triangledown",
+  style_flag: "flag",
+  style_arrowup: "arrowup",
+  style_arrowdown: "arrowdown",
+};
+
+const table: Record<string, BuiltinFn> = {
+  new: (args, ctx) => {
+    const id = ctx.nextId("table");
+    // table.new(position, rows, columns, bgcolor, frame_color, ...)
+    const created = drawing(Number(id.replace(/\D/g, "")) || id.length, "table", {
+      position: (arg(args, ctx.named, 0, "position", null) as string) ?? "top_right",
+      rows: n(arg(args, ctx.named, 1, "rows", null), 1),
+      columns: n(arg(args, ctx.named, 2, "columns", null), 1),
+      bgcolor: arg(args, ctx.named, 3, "bgcolor", null),
+      borderColor: arg(args, ctx.named, 5, "border_color", null),
+      borderWidth: n(arg(args, ctx.named, 6, "border_width", null), 1),
+      cells: [] as Array<Record<string, unknown>>,
+    });
+    ctx.host.recordDrawing(created);
+    return created as unknown as PineValue;
+  },
+  cell: (args, ctx) => {
+    const target = asDrawing(args[0]);
+    if (!target) return null;
+    const cells = (target.cells as Array<Record<string, unknown>>) ?? [];
+    const column = Math.floor(n(args[1]));
+    const row = Math.floor(n(args[2]));
+    const cell = {
+      column,
+      row,
+      text: typeof args[3] === "string" ? args[3] : "",
+      textColor: ctx.named.get("text_color") ?? null,
+      bgcolor: ctx.named.get("bgcolor") ?? null,
+      size: ctx.named.get("text_size") ?? "normal",
+      halign: ctx.named.get("text_halign") ?? "left",
+    };
+    const existing = cells.findIndex((entry) => entry.column === column && entry.row === row);
+    if (existing >= 0) cells[existing] = cell;
+    else cells.push(cell);
+    target.cells = cells;
+    return null;
+  },
+  cell_set_text: (args) => {
+    const target = asDrawing(args[0]);
+    if (!target) return null;
+    const cells = (target.cells as Array<Record<string, unknown>>) ?? [];
+    const cell = cells.find(
+      (entry) => entry.column === Math.floor(n(args[1])) && entry.row === Math.floor(n(args[2]))
+    );
+    if (cell) cell.text = typeof args[3] === "string" ? args[3] : "";
+    return null;
+  },
+  cell_set_bgcolor: (args) => {
+    const target = asDrawing(args[0]);
+    if (!target) return null;
+    const cells = (target.cells as Array<Record<string, unknown>>) ?? [];
+    const cell = cells.find(
+      (entry) => entry.column === Math.floor(n(args[1])) && entry.row === Math.floor(n(args[2]))
+    );
+    if (cell) cell.bgcolor = args[3] ?? null;
+    return null;
+  },
+  cell_set_text_color: (args) => {
+    const target = asDrawing(args[0]);
+    if (!target) return null;
+    const cells = (target.cells as Array<Record<string, unknown>>) ?? [];
+    const cell = cells.find(
+      (entry) => entry.column === Math.floor(n(args[1])) && entry.row === Math.floor(n(args[2]))
+    );
+    if (cell) cell.textColor = args[3] ?? null;
+    return null;
+  },
+  delete: (args) => {
+    const target = asDrawing(args[0]);
+    if (target) target.deleted = true;
+    return null;
+  },
 };
 
 /* ------------------------------------------------------------------ */
@@ -540,6 +903,7 @@ export const format: Record<string, NamespaceEntry> = {
   price: "price",
   volume: "volume",
   percent: "percent",
+  mintick: "mintick",
 };
 
 export const location: Record<string, NamespaceEntry> = {
@@ -622,19 +986,32 @@ const TIMEFRAME_MINUTES: Record<string, number> = {
   D: 1440, W: 10080, M: 43200,
 };
 
+/**
+ * Seconds in a timeframe. Both TradingView's spelling ("15", "60", "1D") and
+ * the app's own ("15m", "1h", "4h", "1d") are understood.
+ */
 export function timeframeSeconds(timeframe: string): number {
-  const match = /^(\d+)?([DWM])?$/.exec(timeframe.trim());
-  if (!match) return 60;
-  const multiplier = match[1] ? Number(match[1]) : 1;
-  const unit = match[2] ?? "m";
+  const text = timeframe.trim();
+  const match = /^(\d+)?\s*([mhdwM])?$/.exec(text);
+  if (match) {
+    const multiplier = match[1] ? Number(match[1]) : 1;
+    const unit = match[2] ?? "m";
+    if (unit === "h") return multiplier * 3600;
+    if (unit === "d") return multiplier * 86400;
+    if (unit === "w" || unit === "M") return multiplier * 604800;
+    return multiplier * 60;
+  }
+  const legacy = /^(\d+)?([DWM])?$/.exec(text);
+  if (!legacy) return 60;
+  const multiplier = legacy[1] ? Number(legacy[1]) : 1;
+  const unit = legacy[2] ?? "m";
   const minutes = TIMEFRAME_MINUTES[unit] ?? 1;
   return multiplier * minutes * 60;
 }
 
 export function timeframeMultiplier(timeframe: string): number {
-  const match = /^(\d+)?([DWM])?$/.exec(timeframe.trim());
-  if (!match || !match[1]) return 1;
-  return Number(match[1]);
+  const match = /^(\d+)/.exec(timeframe.trim());
+  return match ? Number(match[1]) : 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -656,14 +1033,48 @@ export const NAMESPACES: Record<string, Record<string, NamespaceEntry>> = {
   location,
   shape,
   order: { ...orderSide, ...orderType, side: orderSide, type: orderType },
+  box,
+  label,
+  table,
+  size: {
+    auto: "auto",
+    tiny: "tiny",
+    small: "small",
+    normal: "normal",
+    large: "large",
+    huge: "huge",
+  } as Record<string, NamespaceEntry>,
+  text: {
+    align_left: "left",
+    align_center: "center",
+    align_right: "right",
+  } as Record<string, NamespaceEntry>,
+  position: {
+    top_left: "top_left",
+    top_center: "top_center",
+    top_right: "top_right",
+    middle_left: "middle_left",
+    middle_center: "middle_center",
+    middle_right: "middle_right",
+    bottom_left: "bottom_left",
+    bottom_center: "bottom_center",
+    bottom_right: "bottom_right",
+  } as Record<string, NamespaceEntry>,
+  xloc: {
+    bar_index: "bar_index",
+    bar_time: "bar_time",
+    price: "price",
+  } as Record<string, NamespaceEntry>,
+  yloc: {
+    price: "price",
+    abovebar: "abovebar",
+    belowbar: "belowbar",
+  } as Record<string, NamespaceEntry>,
   alert: alertFreq,
   scale,
   extend,
   hline: hlineStyle,
   line: lineStyle,
-  label: lineStyle,
-  box: lineStyle,
-  table: {},
   matrix: {},
   map: {},
 };

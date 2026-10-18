@@ -8,7 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "../src/api/client";
 import { TIMEFRAMES, type Timeframe } from "../src/api/types";
 import { Badge, Button, Card, Chip, ChipRow, Row, Screen, SectionTitle, SignedText } from "../src/components/ui";
-import { runPine, toBars, type PineRunResult } from "../src/pine";
+import { runPine, toBars, type PineLabelDrawing, type PineRunResult } from "../src/pine";
 import { usePine } from "../src/state/pine";
 import { formatNumber, signColor, space, theme } from "../src/theme";
 
@@ -307,6 +307,32 @@ plot(average, "Average")
                   </>
                 ) : null}
 
+                {result.drawings.length ? (
+                  <>
+                    <Text style={styles.subTitle}>Chart objects</Text>
+                    <Row
+                      label="Labels"
+                      value={String(result.drawings.filter((d) => d.kind === "label").length)}
+                    />
+                    <Row
+                      label="Boxes"
+                      value={String(result.drawings.filter((d) => d.kind === "box").length)}
+                    />
+                    <Row
+                      label="Tables"
+                      value={String(result.drawings.filter((d) => d.kind === "table").length)}
+                    />
+                    {result.drawings
+                      .filter((d): d is PineLabelDrawing => d.kind === "label" && !!d.text)
+                      .slice(-4)
+                      .map((drawing, index) => (
+                        <Text key={index} style={styles.signalText}>
+                          • {drawing.text.replace(/\n/g, " ")}
+                        </Text>
+                      ))}
+                  </>
+                ) : null}
+
                 {result.trades.length ? (
                   <>
                     <Text style={styles.subTitle}>Backtest</Text>
@@ -405,4 +431,5 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
   alertText: { color: theme.warn, fontSize: 11, lineHeight: 16 },
+  signalText: { color: theme.textDim, fontSize: 11, lineHeight: 16 },
 });

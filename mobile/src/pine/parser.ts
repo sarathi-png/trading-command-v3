@@ -13,7 +13,7 @@
  */
 import {
   type Block, type CallArg, type Expression, type FunctionDecl, type IfStmt, type Param,
-  type ProgramNode, type Statement,
+  type ProgramNode, type Statement, type TypeDecl, type TypeField,
 } from "./ast";
 import { PineSyntaxError, type Token, tokenize } from "./lexer";
 
@@ -57,9 +57,18 @@ class Parser {
   private lines: LogicalLine[];
   private index = 0;
   private siteCounter = 0;
+  /** User-declared type names, collected before parsing so that a type may be
+   * used in a declaration wherever it appears in the file. */
+  private typeNames = new Set<string>();
 
   constructor(source: string) {
     this.lines = groupLines(tokenize(source));
+    for (const line of this.lines) {
+      if (line.tokens[0]?.type === "keyword" && line.tokens[0]?.value === "type") {
+        const name = line.tokens[1];
+        if (name?.type === "ident") this.typeNames.add(name.value);
+      }
+    }
   }
 
   /* ---------------- line helpers ---------------- */
@@ -139,6 +148,19 @@ class Parser {
     if (first.type === "keyword" && first.value === "while") {
       return this.parseWhile();
     }
+    // `type SRZone` — a user-declared type
+    if (first.type === "keyword" && first.value === "type" && line.tokens[1]?.type === "ident") {
+      return this.parseTypeDecl();
+    }
+    // `break` / `continue`
+    if (first.type === "keyword" && first.value === "break") {
+      this.index++;
+      return { kind: "break", line: line.line, col: line.indent + 1 };
+    }
+    if (first.type === "keyword" && first.value === "continue") {
+      this.index++;
+      return { kind: "continue", line: line.line, col: line.indent + 1 };
+    }
     // function declaration:  name(params) =>   (possibly preceded by a type)
     const fn = this.tryParseFunction();
     if (fn) return fn;
@@ -183,20 +205,54 @@ class Parser {
     return { kind: "tupleAssign", names, value, line: line.line, col: line.indent + 1 };
   }
 
+  /**
+   * `type SRZone` followed by an indented block of field declarations:
+   *
+   *   type SRZone
+   *       float top = na
+   *       bool  isRes = false
+   */
+  private parseTypeDecl(): TypeDecl {
+    const line = this.current!;
+    const name = line.tokens[1].value;
+    this.index++;
+    const block = this.parseIndentedBlock();
+    const fields: TypeField[] = [];
+    for (const statement of block.statements) {
+      if (statement.kind !== "varDecl") {
+        this.error(`Type '${name}' can only contain field declarations.`, line.line);
+      }
+      fields.push({
+        name: statement.name,
+        typeName: statement.typeName,
+        defaultValue: statement.value,
+        line: statement.line,
+        col: statement.col,
+      });
+    }
+    return { kind: "typeDecl", name, fields, line: line.line, col: line.indent + 1 };
+  }
+
+  /**
+   * Parse an `if`. The header may be `if ...` or `else if ...` — in the
+   * second case the condition starts after the `if` token.
+   */
   private parseIf(): IfStmt {
     const line = this.current!;
     this.index++;
-    const condition = this.parseExpressionFrom(line.tokens, 1);
+    const start = line.tokens[0]?.value === "else" ? 2 : 1;
+    const condition = this.parseExpressionFrom(line.tokens, start);
     const then = this.parseIndentedBlock();
     let otherwise: Block | Statement | null = null;
 
     const next = this.current;
     if (next && this.isElseLine(next) && next.indent === line.indent) {
-      this.index++;
-      // `else if` — a nested if statement at the same level.
+      // `else if` — a nested if statement at the same level. parseIf consumes
+      // the line itself, so the index is only advanced for a plain `else`.
       if (next.tokens[1] && next.tokens[1].type === "keyword" && next.tokens[1].value === "if") {
         otherwise = this.parseIf();
       } else {
+        this.index++;
         otherwise = this.parseIndentedBlock();
       }
     }
@@ -399,12 +455,53 @@ class Parser {
       typeName = tokens[cursor].value;
       cursor++;
     }
+    // A user type used as an array: `var SRZone[] zoneList = ...`
+    if (
+      tokens[cursor]?.type === "ident" &&
+      tokens[cursor + 1]?.value === "[" &&
+      tokens[cursor + 2]?.value === "]" &&
+      tokens[cursor + 3]?.type === "ident"
+    ) {
+      typeName = `${tokens[cursor].value}[]`;
+      cursor += 3;
+    }
+    // A user type used as a declaration: `SRZone z = ...`
+    if (
+      !typeName &&
+      tokens[cursor]?.type === "ident" &&
+      this.typeNames.has(tokens[cursor].value) &&
+      tokens[cursor + 1]?.type === "ident"
+    ) {
+      typeName = tokens[cursor].value;
+      cursor++;
+    }
 
     const name = tokens[cursor];
     if (!isNameToken(name)) {
       this.error(`Unexpected token '${tokens[cursor]?.value ?? ""}'`, line.line);
     }
     cursor++;
+
+    // Assignment to a member of an object: `zone.top := 12`. The target is
+    // `object.property`, so the whole expression is parsed and then checked
+    // for an assignment operator.
+    if (tokens[cursor]?.value === "." && isNameToken(tokens[cursor + 1])) {
+      const member = this.parseExpressionFrom(tokens, 0, () => cursor + 2);
+      const memberOperator = tokens[cursor + 2]?.value;
+      if (memberOperator && ["=", ":=", "+=", "-=", "*=", "/=", "%="].includes(memberOperator)) {
+        const value = this.parseExpressionFrom(tokens, cursor + 3);
+        this.index++;
+        return {
+          kind: "assign",
+          target: member,
+          value,
+          op: memberOperator === "=" || memberOperator === ":=" ? null : memberOperator.slice(0, -1),
+          line: line.line,
+          col: line.indent + 1,
+        };
+      }
+    }
+
     const operator = tokens[cursor]?.value;
     if (operator && ["=", "+=", "-=", "*=", "/=", "%=", ":="].includes(operator)) {
       const value = this.parseExpressionFrom(tokens, cursor + 1);
@@ -524,6 +621,8 @@ class Parser {
 
   private parsePostfix(cursor: { pos: number; end: number }, tokens: Token[]): Expression {
     let expression = this.parsePrimary(cursor, tokens);
+    // Explicit type arguments, as in `array.new<SRZone>()`.
+    let typeArgs: string[] | undefined;
     for (;;) {
       const token = tokens[cursor.pos];
       if (!token || cursor.pos >= cursor.end) break;
@@ -535,10 +634,22 @@ class Parser {
           callee: expression,
           args,
           site: this.siteCounter++,
+          ...(typeArgs ? { typeArgs } : {}),
           line: expression.line,
           col: expression.col,
         };
+        typeArgs = undefined;
         continue;
+      }
+      // Generic call: `array.new<SRZone>()`. The type argument list is only
+      // recognised when it is closed and followed by `(`, so `a < b` still
+      // parses as a comparison.
+      if (token.value === "<" && expression.kind === "member" && !typeArgs) {
+        const parsed = this.tryParseTypeArgs(cursor, tokens);
+        if (parsed) {
+          typeArgs = parsed;
+          continue;
+        }
       }
       if (token.value === "[") {
         cursor.pos++;
@@ -564,6 +675,37 @@ class Parser {
       break;
     }
     return expression;
+  }
+
+  /**
+   * Read `<Type, Type>` when it is followed by `(`. Returns null when the
+   * `<` is a comparison rather than a type argument list.
+   */
+  private tryParseTypeArgs(cursor: { pos: number; end: number }, tokens: Token[]): string[] | null {
+    const start = cursor.pos;
+    let index = cursor.pos + 1;
+    const typeArgs: string[] = [];
+    while (index < tokens.length) {
+      const token = tokens[index];
+      if (token.type === "ident" || token.type === "keyword") {
+        typeArgs.push(token.value);
+        index++;
+        if (tokens[index]?.value === ",") {
+          index++;
+          continue;
+        }
+        if (tokens[index]?.value === ">") {
+          index++;
+          if (tokens[index]?.value === "(") {
+            cursor.pos = index;
+            return typeArgs;
+          }
+        }
+      }
+      break;
+    }
+    cursor.pos = start;
+    return null;
   }
 
   private parseArgs(cursor: { pos: number; end: number }, tokens: Token[]): CallArg[] {
@@ -616,10 +758,32 @@ class Parser {
     if (token.type === "string") {
       return { kind: "string", value: token.value, line: token.line, col: token.col };
     }
+    if (token.type === "color") {
+      const hex = token.value.replace("#", "");
+      const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+      return {
+        kind: "color",
+        value: {
+          r: parseInt(full.slice(0, 2), 16) || 0,
+          g: parseInt(full.slice(2, 4), 16) || 0,
+          b: parseInt(full.slice(4, 6), 16) || 0,
+          a: 1,
+        },
+        line: token.line,
+        col: token.col,
+      };
+    }
     if (token.type === "keyword") {
       if (token.value === "true") return { kind: "bool", value: true, line: token.line, col: token.col };
       if (token.value === "false") return { kind: "bool", value: false, line: token.line, col: token.col };
-      if (token.value === "na") return { kind: "na", line: token.line, col: token.col };
+      if (token.value === "na") {
+        // `na` is a keyword, but Pine also has a function of that name:
+        // `na(value)` returns the value unless it is zero.
+        if (tokens[cursor.pos]?.value === "(") {
+          return { kind: "ident", name: "na", line: token.line, col: token.col };
+        }
+        return { kind: "na", line: token.line, col: token.col };
+      }
       if (TYPE_NAMES.has(token.value) || TYPE_QUALIFIERS.has(token.value)) {
         // A bare type used as a value (e.g. `int` in `x = int`) — treat as a
         // named constant so the evaluator can report a precise error.
