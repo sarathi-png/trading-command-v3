@@ -26,10 +26,37 @@ export function buildChartHtml(librarySource: string): string {
     position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
     color: #9aa3b2; font: 13px -apple-system, system-ui, sans-serif; text-align: center; padding: 24px;
   }
+  #overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .tc-box { position: absolute; box-sizing: border-box; }
+  .tc-label {
+    position: absolute; white-space: pre; line-height: 1.25; font-weight: 600;
+    padding: 2px 5px; border-radius: 3px; pointer-events: none;
+  }
+  .tc-label.tiny { font-size: 9px; padding: 1px 3px; }
+  .tc-label.small { font-size: 11px; }
+  .tc-label.normal { font-size: 12px; }
+  .tc-label.large { font-size: 14px; }
+  .tc-label.center { transform: translate(-50%, -50%); }
+  .tc-label.up { transform: translate(-50%, -100%); }
+  .tc-label.down { transform: translate(-50%, 0); }
+  .tc-label.left { transform: translate(-100%, -50%); }
+  .tc-label.right { transform: translate(0, -50%); }
+  .tc-label.lower_left { transform: translate(-100%, 0); }
+  .tc-label.lower_right { transform: translate(0, 0); }
+  .tc-label.upper_left { transform: translate(-100%, -100%); }
+  .tc-label.upper_right { transform: translate(0, -100%); }
+  .tc-label.arrow { background: transparent !important; padding: 0; }
+  .tc-label.cross { background: transparent !important; padding: 0; font-size: 14px; }
+  .tc-table {
+    position: absolute; display: grid; gap: 1px; font-size: 10px; line-height: 1.3;
+    border-radius: 3px; overflow: hidden;
+  }
+  .tc-table div { padding: 2px 6px; white-space: nowrap; }
 </style>
 </head>
 <body>
 <div id="chart"></div>
+<div id="overlay"></div>
 <div id="status">Waiting for market data…</div>
 <script>${library}</script>
 <script>
@@ -37,6 +64,7 @@ export function buildChartHtml(librarySource: string): string {
   var LWC = window.LightweightCharts;
   var container = document.getElementById('chart');
   var statusEl = document.getElementById('status');
+  var overlayEl = document.getElementById('overlay');
   var chart = null;
   var candleSeries = null;
   var overlaySeries = {};   // id -> series
@@ -100,6 +128,10 @@ export function buildChartHtml(librarySource: string): string {
       });
     }
 
+    // The drawings are DOM elements positioned over the chart, so they have
+    // to be moved whenever the visible range changes.
+    chart.timeScale().subscribeVisibleLogicalRangeChange(function () { renderDrawings(); });
+
     chart.subscribeCrosshairMove(function (param) {
       if (!param || !param.time || !candleSeries) return;
       var value = param.seriesData.get(candleSeries);
@@ -117,6 +149,120 @@ export function buildChartHtml(librarySource: string): string {
     try {
       window.parent.postMessage(Object.assign({ source: 'tc-chart' }, message), '*');
     } catch (e) {}
+  }
+
+
+  /* -------------------------------------------------------------- */
+  /* Pine drawings: boxes, labels and tables                         */
+  /* -------------------------------------------------------------- */
+
+  function labelClass(style) {
+    var name = String(style || 'label_down');
+    name = name.replace(/^label_/, '').replace(/^style_/, '');
+    var known = ['center', 'up', 'down', 'left', 'right', 'lower_left', 'lower_right',
+      'upper_left', 'upper_right', 'circle', 'square', 'arrowup', 'arrowdown', 'flag',
+      'text_outline', 'xcross', 'cross', 'triangleup', 'triangledown', 'none'];
+    if (known.indexOf(name) < 0) return 'center';
+    return name;
+  }
+
+  function drawBox(drawing) {
+    if (drawing.leftTime == null || drawing.rightTime == null) return;
+    if (drawing.top == null || drawing.bottom == null) return;
+    var x1 = chart.timeScale().timeToCoordinate(drawing.leftTime);
+    var x2 = chart.timeScale().timeToCoordinate(drawing.rightTime);
+    var y1 = candleSeries.priceToCoordinate(drawing.top);
+    var y2 = candleSeries.priceToCoordinate(drawing.bottom);
+    if (x1 == null || x2 == null || y1 == null || y2 == null) return;
+    var el = document.createElement('div');
+    el.className = 'tc-box';
+    el.style.left = Math.min(x1, x2) + 'px';
+    el.style.top = Math.min(y1, y2) + 'px';
+    el.style.width = Math.max(1, Math.abs(x2 - x1)) + 'px';
+    el.style.height = Math.max(1, Math.abs(y2 - y1)) + 'px';
+    el.style.border = (drawing.borderWidth || 1) + 'px solid ' + (drawing.borderColor || 'transparent');
+    el.style.background = drawing.bgcolor || 'transparent';
+    if (drawing.text) {
+      el.style.color = drawing.textColor || '#ffffff';
+      el.style.fontSize = '10px';
+      el.style.padding = '2px 4px';
+    }
+    overlayEl.appendChild(el);
+  }
+
+  function drawLabel(drawing) {
+    if (drawing.time == null || drawing.price == null) return;
+    var x = chart.timeScale().timeToCoordinate(drawing.time);
+    var y = candleSeries.priceToCoordinate(drawing.price);
+    if (x == null || y == null) return;
+    var kind = labelClass(drawing.style);
+    var el = document.createElement('div');
+    el.className = 'tc-label ' + kind + ' ' + (drawing.size || 'normal');
+    el.textContent = drawing.text || '';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    if (kind === 'circle' || kind === 'square') {
+      el.style.background = drawing.color || 'transparent';
+      el.style.width = '8px';
+      el.style.height = '8px';
+      el.style.borderRadius = kind === 'circle' ? '50%' : '2px';
+      el.style.transform = 'translate(-50%, -50%)';
+    } else if (kind === 'arrowup' || kind === 'arrowdown' || kind === 'triangleup' || kind === 'triangledown') {
+      el.textContent = (kind === 'arrowup' || kind === 'triangleup') ? '\u25b2' : '\u25bc';
+      el.style.color = drawing.color || '#ffffff';
+      el.style.transform = 'translate(-50%, -50%)';
+    } else if (kind === 'cross' || kind === 'xcross') {
+      el.textContent = kind === 'cross' ? '\u2715' : '\u2716';
+      el.style.color = drawing.color || '#ffffff';
+      el.style.transform = 'translate(-50%, -50%)';
+    } else if (kind === 'none') {
+      el.style.background = 'transparent';
+    } else {
+      el.style.background = drawing.color || 'rgba(0, 0, 0, 0.6)';
+      el.style.color = drawing.textColor || '#ffffff';
+    }
+    overlayEl.appendChild(el);
+  }
+
+  function drawTable(drawing) {
+    var el = document.createElement('div');
+    el.className = 'tc-table';
+    var position = String(drawing.position || 'top_right');
+    el.style.gridTemplateColumns = 'repeat(' + Math.max(1, drawing.columns || 1) + ', auto)';
+    if (position.indexOf('bottom') >= 0) el.style.bottom = '8px';
+    else el.style.top = '8px';
+    if (position.indexOf('left') >= 0) el.style.left = '8px';
+    else el.style.right = '72px';
+    var cells = drawing.cells || [];
+    for (var row = 0; row < (drawing.rows || 1); row++) {
+      for (var column = 0; column < (drawing.columns || 1); column++) {
+        var cell = document.createElement('div');
+        var found = null;
+        for (var i = 0; i < cells.length; i++) {
+          if (cells[i].row === row && cells[i].column === column) { found = cells[i]; break; }
+        }
+        cell.textContent = found ? found.text : '';
+        cell.style.color = found ? found.textColor : '#c7ccd8';
+        cell.style.background = found ? found.bgcolor : 'rgba(0, 0, 0, 0)';
+        cell.style.textAlign = found ? found.halign : 'left';
+        el.appendChild(cell);
+      }
+    }
+    overlayEl.appendChild(el);
+  }
+
+  function renderDrawings() {
+    if (!overlayEl || !chart || !candleSeries) return;
+    overlayEl.innerHTML = '';
+    var drawings = (lastPayload && lastPayload.drawings) || [];
+    for (var i = 0; i < drawings.length; i++) {
+      var drawing = drawings[i];
+      try {
+        if (drawing.kind === 'box') drawBox(drawing);
+        else if (drawing.kind === 'label') drawLabel(drawing);
+        else if (drawing.kind === 'table') drawTable(drawing);
+      } catch (error) { /* a broken drawing must not break the chart */ }
+    }
   }
 
   function toSeriesData(points) {
@@ -189,6 +335,8 @@ export function buildChartHtml(librarySource: string): string {
       chart.timeScale().fitContent();
     }
     lastCandleCount = candleCount;
+
+    renderDrawings();
   }
 
   window.__tcChart = {

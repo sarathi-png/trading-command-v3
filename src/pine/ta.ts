@@ -811,10 +811,12 @@ const pivothigh: TaFunction = (args, ctx, named) => {
   const state = ctx.state("pivothigh", () => ({ pending: [] as Array<number | null> }));
   state.pending.push(source);
   if (state.pending.length <= right) return null;
-  const pivot = state.pending[state.pending.length - 1 - right];
-  const window = state.pending.slice(Math.max(0, state.pending.length - left - right - 1), state.pending.length - right);
+  // The candidate sits `right` bars back; the window spans `left` bars before
+  // it and `right` bars after it.
+  const candidateIndex = state.pending.length - 1 - right;
+  const window = state.pending.slice(Math.max(0, candidateIndex - left), candidateIndex + right + 1);
   if (window.length < left + right + 1) return null;
-  const candidate = state.pending[state.pending.length - 1 - right];
+  const candidate = state.pending[candidateIndex];
   if (candidate === null) return null;
   let isPivot = true;
   for (const value of window) {
@@ -824,7 +826,6 @@ const pivothigh: TaFunction = (args, ctx, named) => {
       break;
     }
   }
-  void pivot;
   return isPivot ? candidate : null;
 };
 
@@ -835,9 +836,10 @@ const pivotlow: TaFunction = (args, ctx, named) => {
   const state = ctx.state("pivotlow", () => ({ pending: [] as Array<number | null> }));
   state.pending.push(source);
   if (state.pending.length <= right) return null;
-  const window = state.pending.slice(Math.max(0, state.pending.length - left - right - 1), state.pending.length - right);
+  const candidateIndex = state.pending.length - 1 - right;
+  const window = state.pending.slice(Math.max(0, candidateIndex - left), candidateIndex + right + 1);
   if (window.length < left + right + 1) return null;
-  const candidate = state.pending[state.pending.length - 1 - right];
+  const candidate = state.pending[candidateIndex];
   if (candidate === null) return null;
   let isPivot = true;
   for (const value of window) {
@@ -901,6 +903,47 @@ const keltner: TaFunction = (args, ctx, named) => {
   const range = useTrueRange ? state.atrState.prev : ctx.bar.high - ctx.bar.low;
   if (state.ema === null || range === null) return [state.ema, null, null];
   return [state.ema, state.ema + mult * range, state.ema - mult * range];
+};
+
+/**
+ * `ta.vwap(source, length)`.
+ *
+ * When `length` is a boolean series — as in `timeframe.change("1D")` — the
+ * average is anchored: it accumulates until the series turns true again.
+ * Otherwise `length` is the number of bars in a rolling window.
+ */
+const vwap: TaFunction = (args, ctx, named) => {
+  const source = num(arg(args, named, 0, "source", NA));
+  const lengthArg = arg(args, named, 1, "length", NA);
+  const state = ctx.state("vwap", () => ({
+    sumPV: 0,
+    sumVolume: 0,
+    window: [] as Array<{ price: number; volume: number }>,
+  }));
+  const price = source ?? ctx.bar.close;
+  const volume = ctx.bar.volume ?? 0;
+
+  if (typeof lengthArg === "boolean") {
+    if (lengthArg) {
+      state.sumPV = 0;
+      state.sumVolume = 0;
+    }
+    state.sumPV += price * volume;
+    state.sumVolume += volume;
+    return state.sumVolume === 0 ? null : state.sumPV / state.sumVolume;
+  }
+
+  const length = len(lengthArg, 14);
+  state.window.push({ price, volume });
+  if (state.window.length > 2000) state.window.splice(0, state.window.length - 2000);
+  const window = state.window.slice(Math.max(0, state.window.length - length));
+  let sumPV = 0;
+  let sumVolume = 0;
+  for (const entry of window) {
+    sumPV += entry.price * entry.volume;
+    sumVolume += entry.volume;
+  }
+  return sumVolume === 0 ? null : sumPV / sumVolume;
 };
 
 const supertrend: TaFunction = (args, ctx, named) => {
@@ -1064,5 +1107,6 @@ export const TA_FUNCTIONS: Record<string, TaFunction> = {
   rsi, macd, stoch, cci, mfi, wpr, mom, roc, change, cum, sum,
   crossover, crossunder, cross, highest, lowest, highestbars, lowestbars,
   barssince, valuewhen, pivothigh, pivotlow, bb, keltner, supertrend, dmi, sar,
+  vwap,
 };
 

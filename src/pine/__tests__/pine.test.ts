@@ -307,7 +307,11 @@ test("every bundled example script runs", () => {
       `${example.name} reported errors: ${result.errors.map((error) => error.message).join("; ")}`
     );
     assert.equal(result.ok, true, `${example.name} did not run`);
-    assert.ok(result.plots.length > 0, `${example.name} produced no plots`);
+    // The confluence indicator hides its internal lines behind an input, so
+    // it draws its signals as labels and boxes instead of plots.
+    const drawsSomething =
+      result.plots.length > 0 || result.drawings.length > 0 || result.shapes.length > 0;
+    assert.ok(drawsSomething, `${example.name} drew nothing at all`);
   }
 });
 

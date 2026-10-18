@@ -27,3 +27,11 @@ test("the page is a complete document", () => {
   assert.match(html, /<meta name="viewport"/);
   assert.match(html, /id="chart"/);
 });
+
+test("the page can draw the Pine boxes, labels and tables", () => {
+  const html = buildChartHtml("");
+  assert.match(html, /id="overlay"/);
+  assert.match(html, /function renderDrawings/);
+  assert.match(html, /timeToCoordinate/);
+  assert.match(html, /priceToCoordinate/);
+});

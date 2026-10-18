@@ -6,7 +6,7 @@
  * builtins.ts free of any dependency on the evaluator and makes the whole
  * runtime testable in isolation.
  */
-import type { PineValue } from "./values";
+import type { PineDrawing, PineValue } from "./values";
 import type { BarData } from "./ta";
 
 export interface PineInput {
@@ -69,11 +69,15 @@ export interface PineHost {
   recordHLine(line: { value: number; title: string; color: PineValue }): void;
   recordAlertCondition(condition: PineAlertConditionCall): void;
   recordAlert(alert: PineAlertEvent): void;
+  /** Record a drawing object (box, label, table) so the app can draw it. */
+  recordDrawing(drawing: PineDrawing): void;
   /** `strategy.*` entry point — implemented by the order simulator. */
   strategyCall(name: string, args: PineValue[], named: Map<string, PineValue>): PineValue;
   /** `request.security(...)` — only same-timeframe requests are supported. */
   securityCall(timeframe: string, expression: PineValue): PineValue;
   bar(): BarData;
+  /** The time of the bar before the current one, or null on the first bar. */
+  previousBarTime(): number | null;
   barIndex(): number;
   lastBarIndex(): number;
   symbol(): string;

@@ -143,6 +143,7 @@ export default function ChartScreen() {
       overlays,
       levels,
       markers,
+      drawings: showPine ? pine?.drawings ?? [] : [],
       chartType,
       error: candles.error ?? undefined,
     };

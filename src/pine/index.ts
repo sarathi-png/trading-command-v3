@@ -14,6 +14,13 @@ import type { PineValue } from "./values";
 
 export type { PineRunOptions, PineRunResult, PineError, BarData };
 export type { PinePlotResult, PineShapeResult, PineHLine } from "./evaluator";
+export type {
+  PineDrawingResult,
+  PineBoxDrawing,
+  PineLabelDrawing,
+  PineTableDrawing,
+  PineTableCell,
+} from "./drawings";
 export type { StrategyTrade, StrategyStats } from "./strategy";
 export type { PineInput } from "./host";
 
@@ -56,6 +63,7 @@ export function emptyResult(errors: PineError[], compileFailed = false): PineCom
     inputs: [],
     plots: [],
     shapes: [],
+    drawings: [],
     hlines: [],
     alerts: [],
     alertConditions: [],

@@ -56,9 +56,9 @@ supported one.
 
 ```bash
 npm run typecheck   # tsc --noEmit over the whole app
-npm run test:pine   # 18 tests for the Pine runtime
+npm run test:pine   # 23 tests for the Pine runtime
 npm run test:api    # 7 tests for the API client against a mock server
-npm run test:chart  # 3 tests for the chart page
+npm run test:chart  # 4 tests for the chart page
 npm test            # all of the above
 ```
 
@@ -84,6 +84,7 @@ mobile/
     chart/                 Lightweight Charts WebView and its bridge
     components/ui.tsx      the shared UI kit
     pine/                  the Pine Script runtime (lexer → parser → evaluator)
+      scripts/             scripts that ship with the app
   assets/charts/           the bundled chart library, for offline use
 ```
 
@@ -125,10 +126,19 @@ which one it is talking to.
 Supported today: `indicator` / `strategy` declarations, `plot`, `plotshape`,
 `plotchar`, `alert` / `alertcondition`, `input.*` (with in-app overrides),
 `ta.sma/ema/rma/wma/atr/tr/crossover/crossunder/highest/lowest/changes/vwap/
-stdev/range/median/percentile/sum/cum/abs/...`, `math.*`, `nz`, `na`, `var`,
-`if/else`, `for`, `while`, ternary, boolean operators, user functions, series
-history (`close[1]`), and the standard strategy calls (`strategy.entry`,
-`strategy.exit`, `strategy.close`, `strategy.cancel`, `strategy.close_all`).
+stdev/range/median/percentile/sum/cum/abs/pivothigh/pivotlow/barssince/
+valuewhen/supertrend/dmi/sar/...`, `math.*`, `nz`, `na`, `var` / `varip`,
+`if/else if/else`, `for`, `while`, `break` / `continue`, ternary, boolean
+operators, user functions, tuple destructuring, series history (`close[1]`),
+user `type` declarations with `X.new()`, Pine arrays (`array.new<T>()` and its
+methods), the drawing family (`box.*`, `label.*`, `table.*`), and the standard
+strategy calls (`strategy.entry`, `strategy.exit`, `strategy.close`,
+`strategy.cancel`, `strategy.close_all`).
+
+Pine idioms that are easy to get wrong are implemented on purpose: `not na(x)`
+is true when the value is present, `na(x)` returns the value itself, `array`
+elements keep their object identity (so `z.top := v` mutates the zone), and a
+user type may be used in a declaration wherever it appears in the file.
 
 Strategy semantics match TradingView's defaults: an order fills on the **next**
 bar, limit and stop orders fill against the bar range and stay pending if the
@@ -137,13 +147,22 @@ bar never touches them, `strategy.exit` stop and target are checked every bar
 the opposite position first, pyramiding is one entry, and any position still
 open at the end of the data is closed at the last close.
 
-What is **not** supported yet: `request.security`, `array.*` / `matrix.*` /
-`map.*` collections, `switch`, `varip`, and the drawing-object family
-(`line.new`, `label.new`, …). Unsupported calls are reported as a runtime
-warning on the screen rather than crashing the app.
+What is **not** supported yet: `request.security` (other than the chart's own
+timeframe), `matrix.*` / `map.*` collections and `switch`. Unsupported calls are
+reported as a runtime warning on the screen rather than crashing the app.
 
 Send the script you actually use and it will be added to the runtime with a
 regression test in `src/pine/__tests__/pine.test.ts`.
+
+### The script this app was built for
+
+`src/pine/scripts/confluence.ts` holds the **Crypto Confluence Signals [8x]**
+indicator verbatim. It is a v6 indicator with 39 inputs, seven confluence
+votes, support/resistance zones, a stop/target pair, signal labels and an info
+table — and it is the app's regression fixture
+(`src/pine/__tests__/confluence.test.ts`), so the runtime cannot break it
+without a test failing. It ships as the first example script, so it is in the
+script list on a fresh install.
 
 ### The chart bridge
 
@@ -153,8 +172,14 @@ CDN. The library is shipped as a **text asset**
 (`assets/charts/lightweight-charts.standalone.production.txt`), not as a module:
 it is browser JavaScript that assigns to `window`, so it must never run inside
 the React Native runtime. React calls `window.__tcChart.setData(json)` with candles, line overlays,
-price lines (support/resistance) and series markers (signals, Pine trades);
-crosshair moves are posted back to React.
+price lines (support/resistance), series markers (signals, Pine trades) and the
+script's drawings; crosshair moves are posted back to React.
+
+The drawings (`box.new`, `label.new`, `table.new`) are DOM elements in an
+overlay above the chart: the page converts their bar times and prices into
+chart coordinates, so a support/resistance zone, a "BUY 6/7" label or the info
+table lands exactly where Pine would draw it. The overlay is redrawn whenever
+the visible range changes.
 
 ---
 

@@ -52,7 +52,13 @@ export const useSession = create<SessionState>((set, get) => ({
         getItemAsync(PASSWORD_KEY),
         AsyncStorage.getItem(WORKSPACE_KEY),
       ]);
-      if (!url || !password) return false;
+      // No saved session is not a failure — it is simply "signed out". The
+      // status has to leave "idle", or the gate would wait for a restore
+      // that is never coming.
+      if (!url || !password) {
+        set({ status: "error", error: "Not signed in." });
+        return false;
+      }
       const selected: Workspace = workspace === "live" ? "live" : "paper";
       configureApi({ baseUrl: url, password, workspace: selected });
       set({ baseUrl: url, password, workspace: selected, status: "loading" });
@@ -68,6 +74,7 @@ export const useSession = create<SessionState>((set, get) => ({
         return false;
       }
     } catch {
+      set({ status: "error", error: "Could not read the saved session." });
       return false;
     }
   },
@@ -116,7 +123,9 @@ export const useSession = create<SessionState>((set, get) => ({
       password: "",
       settings: null,
       system: null,
-      status: "idle",
+      // "idle" means "the restore has not run yet" — a signed-out session
+      // must not look like one.
+      status: "error",
       error: null,
     });
   },

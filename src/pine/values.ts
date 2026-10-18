@@ -22,6 +22,39 @@ export interface PineObject {
   [key: string]: PineValue;
 }
 
+/**
+ * A Pine array: `array.new<float>()`.
+ *
+ * Arrays are reference values, so `zoneList.get(i).top := x` mutates the
+ * object inside the array — which is what the user's S/R zone code relies on.
+ */
+export interface PineArray {
+  __array: true;
+  /** The declared element type, e.g. "SRZone". */
+  typeName: string | null;
+  items: PineValue[];
+}
+
+/**
+ * An instance of a user-declared `type`, e.g. `SRZone.new(top = 1)`.
+ * Fields are stored directly on the object so they can be mutated in place.
+ */
+export interface PineUserObject extends PineObject {
+  __userType: string;
+}
+
+/**
+ * A drawing object (`box.new`, `label.new`, `table.new`). The runtime keeps
+ * them as live objects so the script can mutate them, and reports them to the
+ * app so the chart can draw them.
+ */
+export interface PineDrawing {
+  __drawing: "box" | "label" | "table";
+  id: number;
+  deleted: boolean;
+  [key: string]: unknown;
+}
+
 export type PineValue =
   | number
   | boolean
@@ -30,6 +63,9 @@ export type PineValue =
   | PineColor
   | PineValue[]
   | PineObject
+  | PineArray
+  | PineUserObject
+  | PineDrawing
   | PineCallable
   | PineBoundMethod
   | PineProperty;
@@ -62,10 +98,21 @@ export function isCallable(value: unknown): value is PineCallable {
  * A namespace member that holds a live value (e.g. `strategy.position_size`)
  * and can be assigned to (e.g. `strategy.default_qty_type = ...`).
  */
+/**
+ * The slice of the host a live property needs. Properties such as
+ * `barstate.islast` are values, not functions, so their getter is called
+ * with the host rather than with arguments.
+ */
+export interface PinePropertyHost {
+  barIndex(): number;
+  lastBarIndex(): number;
+  bar(): { time: number; open: number; high: number; low: number; close: number; volume: number };
+}
+
 export interface PineProperty {
   __property: true;
-  get(): PineValue;
-  set(value: PineValue): void;
+  get(host?: PinePropertyHost): PineValue;
+  set(value: PineValue, host?: PinePropertyHost): void;
 }
 
 export function isProperty(value: unknown): value is PineProperty {
@@ -87,6 +134,14 @@ export function isNA(value: PineValue): boolean {
   return value === null || value === undefined;
 }
 
+/** `na(x)` — the value, or the fallback when it is na. */
+export function nz(value: PineValue, fallback: PineValue = 0): PineValue {
+  const unwrapped = unwrap(value);
+  if (unwrapped === null || unwrapped === undefined) return fallback;
+  if (typeof unwrapped === "number" && !Number.isFinite(unwrapped)) return fallback;
+  return unwrapped;
+}
+
 export function isNumber(value: PineValue): value is number {
   return typeof value === "number";
 }
@@ -97,6 +152,23 @@ export function isTuple(value: PineValue): value is PineValue[] {
 
 export function isColor(value: unknown): value is PineColor {
   return !!value && typeof value === "object" && !Array.isArray(value) && "r" in value;
+}
+
+export function isArray(value: unknown): value is PineArray {
+  return !!value && typeof value === "object" && !Array.isArray(value) && "__array" in value;
+}
+
+export function isUserObject(value: unknown): value is PineUserObject {
+  return !!value && typeof value === "object" && !Array.isArray(value) && "__userType" in value;
+}
+
+export function isDrawing(value: unknown): value is PineDrawing {
+  return !!value && typeof value === "object" && !Array.isArray(value) && "__drawing" in value;
+}
+
+/** A fresh Pine array. */
+export function newArray(typeName: string | null = null): PineArray {
+  return { __array: true, typeName, items: [] };
 }
 
 /** Truthiness with Pine semantics: na is false. */
