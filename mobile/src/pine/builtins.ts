@@ -1,0 +1,671 @@
+/**
+ * Pine built-in namespaces: math, str, color, array, input, time, syminfo,
+ * request.security and the constant namespaces (plot styles, locations,
+ * shapes, display modes).
+ *
+ * Everything here is a plain function of (args, context) so the evaluator can
+ * dispatch namespace calls without knowing what they do.
+ */
+import type { PineHost, PineInput } from "./host";
+import {
+  type PineValue, isColor, toBoolean, toDisplayString, toNumber, truthy,
+  type PineColor, type PineCallable, type PineProperty,
+} from "./values";
+
+export interface BuiltinContext {
+  site: number;
+  named: Map<string, PineValue>;
+  host: PineHost;
+  /** Unique-ish id generator for input ids. */
+  nextId(prefix: string): string;
+}
+
+export type BuiltinFn = (args: PineValue[], ctx: BuiltinContext) => PineValue;
+
+/**
+ * A namespace member is one of:
+ *   - a function, called with `ns.fn(...)`
+ *   - a constant (`plot.style_line`, `strategy.long`, `color.red`)
+ *   - a live property (`strategy.position_size`), readable and assignable
+ *   - a callable with methods (`strategy.opentrades.entry_price(0)`)
+ */
+export type NamespaceEntry = BuiltinFn | PineValue | PineProperty | PineCallable;
+
+export function isBuiltinFn(entry: unknown): entry is BuiltinFn {
+  return typeof entry === "function";
+}
+
+function arg(
+  args: PineValue[],
+  named: Map<string, PineValue>,
+  index: number,
+  name: string,
+  fallback: PineValue
+): PineValue {
+  const namedValue = named.get(name);
+  if (namedValue !== undefined) return namedValue;
+  if (index < args.length) return args[index];
+  return fallback;
+}
+
+function n(value: PineValue, fallback = 0): number {
+  const parsed = toNumber(value);
+  return parsed === null ? fallback : parsed;
+}
+
+/* ------------------------------------------------------------------ */
+/* math.*                                                              */
+/* ------------------------------------------------------------------ */
+
+const math: Record<string, BuiltinFn> = {
+  abs: (args) => {
+    const value = toNumber(args[0]);
+    return value === null ? null : Math.abs(value);
+  },
+  ceil: (args) => {
+    const value = toNumber(args[0]);
+    return value === null ? null : Math.ceil(value);
+  },
+  floor: (args) => {
+    const value = toNumber(args[0]);
+    return value === null ? null : Math.floor(value);
+  },
+  round: (args, ctx) => {
+    const value = toNumber(arg(args, ctx.named, 0, "value", 0));
+    if (value === null) return null;
+    const precision = n(arg(args, ctx.named, 1, "precision", 0));
+    const factor = 10 ** precision;
+    return Math.round(value * factor) / factor;
+  },
+  sign: (args) => {
+    const value = toNumber(args[0]);
+    if (value === null) return null;
+    return Math.sign(value);
+  },
+  sqrt: (args) => {
+    const value = toNumber(args[0]);
+    if (value === null) return null;
+    return value < 0 ? null : Math.sqrt(value);
+  },
+  pow: (args) => {
+    const base = toNumber(args[0]);
+    const exponent = toNumber(args[1]);
+    if (base === null || exponent === null) return null;
+    return base ** exponent;
+  },
+  log: (args) => {
+    const value = toNumber(args[0]);
+    if (value === null || value <= 0) return null;
+    return Math.log(value);
+  },
+  log10: (args) => {
+    const value = toNumber(args[0]);
+    if (value === null || value <= 0) return null;
+    return Math.log10(value);
+  },
+  exp: (args) => {
+    const value = toNumber(args[0]);
+    return value === null ? null : Math.exp(value);
+  },
+  max: (args) => {
+    let best: number | null = null;
+    for (const value of args) {
+      const parsed = toNumber(value);
+      if (parsed === null) return null;
+      if (best === null || parsed > best) best = parsed;
+    }
+    return best;
+  },
+  min: (args) => {
+    let best: number | null = null;
+    for (const value of args) {
+      const parsed = toNumber(value);
+      if (parsed === null) return null;
+      if (best === null || parsed < best) best = parsed;
+    }
+    return best;
+  },
+  sum: (args) => {
+    let total = 0;
+    for (const value of args) {
+      const parsed = toNumber(value);
+      if (parsed === null) return null;
+      total += parsed;
+    }
+    return total;
+  },
+  avg: (args) => {
+    let total = 0;
+    for (const value of args) {
+      const parsed = toNumber(value);
+      if (parsed === null) return null;
+      total += parsed;
+    }
+    return args.length ? total / args.length : null;
+  },
+  median: (args) => {
+    const values = args.map(toNumber).filter((v): v is number => v !== null);
+    if (!values.length) return null;
+    values.sort((a, b) => a - b);
+    const middle = Math.floor(values.length / 2);
+    return values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+  },
+  mode: (args) => {
+    const values = args.map(toNumber).filter((v): v is number => v !== null);
+    if (!values.length) return null;
+    const counts = new Map<number, number>();
+    for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+    let best = values[0];
+    let bestCount = 0;
+    for (const [value, count] of counts) {
+      if (count > bestCount) {
+        best = value;
+        bestCount = count;
+      }
+    }
+    return best;
+  },
+  acos: (args) => {
+    const value = toNumber(args[0]);
+    if (value === null || value < -1 || value > 1) return null;
+    return Math.acos(value);
+  },
+  asin: (args) => {
+    const value = toNumber(args[0]);
+    if (value === null || value < -1 || value > 1) return null;
+    return Math.asin(value);
+  },
+  atan: (args) => {
+    const value = toNumber(args[0]);
+    return value === null ? null : Math.atan(value);
+  },
+  random: (args, ctx) => {
+    // Deterministic per call site: a strategy must replay identically.
+    const state = ctx.host as unknown as { __random?: Map<number, number> };
+    void state;
+    const store = RANDOM_STATES.get(ctx.site) ?? { value: 0 };
+    store.value = (store.value * 9301 + 49297) % 233280;
+    RANDOM_STATES.set(ctx.site, store);
+    return store.value / 233280;
+  },
+  e: () => Math.E,
+  pi: () => Math.PI,
+  phi: () => (1 + Math.sqrt(5)) / 2,
+  rphi: () => (1 + Math.sqrt(5)) / 2,
+};
+
+const RANDOM_STATES = new Map<number, { value: number }>();
+
+/* ------------------------------------------------------------------ */
+/* str.*                                                               */
+/* ------------------------------------------------------------------ */
+
+const str: Record<string, BuiltinFn> = {
+  format: (args) => {
+    const template = typeof args[0] === "string" ? args[0] : "";
+    const rest = args.slice(1);
+    let index = 0;
+    return template.replace(/\{[^{}]*\}/g, () => {
+      const value = rest[index++];
+      return toDisplayString(value ?? null);
+    });
+  },
+  contains: (args) => typeof args[0] === "string" && typeof args[1] === "string" && args[0].includes(args[1]),
+  startswith: (args) => typeof args[0] === "string" && typeof args[1] === "string" && args[0].startsWith(args[1]),
+  endswith: (args) => typeof args[0] === "string" && typeof args[1] === "string" && args[0].endsWith(args[1]),
+  length: (args) => (typeof args[0] === "string" ? args[0].length : null),
+  lower: (args) => (typeof args[0] === "string" ? args[0].toLowerCase() : null),
+  upper: (args) => (typeof args[0] === "string" ? args[0].toUpperCase() : null),
+  replace: (args) => {
+    if (typeof args[0] !== "string") return null;
+    return args[0].split(String(args[1] ?? "")).join(String(args[2] ?? ""));
+  },
+  split: (args) => {
+    if (typeof args[0] !== "string") return null;
+    return args[0].split(String(args[1] ?? ","));
+  },
+  substring: (args) => {
+    if (typeof args[0] !== "string") return null;
+    const from = n(args[1]);
+    const to = args.length > 2 ? n(args[2]) : args[0].length;
+    return args[0].slice(from, to);
+  },
+  tonumber: (args) => toNumber(args[0]),
+  tostring: (args) => toDisplayString(args[0] ?? null),
+  replace_all: (args) => {
+    if (typeof args[0] !== "string") return null;
+    return args[0].split(String(args[1] ?? "")).join(String(args[2] ?? ""));
+  },
+};
+
+/* ------------------------------------------------------------------ */
+/* color.*                                                             */
+/* ------------------------------------------------------------------ */
+
+const NAMED_COLORS: Record<string, PineColor> = {
+  aqua: { r: 0, g: 255, b: 255, a: 1 },
+  black: { r: 0, g: 0, b: 0, a: 1 },
+  blue: { r: 0, g: 0, b: 255, a: 1 },
+  brown: { r: 165, g: 42, b: 42, a: 1 },
+  chartreuse: { r: 127, g: 255, b: 0, a: 1 },
+  coral: { r: 255, g: 127, b: 80, a: 1 },
+  crimson: { r: 220, g: 20, b: 60, a: 1 },
+  fuchsia: { r: 255, g: 0, b: 255, a: 1 },
+  gold: { r: 255, g: 215, b: 0, a: 1 },
+  gray: { r: 128, g: 128, b: 128, a: 1 },
+  green: { r: 0, g: 128, b: 0, a: 1 },
+  indigo: { r: 75, g: 0, b: 130, a: 1 },
+  lime: { r: 0, g: 255, b: 0, a: 1 },
+  maroon: { r: 128, g: 0, b: 0, a: 1 },
+  navy: { r: 0, g: 0, b: 128, a: 1 },
+  olive: { r: 128, g: 128, b: 0, a: 1 },
+  orange: { r: 255, g: 165, b: 0, a: 1 },
+  purple: { r: 128, g: 0, b: 128, a: 1 },
+  red: { r: 255, g: 0, b: 0, a: 1 },
+  silver: { r: 192, g: 192, b: 192, a: 1 },
+  sky: { r: 135, g: 206, b: 235, a: 1 },
+  teal: { r: 0, g: 128, b: 128, a: 1 },
+  white: { r: 255, g: 255, b: 255, a: 1 },
+  yellow: { r: 255, g: 255, b: 0, a: 1 },
+};
+
+const color: Record<string, NamespaceEntry> = {
+  rgb: (args) => {
+    const r = n(args[0]);
+    const g = n(args[1]);
+    const b = n(args[2]);
+    const a = args.length > 3 ? n(args[3], 1) : 1;
+    return { r, g, b, a } satisfies PineColor;
+  },
+  r: (args) => (isColor(args[0]) ? args[0].r : null),
+  g: (args) => (isColor(args[0]) ? args[0].g : null),
+  b: (args) => (isColor(args[0]) ? args[0].b : null),
+  new: (args) => {
+    const base = isColor(args[0]) ? args[0] : { r: 0, g: 0, b: 0, a: 1 };
+    const transparency = n(args[1], 0);
+    return { ...base, a: Math.max(0, Math.min(1, 1 - transparency / 100)) } satisfies PineColor;
+  },
+  from_gradient: (args) => (isColor(args[0]) ? args[0] : null),
+  ...NAMED_COLORS,
+};
+
+/* ------------------------------------------------------------------ */
+/* array.*                                                             */
+/* ------------------------------------------------------------------ */
+
+function asArray(value: PineValue): PineValue[] | null {
+  return Array.isArray(value) ? value : null;
+}
+
+const array: Record<string, BuiltinFn> = {
+  new_float: (args) => new Array(Math.max(0, Math.floor(n(args[0])))).fill(0),
+  new_int: (args) => new Array(Math.max(0, Math.floor(n(args[0])))).fill(0),
+  new_bool: (args) => new Array(Math.max(0, Math.floor(n(args[0])))).fill(false),
+  new_string: (args) => new Array(Math.max(0, Math.floor(n(args[0])))).fill(""),
+  push: (args) => {
+    const target = asArray(args[0]);
+    if (!target) return null;
+    target.push(args[1] ?? null);
+    return null;
+  },
+  pop: (args) => {
+    const target = asArray(args[0]);
+    if (!target || !target.length) return null;
+    return target.pop() ?? null;
+  },
+  get: (args) => {
+    const target = asArray(args[0]);
+    if (!target) return null;
+    const index = Math.floor(n(args[1]));
+    return index >= 0 && index < target.length ? target[index] : null;
+  },
+  set: (args) => {
+    const target = asArray(args[0]);
+    if (!target) return null;
+    const index = Math.floor(n(args[1]));
+    if (index >= 0 && index < target.length) target[index] = args[2] ?? null;
+    return null;
+  },
+  size: (args) => {
+    const target = asArray(args[0]);
+    return target ? target.length : null;
+  },
+  shift: (args) => {
+    const target = asArray(args[0]);
+    if (!target || !target.length) return null;
+    return target.shift() ?? null;
+  },
+  unshift: (args) => {
+    const target = asArray(args[0]);
+    if (!target) return null;
+    target.unshift(args[1] ?? null);
+    return null;
+  },
+  insert: (args) => {
+    const target = asArray(args[0]);
+    if (!target) return null;
+    const index = Math.floor(n(args[1]));
+    target.splice(index, 0, args[2] ?? null);
+    return null;
+  },
+  remove: (args) => {
+    const target = asArray(args[0]);
+    if (!target) return null;
+    const index = Math.floor(n(args[1]));
+    if (index >= 0 && index < target.length) return target.splice(index, 1)[0] ?? null;
+    return null;
+  },
+  clear: (args) => {
+    const target = asArray(args[0]);
+    if (target) target.length = 0;
+    return null;
+  },
+  slice: (args) => {
+    const target = asArray(args[0]);
+    if (!target) return null;
+    return target.slice(Math.floor(n(args[1], 0)), args.length > 2 ? Math.floor(n(args[2])) : undefined);
+  },
+  includes: (args) => {
+    const target = asArray(args[0]);
+    if (!target) return false;
+    return target.some((value) => value === args[1]);
+  },
+  indexof: (args) => {
+    const target = asArray(args[0]);
+    if (!target) return null;
+    const index = target.indexOf(args[1]);
+    return index === -1 ? null : index;
+  },
+  copy: (args) => {
+    const target = asArray(args[0]);
+    return target ? [...target] : null;
+  },
+  sort: (args) => {
+    const target = asArray(args[0]);
+    if (target) target.sort((a, b) => n(a) - n(b));
+    return null;
+  },
+};
+
+/* ------------------------------------------------------------------ */
+/* input.*                                                             */
+/* ------------------------------------------------------------------ */
+
+type InputType = PineInput["type"];
+
+function makeInput(type: InputType, coerce: (value: PineValue) => PineValue): BuiltinFn {
+  return (args, ctx) => {
+    // Pine v5 order: (defval, title, ...). Pine v6 also allows (title, defval).
+    let defval = args[0] ?? null;
+    let title = typeof args[1] === "string" ? args[1] : "";
+    if (typeof args[0] === "string" && args.length > 1) {
+      title = args[0];
+      defval = args[1];
+    }
+    const namedTitle = ctx.named.get("title");
+    if (typeof namedTitle === "string") title = namedTitle;
+    const namedDefval = ctx.named.get("defval");
+    if (namedDefval !== undefined) defval = namedDefval;
+
+    const id = ctx.nextId(`input.${type}`);
+    const coerced = coerce(defval);
+    const input: PineInput = {
+      id,
+      title: title || id,
+      type,
+      defval: coerced,
+      value: coerced,
+    };
+    const minval = toNumber(ctx.named.get("minval") ?? null);
+    const maxval = toNumber(ctx.named.get("maxval") ?? null);
+    const step = toNumber(ctx.named.get("step") ?? null);
+    if (minval !== null) input.minval = minval;
+    if (maxval !== null) input.maxval = maxval;
+    if (step !== null) input.step = step;
+    const options = ctx.named.get("options") ?? null;
+    if (Array.isArray(options)) input.options = options.map((option) => toDisplayString(option));
+
+    ctx.host.recordInput(input);
+    return ctx.host.inputValue(id, coerced);
+  };
+}
+
+const input: Record<string, BuiltinFn> = {
+  int: makeInput("int", (value) => Math.trunc(toNumber(value) ?? 0)),
+  float: makeInput("float", (value) => toNumber(value) ?? 0),
+  bool: makeInput("bool", (value) => toBoolean(value)),
+  string: makeInput("string", (value) => (typeof value === "string" ? value : toDisplayString(value))),
+  color: makeInput("color", (value) => (isColor(value) ? value : NAMED_COLORS.teal)),
+  source: makeInput("source", (value) => (typeof value === "string" ? value : "close")),
+  timeframe: makeInput("timeframe", (value) => (typeof value === "string" ? value : "5")),
+  price: makeInput("price", (value) => toNumber(value) ?? 0),
+  time: makeInput("time", (value) => (typeof value === "string" ? value : "1970-01-01T00:00:00Z")),
+  session: makeInput("session", (value) => (typeof value === "string" ? value : "0000-0000")),
+  text_area: makeInput("string", (value) => (typeof value === "string" ? value : toDisplayString(value))),
+};
+
+/* ------------------------------------------------------------------ */
+/* time / syminfo / timeframe / barstate / request                      */
+/* ------------------------------------------------------------------ */
+
+const time: Record<string, BuiltinFn> = {
+  year: (args, ctx) => new Date(n(args[0], ctx.host.bar().time) * 1000).getUTCFullYear(),
+  month: (args, ctx) => new Date(n(args[0], ctx.host.bar().time) * 1000).getUTCMonth() + 1,
+  dayofmonth: (args, ctx) => new Date(n(args[0], ctx.host.bar().time) * 1000).getUTCDate(),
+  dayofweek: (args, ctx) => new Date(n(args[0], ctx.host.bar().time) * 1000).getUTCDay() + 1,
+  hour: (args, ctx) => new Date(n(args[0], ctx.host.bar().time) * 1000).getUTCHours(),
+  minute: (args, ctx) => new Date(n(args[0], ctx.host.bar().time) * 1000).getUTCMinutes(),
+  second: (args, ctx) => new Date(n(args[0], ctx.host.bar().time) * 1000).getUTCSeconds(),
+};
+
+const syminfo: Record<string, BuiltinFn> = {
+  type: () => "futures",
+  mintick: () => 0.1,
+  pointvalue: () => 1,
+  prefix: () => "",
+  ticker: (_args, ctx) => ctx.host.symbol(),
+  currency: () => "INR",
+  timezone: () => "Asia/Kolkata",
+  volvaluetype: () => "tick",
+  type_key: () => "futures",
+  description: (_args, ctx) => ctx.host.symbol(),
+};
+
+const timeframe: Record<string, BuiltinFn> = {
+  in_seconds: (_args, ctx) => timeframeSeconds(ctx.host.timeframe()),
+  multiplier: (_args, ctx) => timeframeMultiplier(ctx.host.timeframe()),
+  period: (_args, ctx) => ctx.host.timeframe(),
+  isintraday: (_args, ctx) => timeframeSeconds(ctx.host.timeframe()) < 86400,
+  isdaily: (_args, ctx) => timeframeSeconds(ctx.host.timeframe()) === 86400,
+  isweekly: (_args, ctx) => timeframeSeconds(ctx.host.timeframe()) === 604800,
+  ismonthly: (_args, ctx) => timeframeSeconds(ctx.host.timeframe()) === 2592000,
+  isseconds: (_args, ctx) => timeframeSeconds(ctx.host.timeframe()) === 1,
+  isminutes: (_args, ctx) => timeframeSeconds(ctx.host.timeframe()) === 60,
+};
+
+const barstate: Record<string, BuiltinFn> = {
+  isconfirmed: () => true,
+  islast: (_args, ctx) => ctx.host.barIndex() === ctx.host.lastBarIndex(),
+  isfirst: (_args, ctx) => ctx.host.barIndex() === 0,
+  isnew: (_args, ctx) => ctx.host.barIndex() === 0,
+  isrealtime: () => false,
+  ishistory: (_args, ctx) => ctx.host.barIndex() < ctx.host.lastBarIndex(),
+};
+
+const request: Record<string, BuiltinFn> = {
+  security: (args, ctx) => {
+    const requested = typeof args[1] === "string" ? args[1] : ctx.host.timeframe();
+    return ctx.host.securityCall(requested, args[2] ?? null);
+  },
+  security_lower_tf: (args, ctx) => ctx.host.securityCall(typeof args[1] === "string" ? args[1] : ctx.host.timeframe(), args[2] ?? null),
+  dividend: () => null,
+  earnings: () => null,
+  splits: () => null,
+  financial: () => null,
+  economic: () => null,
+  seed: (_args, ctx) => ctx.host.bar().time,
+};
+
+/* ------------------------------------------------------------------ */
+/* Constant namespaces                                                 */
+/* ------------------------------------------------------------------ */
+
+export const plotStyles: Record<string, string> = {
+  style_line: "line",
+  style_linebr: "linebr",
+  style_histogram: "histogram",
+  style_cross: "cross",
+  style_stepline: "stepline",
+  style_stepline_diamond: "stepline_diamond",
+  style_areabr: "areabr",
+  style_columns: "columns",
+  style_circles: "circles",
+};
+
+/** `plot.style_line` and friends are constants, not calls. */
+export const plot: Record<string, NamespaceEntry> = { ...plotStyles };
+
+export const display: Record<string, NamespaceEntry> = {
+  none: "none",
+  all: "all",
+  data_window: "data_window",
+  pane: "pane",
+  status_line: "status_line",
+  price_scale: "price_scale",
+  drawing: "drawing",
+};
+
+export const format: Record<string, NamespaceEntry> = {
+  inherit: "inherit",
+  price: "price",
+  volume: "volume",
+  percent: "percent",
+};
+
+export const location: Record<string, NamespaceEntry> = {
+  abovebar: "abovebar",
+  belowbar: "belowbar",
+  top: "top",
+  bottom: "bottom",
+  absolute: "absolute",
+  top_bar: "top_bar",
+  bottom_bar: "bottom_bar",
+};
+
+export const shape: Record<string, NamespaceEntry> = {
+  xcross: "xcross",
+  cross: "cross",
+  triangleup: "triangleup",
+  triangledown: "triangledown",
+  flag: "flag",
+  circle: "circle",
+  arrowup: "arrowup",
+  arrowdown: "arrowdown",
+  labelup: "labelup",
+  labeldown: "labeldown",
+  square: "square",
+  circlehollow: "circlehollow",
+};
+
+export const orderSide: Record<string, string> = { buy: "buy", sell: "sell" };
+export const orderType: Record<string, string> = {
+  market: "market",
+  limit: "limit",
+  stop: "stop",
+  stoplimit: "stoplimit",
+};
+export const alertFreq: Record<string, NamespaceEntry> = {
+  freq_once_per_bar: "once_per_bar",
+  freq_once_per_bar_close: "once_per_bar_close",
+  freq_all: "all",
+};
+export const scale: Record<string, NamespaceEntry> = { right: "right", left: "left", none: "none" };
+export const extend: Record<string, NamespaceEntry> = {
+  none: "none",
+  left: "left",
+  right: "right",
+  both: "both",
+};
+/**
+ * Pine spells the line styles `line.style_solid`, `hline.style_dotted` and so
+ * on; the short names are kept as well because older scripts use them.
+ */
+export const lineStyle: Record<string, NamespaceEntry> = {
+  style_solid: "solid",
+  style_dotted: "dotted",
+  style_dashed: "dashed",
+  style_arrow_left: "arrow_left",
+  style_arrow_right: "arrow_right",
+  style_arrow_both: "arrow_both",
+  solid: "solid",
+  dotted: "dotted",
+  dashed: "dashed",
+  arrow_left: "arrow_left",
+  arrow_right: "arrow_right",
+  arrow_both: "arrow_both",
+};
+export const hlineStyle: Record<string, NamespaceEntry> = {
+  style_solid: "solid",
+  style_dotted: "dotted",
+  style_dashed: "dashed",
+  solid: "solid",
+  dotted: "dotted",
+  dashed: "dashed",
+};
+
+/* ------------------------------------------------------------------ */
+/* Timeframe helpers                                                   */
+/* ------------------------------------------------------------------ */
+
+const TIMEFRAME_MINUTES: Record<string, number> = {
+  "1": 1, "3": 3, "5": 5, "15": 15, "30": 30, "60": 60, "120": 120, "240": 240,
+  D: 1440, W: 10080, M: 43200,
+};
+
+export function timeframeSeconds(timeframe: string): number {
+  const match = /^(\d+)?([DWM])?$/.exec(timeframe.trim());
+  if (!match) return 60;
+  const multiplier = match[1] ? Number(match[1]) : 1;
+  const unit = match[2] ?? "m";
+  const minutes = TIMEFRAME_MINUTES[unit] ?? 1;
+  return multiplier * minutes * 60;
+}
+
+export function timeframeMultiplier(timeframe: string): number {
+  const match = /^(\d+)?([DWM])?$/.exec(timeframe.trim());
+  if (!match || !match[1]) return 1;
+  return Number(match[1]);
+}
+
+/* ------------------------------------------------------------------ */
+
+export const NAMESPACES: Record<string, Record<string, NamespaceEntry>> = {
+  math,
+  str,
+  color,
+  array,
+  input,
+  time,
+  syminfo,
+  timeframe,
+  barstate,
+  request,
+  plot,
+  display,
+  format,
+  location,
+  shape,
+  order: { ...orderSide, ...orderType, side: orderSide, type: orderType },
+  alert: alertFreq,
+  scale,
+  extend,
+  hline: hlineStyle,
+  line: lineStyle,
+  label: lineStyle,
+  box: lineStyle,
+  table: {},
+  matrix: {},
+  map: {},
+};
+
+export { NAMED_COLORS };
