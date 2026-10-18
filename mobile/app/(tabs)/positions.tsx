@@ -25,7 +25,7 @@ export default function PositionsScreen() {
     useCallback(() => {
       void account.reload();
       void paper.reload();
-    }, [account, paper])
+    }, [account.reload, paper.reload])
   );
 
   const positions = account.data?.account.positions ?? [];

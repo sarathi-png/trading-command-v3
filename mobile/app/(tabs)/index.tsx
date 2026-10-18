@@ -19,10 +19,12 @@ export default function OverviewScreen() {
   const account = useResource(() => api.account(), [workspace]);
   const movers = useResource(() => api.movers().catch(() => ({ movers: [] })), [workspace]);
 
+  // `reload` is stable; the resource object itself is new on every render,
+  // so it must not be a dependency here.
   useFocusEffect(
     useCallback(() => {
       void account.reload();
-    }, [account])
+    }, [account.reload])
   );
 
   const onRefresh = async () => {

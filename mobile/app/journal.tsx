@@ -17,7 +17,7 @@ export default function JournalScreen() {
   useFocusEffect(
     useCallback(() => {
       void journal.reload();
-    }, [journal])
+    }, [journal.reload])
   );
 
   const entries = journal.data?.entries ?? [];
