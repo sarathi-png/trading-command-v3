@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "module": "node16",
+    "moduleResolution": "node16",
+    "lib": [
+      "ES2021",
+      "DOM"
+    ],
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "output/pine-js",
+    "rootDir": "src",
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src/pine/**/*.ts",
+    "src/api/**/*.ts"
+  ]
+}
