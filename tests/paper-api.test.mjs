@@ -375,6 +375,17 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.notEqual(rawAnalysis.analysis.lastClose, haAnalysis.analysis.lastClose);
     assert.equal(signalsBeforeHa.signals.length, signalsAfterHa.signals.length, "HA research must not enter the normal candle signal ledger");
 
+    // Failed logins are throttled per client. This runs last: the window it
+    // opens would otherwise refuse the logins used above.
+    const wrongLogin = () => fetch(`${url}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: "definitely-not-the-password" }),
+    });
+    for (let i = 0; i < 10; i += 1) assert.equal((await wrongLogin()).status, 401);
+    const throttled = await wrongLogin();
+    assert.equal(throttled.status, 429);
+    assert.ok(Number(throttled.headers.get("retry-after")) > 0);
 
   } finally {
     if (server.exitCode === null) {

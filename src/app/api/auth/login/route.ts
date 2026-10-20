@@ -14,6 +14,14 @@ import {
   signSession,
   sessionCookieOptions,
 } from "@/lib/auth";
+import {
+  bodyTooLarge,
+  clearAuthFailures,
+  clientKey,
+  isThrottled,
+  recordAuthFailure,
+  retryAfterSeconds,
+} from "@/lib/authRateLimit";
 import { logAudit } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +33,19 @@ export async function POST(req: Request) {
       { error: "Authentication is not configured. Set API_PASSWORD and restart." },
       { status: 503 }
     );
+  }
+
+  // Refuse before parsing anything: a password oracle must not accept
+  // unbounded work from an unauthenticated caller.
+  const key = clientKey(req);
+  if (isThrottled(key)) {
+    return Response.json(
+      { error: "Too many failed attempts. Try again later." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(key)) } }
+    );
+  }
+  if (bodyTooLarge(req)) {
+    return Response.json({ error: "Request body is too large" }, { status: 413 });
   }
 
   let password = "";
@@ -39,9 +60,14 @@ export async function POST(req: Request) {
 
   if (!passwordMatches(password)) {
     // Never record the attempted value.
+    recordAuthFailure(key);
     await logAudit("auth_login_failed", {});
     return Response.json({ error: "Invalid credentials." }, { status: 401 });
   }
+
+  // A correct password clears the window so a typo cannot accumulate toward a
+  // lockout, while successful logins are never counted.
+  clearAuthFailures(key);
 
   const token = await signSession(Date.now() + SESSION_TTL_MS, sessionSecret());
   await logAudit("auth_login_succeeded", {});

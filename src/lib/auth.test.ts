@@ -2,6 +2,16 @@ import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { NextRequest } from 'next/server';
 import { isAuthenticated, sessionCookieOptions, signSession } from './auth';
+import {
+  AUTH_MAX_FAILURES,
+  AUTH_THROTTLE_WINDOW_MS,
+  bodyTooLarge,
+  clearAuthFailures,
+  isThrottled,
+  recordAuthFailure,
+  resetAuthThrottle,
+  retryAfterSeconds,
+} from './authRateLimit';
 
 const original = { password: process.env.API_PASSWORD, secret: process.env.SESSION_SECRET, embedded: process.env.EMBEDDED_PREVIEW_COOKIES };
 const secret='test-only-preview-session-signing-secret';
@@ -58,5 +68,48 @@ describe('preview session authentication (gateway header replacement)',()=>{
     delete process.env.API_PASSWORD;
     assert.equal(await isAuthenticated(request({'x-tc-preview-session':await signSession(Date.now()+60_000,secret)})),false);
     process.env.API_PASSWORD='test-only-password';
+  });
+});
+
+describe('failed-login throttling',()=>{
+  it('allows attempts below the limit and refuses the limit-th attempt onward',()=>{
+    resetAuthThrottle();
+    const key='client-a';
+    for(let i=0;i<AUTH_MAX_FAILURES-1;i++) recordAuthFailure(key);
+    assert.equal(isThrottled(key),false);
+    recordAuthFailure(key);
+    assert.equal(isThrottled(key),true);
+  });
+  it('clears the window after a successful login',()=>{
+    resetAuthThrottle();
+    const key='client-b';
+    for(let i=0;i<AUTH_MAX_FAILURES;i++) recordAuthFailure(key);
+    assert.equal(isThrottled(key),true);
+    clearAuthFailures(key);
+    assert.equal(isThrottled(key),false);
+  });
+  it('expires the window instead of locking the operator out forever',()=>{
+    resetAuthThrottle();
+    const key='client-c';
+    const start=1_000_000;
+    for(let i=0;i<AUTH_MAX_FAILURES;i++) recordAuthFailure(key,start);
+    assert.equal(isThrottled(key,start),true);
+    assert.equal(isThrottled(key,start+AUTH_THROTTLE_WINDOW_MS+1),false);
+  });
+  it('reports a positive Retry-After while throttled',()=>{
+    resetAuthThrottle();
+    const key='client-d';
+    const start=2_000_000;
+    for(let i=0;i<AUTH_MAX_FAILURES;i++) recordAuthFailure(key,start);
+    assert.ok(retryAfterSeconds(key,start)>0);
+    assert.equal(retryAfterSeconds('never-seen',start),0);
+  });
+  it('rejects oversized credential bodies before parsing',()=>{
+    const small=new Request('http://localhost/api/auth/login',{method:'POST',headers:{'content-length':'128'}});
+    const huge=new Request('http://localhost/api/auth/login',{method:'POST',headers:{'content-length':'5000'}});
+    const unknown=new Request('http://localhost/api/auth/login',{method:'POST'});
+    assert.equal(bodyTooLarge(small),false);
+    assert.equal(bodyTooLarge(huge),true);
+    assert.equal(bodyTooLarge(unknown),false);
   });
 });
