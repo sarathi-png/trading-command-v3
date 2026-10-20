@@ -5,6 +5,9 @@
  * Errors are surfaced — we never silently substitute stale/demo data for live.
  */
 import { demoCandles, demoTicker, demoOrderbook, demoTrades, DEMO_SYMBOLS } from "./demo";
+import { validateCandles } from "./validate";
+import { cached } from "./cache";
+import { UnsupportedTimeframeError } from "../exchange/coindcx/timeframes";
 import { flags } from "../flags";
 import { getSettings } from "../settings";
 import type { Candle, OrderBook, RecentTrade, Ticker, Timeframe } from "../types";
@@ -18,6 +21,12 @@ import {
 import type { ExchangeTicker } from "../exchange/types";
 
 export class MarketError extends Error {}
+
+/** Short enough to feel live, long enough to collapse a page-load fan-out. */
+const TICKER_TTL_MS = 2_000;
+const CANDLE_TTL_MS = 5_000;
+const ORDERBOOK_TTL_MS = 1_000;
+const TRADES_TTL_MS = 3_000;
 
 export async function activeDataSource(): Promise<"live" | "demo"> {
   return (await getSettings()).dataSource;
@@ -52,7 +61,8 @@ function toAppTicker(t: ExchangeTicker): Ticker {
 export async function getTickers(symbols?: string[]): Promise<Ticker[]> {
   if (await activeDataSource() === "demo") return (symbols ?? DEMO_SYMBOLS.map(s => s.symbol)).filter(symbol => DEMO_SYMBOLS.some(fixture => fixture.symbol === symbol)).map(demoTicker);
   try {
-    const all = await marketTickers(symbols);
+    const key = `tickers:${(symbols ?? []).slice().sort().join(",") || "all"}`;
+    const all = await cached(key, TICKER_TTL_MS, () => marketTickers(symbols));
     return all.map(toAppTicker);
   } catch (e) {
     throw new MarketError(
@@ -76,7 +86,26 @@ export async function getCandles(
     if (!DEMO_SYMBOLS.some(fixture => fixture.symbol === symbol)) throw new MarketError("No demo candle fixture for this symbol. Choose BTC/ETH/SOL/XRP or switch to real CoinDCX market data.");
     return { candles: demoCandles(symbol, timeframe, limit), source: "demo" };
   }
-  const candles = await marketCandles(symbol, TF_MINUTES[timeframe] * 60, limit);
+  const seconds = TF_MINUTES[timeframe] * 60;
+  let raw: Awaited<ReturnType<typeof marketCandles>>;
+  try {
+    raw = await cached(
+      `candles:${symbol}:${timeframe}:${limit}`,
+      CANDLE_TTL_MS,
+      () => marketCandles(symbol, seconds, limit)
+    );
+  } catch (e) {
+    // A venue that does not publish this timeframe is a client error, not a
+    // provider outage. Never fall back to a different resolution.
+    if (e instanceof UnsupportedTimeframeError) throw new MarketError(e.message);
+    throw e;
+  }
+  // Validate at the boundary: downstream indicators assume finite, coherent
+  // OHLCV bars, and a single bad bar corrupts every signal derived from it.
+  const { candles, rejected } = validateCandles(raw, { timeframeSeconds: seconds });
+  if (rejected > 0) {
+    console.warn(`[market] dropped ${rejected} invalid ${symbol} ${timeframe} candle(s)`);
+  }
   if (candles.length === 0) {
     throw new MarketError(`No candles available for ${symbol} ${timeframe}`);
   }
@@ -89,7 +118,7 @@ export async function getOrderbook(symbol: string): Promise<OrderBook> {
   }
   if (await activeDataSource() === "demo") return demoOrderbook(symbol);
   try {
-    const book = await marketOrderBook(symbol, 20);
+    const book = await cached(`book:${symbol}`, ORDERBOOK_TTL_MS, () => marketOrderBook(symbol, 20));
     return {
       symbol: book.symbol,
       bids: book.bids,
@@ -105,7 +134,7 @@ export async function getOrderbook(symbol: string): Promise<OrderBook> {
 export async function getRecentTrades(symbol: string): Promise<RecentTrade[]> {
   if (await activeDataSource() === "demo") return demoTrades(symbol);
   try {
-    return await marketRecentTrades(symbol);
+    return await cached(`trades:${symbol}`, TRADES_TTL_MS, () => marketRecentTrades(symbol));
   } catch (e) {
     throw new MarketError(e instanceof Error ? e.message : "Recent trades unavailable");
   }

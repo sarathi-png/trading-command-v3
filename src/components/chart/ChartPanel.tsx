@@ -16,7 +16,7 @@ import { cx, fmtPrice } from "@/lib/format";
 import { useApp } from "@/stores";
 import { useViewport } from "@/lib/useResponsive";
 import { activeChartSignal, analysisBelongsToChart } from "@/lib/chartScope";
-import { TIMEFRAMES } from "@/lib/types";
+import { SUPPORTED_TIMEFRAMES } from "@/lib/exchange/coindcx/timeframes";
 import type { Analysis, Candle, Drawing, DrawingType, Timeframe } from "@/lib/types";
 import { DrawLayer, type HitResult } from "./drawLayer";
 import { toHeikinAshi } from "@/lib/strategy/v2/heikin-ashi";
@@ -635,7 +635,7 @@ export default function ChartPanel({
       <div className="chart-local-controls">
         <label className="inline-flex items-center gap-2">Timeframe
           <select aria-label="Chart timeframe" value={timeframe} onChange={event => setTimeframe(event.target.value as Timeframe)} className="bg-panel2 border border-edge rounded px-2 py-1 text-ink">
-            {TIMEFRAMES.map(tf => <option key={tf} value={tf}>{tf}</option>)}
+            {SUPPORTED_TIMEFRAMES.map(tf => <option key={tf} value={tf}>{tf}</option>)}
           </select>
         </label>
         <button type="button" className="text-accent" aria-pressed={showAllLabels} onClick={() => setShowAllLabels(value => !value)}>{showAllLabels ? "Essential price labels" : "All price labels"}</button>

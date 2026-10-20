@@ -1,5 +1,6 @@
 import { getCandles } from "@/lib/market/service";
-import { TIMEFRAMES, type Timeframe } from "@/lib/types";
+import { TIMEFRAMES, TF_MINUTES, type Timeframe } from "@/lib/types";
+import { isTimeframeSupported } from "@/lib/exchange/coindcx/timeframes";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -12,9 +13,27 @@ export async function GET(req: Request) {
   if (!TIMEFRAMES.includes(tf as Timeframe)) {
     return Response.json({ error: `Unsupported timeframe: ${tf}` }, { status: 400 });
   }
+  if (!isTimeframeSupported(tf as Timeframe)) {
+    return Response.json(
+      { error: `CoinDCX does not publish ${tf} candles. Choose 1m, 5m, 15m, 1H, 4H or 1D.` },
+      { status: 422 }
+    );
+  }
   try {
     const { candles, source } = await getCandles(symbol, tf as Timeframe, limit);
-    return Response.json({ symbol, timeframe: tf, candles, source });
+    const last = candles[candles.length - 1];
+    const interval = TF_MINUTES[tf as Timeframe] * 60;
+    const asOf = last ? new Date(last.time * 1000).toISOString() : null;
+    const stale = last ? Date.now() / 1000 - last.time > interval * 3 : true;
+    return Response.json({
+      symbol,
+      timeframe: tf,
+      candles,
+      source,
+      provider: source === "live" ? "coindcx" : "demo",
+      asOf,
+      stale,
+    });
   } catch (e) {
     return Response.json(
       { error: e instanceof Error ? e.message : "Candles unavailable" },
