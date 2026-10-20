@@ -123,6 +123,12 @@ export interface Repo {
   updatePaperPositionBySymbol(symbol: string, patch: Partial<PaperPositionRow>): Promise<PaperPositionRow[]>;
   deletePaperPosition(id: string): Promise<void>;
 
+  // ---- paper fills (immutable ledger) ----
+  listPaperFills(opts?: { symbol?: string; limit?: number }): Promise<PaperFillRow[]>;
+  insertPaperFill(value: PaperFillInsert): Promise<PaperFillRow>;
+  /** Serialises fill application per symbol (Postgres advisory lock / file mutex). */
+  withPaperLock<T>(key: string, fn: () => Promise<T>): Promise<T>;
+
   // ---- alert rules ----
   listAlertRules(): Promise<AlertRuleRow[]>;
   insertAlertRule(value: AlertRuleInsert): Promise<AlertRuleRow>;
@@ -156,6 +162,25 @@ export interface PaperOrderRow {
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
+
+export interface PaperFillRow {
+  id: string;
+  orderId: string | null;
+  positionId: string | null;
+  symbol: string;
+  side: "long" | "short";
+  kind: "open" | "add" | "reduce" | "close";
+  qty: number;
+  price: number;
+  fee: number;
+  realizedPnl: number;
+  createdAt: Timestamp;
+}
+
+export type PaperFillInsert = Omit<PaperFillRow, "id" | "createdAt"> & {
+  id?: string;
+  createdAt?: Timestamp | Date;
+};
 
 export type PaperOrderInsert = Omit<
   PaperOrderRow,

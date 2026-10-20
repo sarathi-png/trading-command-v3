@@ -191,6 +191,9 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.equal(placed.ok, true);
     assert.equal(placed.status, "filled");
     assert.equal(placed.positions.length, 1);
+    assert.equal(placed.fills.length, 1, "one immutable fill for the opening market order");
+    assert.equal(placed.fills[0].kind, "open");
+    assert.ok(placed.fills[0].fee > 0);
     const position = placed.positions[0];
 
     // A retried submission with the same key must not open a second position.
@@ -205,6 +208,7 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.equal(duplicate.deduplicated, true);
     assert.equal(duplicate.orderId, placed.orderId);
     assert.equal(duplicate.positions.length, 1);
+    assert.equal(duplicate.fills.length, 1, "a retry must not write a second fill");
 
     const closed = await json("/api/paper", {
       action: "close",
@@ -216,6 +220,12 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     const paperState = await request("/api/paper").then((response) => response.json());
     assert.equal(paperState.positions.length, 0);
     assert.ok(paperState.orders.some((order) => order.status === "filled"));
+    assert.equal(paperState.fills.length, 2, "open + close");
+    assert.deepEqual(paperState.fills.map((f) => f.kind).sort(), ["close", "open"]);
+    for (const fill of paperState.fills) {
+      assert.ok(Number.isFinite(fill.fee) && fill.fee >= 0);
+      assert.ok(Number.isFinite(fill.realizedPnl));
+    }
 
     const journal = await request("/api/journal?mode=paper").then((response) => response.json());
     assert.equal(journal.entries.length, 1);

@@ -15,6 +15,7 @@ import type {
   JournalPnlFilter,
   JournalRow,
   LiveOrderRow,
+  PaperFillRow,
   PaperOrderRow,
   PaperPositionRow,
   Repo,
@@ -29,6 +30,7 @@ export const DOC_SIGNALS = "signals.json";
 export const DOC_JOURNAL = "journal.json";
 export const DOC_PAPER_ORDERS = "paper_orders.json";
 export const DOC_PAPER_POSITIONS = "paper_positions.json";
+export const DOC_PAPER_FILLS = "paper_fills.json";
 export const DOC_ALERTS = "alerts.json";
 export const DOC_DRAWINGS = "drawings.json";
 export const DOC_LIVE_ORDERS = "live_orders.json";
@@ -41,6 +43,7 @@ export const ALL_DOCS = [
   DOC_JOURNAL,
   DOC_PAPER_ORDERS,
   DOC_PAPER_POSITIONS,
+  DOC_PAPER_FILLS,
   DOC_ALERTS,
   DOC_DRAWINGS,
   DOC_LIVE_ORDERS,
@@ -392,6 +395,37 @@ export const fileRepo: Repo = {
       const next = rows.filter((p) => p.id !== id);
       return next.length === rows.length ? null : next;
     });
+  },
+
+  // ---- paper fills ----
+  async listPaperFills(opts) {
+    const rows = readDoc<PaperFillRow[]>(DOC_PAPER_FILLS, []);
+    const filtered = opts?.symbol ? rows.filter((r) => r.symbol === opts.symbol) : rows;
+    return [...filtered].sort(byTimeDesc).slice(0, opts?.limit ?? 1_000_000);
+  },
+  async insertPaperFill(value) {
+    const createdAt = ts(value.createdAt, now());
+    const row: PaperFillRow = {
+      id: value.id ?? randomUUID(),
+      orderId: value.orderId ?? null,
+      positionId: value.positionId ?? null,
+      symbol: value.symbol,
+      side: value.side,
+      kind: value.kind,
+      qty: value.qty,
+      price: value.price,
+      fee: value.fee,
+      realizedPnl: value.realizedPnl,
+      createdAt,
+    };
+    await mutate<PaperFillRow[]>(DOC_PAPER_FILLS, [], (rows) => [row, ...rows]);
+    return row;
+  },
+  withPaperLock(key, fn) {
+    // Fill application touches several documents; this per-symbol lock is held
+    // for the whole sequence, not just one write. Single process only — Vercel
+    // refuses this backend, so cross-instance locking is a Postgres concern.
+    return lock(`paper:${key}`, fn);
   },
 
   // ---- alert rules ----

@@ -15,6 +15,7 @@ import {
   drawingsTable,
   journalTable,
   liveOrdersTable,
+  paperFillsTable,
   paperOrdersTable,
   paperPositionsTable,
   settingsTable,
@@ -31,6 +32,7 @@ import type {
   JournalRow,
   LiveOrderInsert,
   LiveOrderRow,
+  PaperFillRow,
   PaperOrderRow,
   PaperPositionInsert,
   PaperPositionRow,
@@ -181,6 +183,22 @@ function toPaperPosition(r: typeof paperPositionsTable.$inferSelect): PaperPosit
     realizedPnl: r.realizedPnl ?? 0,
     openedAt: iso(r.openedAt, EPOCH),
     updatedAt: iso(r.updatedAt, EPOCH),
+  };
+}
+
+function toPaperFill(r: typeof paperFillsTable.$inferSelect): PaperFillRow {
+  return {
+    id: r.id,
+    orderId: r.orderId ?? null,
+    positionId: r.positionId ?? null,
+    symbol: r.symbol,
+    side: r.side as PaperFillRow["side"],
+    kind: r.kind as PaperFillRow["kind"],
+    qty: r.qty,
+    price: r.price,
+    fee: r.fee ?? 0,
+    realizedPnl: r.realizedPnl ?? 0,
+    createdAt: iso(r.createdAt, EPOCH),
   };
 }
 
@@ -588,6 +606,61 @@ export const postgresRepo: Repo = {
   async deletePaperPosition(id) {
     const db = await getDb();
     await db.delete(paperPositionsTable).where(eq(paperPositionsTable.id, id));
+  },
+
+  // ---- paper fills ----
+  async listPaperFills(opts) {
+    const db = await getDb();
+    const rows = opts?.symbol
+      ? await db
+          .select()
+          .from(paperFillsTable)
+          .where(eq(paperFillsTable.symbol, opts.symbol))
+          .orderBy(desc(paperFillsTable.createdAt))
+      : await db.select().from(paperFillsTable).orderBy(desc(paperFillsTable.createdAt));
+    return rows.slice(0, opts?.limit ?? 1_000_000).map(toPaperFill);
+  },
+  async insertPaperFill(value) {
+    const db = await getDb();
+    const [row] = await db
+      .insert(paperFillsTable)
+      .values({
+        orderId: value.orderId ?? null,
+        positionId: value.positionId ?? null,
+        symbol: value.symbol,
+        side: value.side,
+        kind: value.kind,
+        qty: value.qty,
+        price: value.price,
+        fee: value.fee ?? 0,
+        realizedPnl: value.realizedPnl ?? 0,
+      })
+      .returning();
+    return toPaperFill(row);
+  },
+  async withPaperLock(key, fn) {
+    // A session-level advisory lock on a dedicated pooled client serialises fills
+    // for the same symbol across serverless instances. Held for the whole
+    // read-modify-write sequence, unlike a per-statement transaction.
+    const { pool } = await import("@/db");
+    const client = await pool.connect();
+    let locked = false;
+    try {
+      await client.query("select pg_advisory_lock(hashtext($1))", [key]);
+      locked = true;
+      return await fn();
+    } finally {
+      if (locked) {
+        try {
+          await client.query("select pg_advisory_unlock(hashtext($1))", [key]);
+        } catch {
+          // Never return a client that may still hold the lock to the pool.
+          client.release(true);
+          throw new Error("Paper fill lock could not be released");
+        }
+      }
+      client.release();
+    }
   },
 
 

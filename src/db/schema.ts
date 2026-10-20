@@ -107,6 +107,25 @@ export const paperPositionsTable = pgTable("paper_positions", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+/**
+ * Immutable paper fill ledger. One row per position-changing event, so the
+ * paper account can be audited independently of the mutable position row and
+ * the journal (which only records closes).
+ */
+export const paperFillsTable = pgTable("paper_fills", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id"),
+  positionId: uuid("position_id"),
+  symbol: text("symbol").notNull(),
+  side: text("side").notNull(), // long | short
+  kind: text("kind").notNull(), // open | add | reduce | close
+  qty: real("qty").notNull(),
+  price: real("price").notNull(),
+  fee: real("fee").notNull().default(0),
+  realizedPnl: real("realized_pnl").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
 /** Local alert rules evaluated against the live ticker stream. */
 export const alertRulesTable = pgTable("alert_rules", {
   id: uuid("id").primaryKey().defaultRandom(),
