@@ -5,7 +5,8 @@ import { currencySymbol, displayRate } from "@/lib/displayCurrency";
 import { useRef, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { Btn, Chip, EmptyState, Input, KV, Modal, PremiumPanel, PageHeader, Select, Skeleton, Toggle } from "@/components/ui";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { newClientOrderId } from "@/lib/orderId";
 import { cx, fmtDateTime, fmtPrice, fmtUsd } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
 import { useMarket, useApp } from "@/stores";
@@ -13,14 +14,6 @@ import type { PaperOrder, PaperPosition } from "@/lib/types";
 
 type OrderType = "market" | "limit" | "stop_market" | "stop_limit";
 
-/** Idempotency key for one logical submission (retries reuse it). */
-function newClientOrderId(): string {
-  const rand =
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID().slice(0, 12)
-      : Math.random().toString(36).slice(2, 14);
-  return `tc-${Date.now().toString(36)}-${rand}`;
-}
 
 export default function OrdersPage() {
   useDisplayCurrency();
@@ -109,6 +102,9 @@ export default function OrdersPage() {
       notify({ title: "Live order placed", body: `${activeSymbol} ${side}`, tone: "success" });
       void res;
     } catch (e) {
+      // A definitive refusal means nothing exists: allow a fresh id next click.
+      // An UNKNOWN outcome must keep the id so a retry can never resubmit.
+      if (!(e instanceof ApiError && e.message.includes("UNKNOWN"))) pendingOrderId.current = null;
       notify({ title: "Live order blocked", body: e instanceof Error ? e.message : "Unknown error", tone: "danger" });
     }
   };

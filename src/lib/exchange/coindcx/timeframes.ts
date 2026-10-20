@@ -63,9 +63,6 @@ export function resolutionForTimeframe(seconds: number): CoinDcxResolution {
   }
 }
 
-/** Timeframes the UI may offer while live CoinDCX data is selected. */
-export const SUPPORTED_TIMEFRAMES: Timeframe[] = ["1m", "5m", "15m", "1H", "4H", "1D"];
-
 /** Whether the app can request real candles for this timeframe. */
 export function isTimeframeSupported(timeframe: Timeframe): boolean {
   return TIMEFRAME_RESOLUTIONS[timeframe] !== null;

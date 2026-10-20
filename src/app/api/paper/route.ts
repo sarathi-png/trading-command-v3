@@ -6,6 +6,7 @@ import {
   getPaperState, placePaperOrder, syncPaper,
 } from "@/lib/paper/engine";
 import { getSettings, logAudit } from "@/lib/settings";
+import { isValidClientOrderId } from "@/lib/orderId";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -92,13 +93,24 @@ export async function POST(req: Request) {
   }
 
   // action === "place"
-  const clientOrderId = typeof body.client_order_id === "string" ? body.client_order_id : "";
-  if (!/^[A-Za-z0-9._:-]{1,64}$/.test(clientOrderId)) {
+  const clientOrderId = body.client_order_id;
+  if (!isValidClientOrderId(clientOrderId)) {
     return Response.json(
       { error: "client_order_id (1-64 chars of [A-Za-z0-9._:-]) is required; it makes retries idempotent" },
       { status: 400 }
     );
   }
+  // Strict enums: a caller asking for LIMIT must not silently get MARKET.
+  if (body.side !== "buy" && body.side !== "sell") {
+    return Response.json({ error: "side must be 'buy' or 'sell'" }, { status: 400 });
+  }
+  if (!["market", "limit", "stop_market", "stop_limit"].includes(String(body.type))) {
+    return Response.json(
+      { error: "type must be market, limit, stop_market or stop_limit" },
+      { status: 400 }
+    );
+  }
+  const side: "buy" | "sell" = body.side;
   const symbol = String(body.symbol ?? "").toUpperCase();
   const prices = await priceMap([symbol]);
   const mark = prices.get(symbol);
@@ -107,10 +119,8 @@ export async function POST(req: Request) {
   const result = await placePaperOrder(
     {
       symbol,
-      side: body.side === "sell" ? "sell" : "buy",
-      type: (["market", "limit", "stop_market", "stop_limit"].includes(String(body.type))
-        ? String(body.type)
-        : "market") as "market" | "limit" | "stop_market" | "stop_limit",
+      side,
+      type: body.type as "market" | "limit" | "stop_market" | "stop_limit",
       qty: Number(body.qty) || 0,
       price: typeof body.price === "number" ? body.price : null,
       stopPrice: typeof body.stopPrice === "number" ? body.stopPrice : null,

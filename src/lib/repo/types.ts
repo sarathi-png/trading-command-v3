@@ -161,7 +161,7 @@ export type PaperOrderInsert = Omit<
   PaperOrderRow,
   "id" | "createdAt" | "updatedAt" | "filledPrice" | "clientOrderId"
 > & {
-  clientOrderId?: string | null;
+  clientOrderId: string;
   id?: string;
   createdAt?: Timestamp | Date;
   updatedAt?: Timestamp | Date;

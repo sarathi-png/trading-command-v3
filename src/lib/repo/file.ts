@@ -309,7 +309,7 @@ export const fileRepo: Repo = {
       status: value.status ?? "open",
       filledPrice: value.filledPrice ?? null,
       reduceOnly: value.reduceOnly ?? false,
-      clientOrderId: value.clientOrderId ?? null,
+      clientOrderId: value.clientOrderId,
       createdAt,
       updatedAt: ts(value.updatedAt, createdAt),
     };
@@ -319,13 +319,11 @@ export const fileRepo: Repo = {
     let created = true;
     let result = row;
     await mutate<PaperOrderRow[]>(DOC_PAPER_ORDERS, [], (rows) => {
-      if (value.clientOrderId) {
-        const existing = rows.find((r) => r.clientOrderId === value.clientOrderId);
-        if (existing) {
-          created = false;
-          result = existing;
-          return null;
-        }
+      const existing = rows.find((r) => r.clientOrderId === value.clientOrderId);
+      if (existing) {
+        created = false;
+        result = existing;
+        return null;
       }
       return [row, ...rows];
     });

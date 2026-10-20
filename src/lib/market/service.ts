@@ -6,8 +6,9 @@
  */
 import { demoCandles, demoTicker, demoOrderbook, demoTrades, DEMO_SYMBOLS } from "./demo";
 import { validateCandles } from "./validate";
-import { cached } from "./cache";
+import { cached } from "@/lib/cache";
 import { UnsupportedTimeframeError } from "../exchange/coindcx/timeframes";
+import { knownSymbols as exchangeKnownSymbols } from "../exchange/symbols";
 import { flags } from "../flags";
 import { getSettings } from "../settings";
 import type { Candle, OrderBook, RecentTrade, Ticker, Timeframe } from "../types";
@@ -33,8 +34,6 @@ export async function activeDataSource(): Promise<"live" | "demo"> {
 }
 
 export function knownSymbols(): string[] {
-  // Use the exchange module's known symbols (all CoinDCX futures pairs)
-  const { knownSymbols: exchangeKnownSymbols } = require("../exchange/symbols");
   return exchangeKnownSymbols();
 }
 
@@ -61,7 +60,7 @@ function toAppTicker(t: ExchangeTicker): Ticker {
 export async function getTickers(symbols?: string[]): Promise<Ticker[]> {
   if (await activeDataSource() === "demo") return (symbols ?? DEMO_SYMBOLS.map(s => s.symbol)).filter(symbol => DEMO_SYMBOLS.some(fixture => fixture.symbol === symbol)).map(demoTicker);
   try {
-    const key = `tickers:${(symbols ?? []).slice().sort().join(",") || "all"}`;
+    const key = `market:tickers:${(symbols ?? []).slice().sort().join(",") || "all"}`;
     const all = await cached(key, TICKER_TTL_MS, () => marketTickers(symbols));
     return all.map(toAppTicker);
   } catch (e) {
@@ -90,7 +89,7 @@ export async function getCandles(
   let raw: Awaited<ReturnType<typeof marketCandles>>;
   try {
     raw = await cached(
-      `candles:${symbol}:${timeframe}:${limit}`,
+      `market:candles:${symbol}:${timeframe}:${limit}`,
       CANDLE_TTL_MS,
       () => marketCandles(symbol, seconds, limit)
     );
@@ -118,7 +117,7 @@ export async function getOrderbook(symbol: string): Promise<OrderBook> {
   }
   if (await activeDataSource() === "demo") return demoOrderbook(symbol);
   try {
-    const book = await cached(`book:${symbol}`, ORDERBOOK_TTL_MS, () => marketOrderBook(symbol, 20));
+    const book = await cached(`market:book:${symbol}`, ORDERBOOK_TTL_MS, () => marketOrderBook(symbol, 20));
     return {
       symbol: book.symbol,
       bids: book.bids,
@@ -134,7 +133,7 @@ export async function getOrderbook(symbol: string): Promise<OrderBook> {
 export async function getRecentTrades(symbol: string): Promise<RecentTrade[]> {
   if (await activeDataSource() === "demo") return demoTrades(symbol);
   try {
-    return await cached(`trades:${symbol}`, TRADES_TTL_MS, () => marketRecentTrades(symbol));
+    return await cached(`market:trades:${symbol}`, TRADES_TTL_MS, () => marketRecentTrades(symbol));
   } catch (e) {
     throw new MarketError(e instanceof Error ? e.message : "Recent trades unavailable");
   }

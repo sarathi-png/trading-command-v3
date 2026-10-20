@@ -49,9 +49,9 @@ import {
 import { orderOutcomeKnown } from "@/lib/exchange/errors";
 import { isSupportedSymbol } from "@/lib/exchange/symbols";
 import { evaluateOrderRisk, normalizeRiskLimits } from "@/lib/risk";
-import { getSettings, logAudit } from "@/lib/settings";
+import { getSettings, invalidateSettingsCache, logAudit } from "@/lib/settings";
 import { getRepo } from "@/lib/repo";
-import crypto from "node:crypto";
+import { isValidClientOrderId, newClientOrderId } from "@/lib/orderId";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -75,10 +75,6 @@ async function liveRealizedPnlToday(): Promise<number | null> {
   return realizedPnlTodayUtc();
 }
 
-/** Request key that makes a submission idempotent across retries. */
-function newClientOrderId(): string {
-  return `tc-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 12)}`;
-}
 
 export async function GET() {
   const settings = await getSettings();
@@ -108,6 +104,9 @@ interface LiveOrderBody {
 }
 
 export async function POST(req: Request) {
+  // Bypass the 5 s settings cache on the live path: a disarm on another
+  // instance must not be ignored because this lambda cached "armed" a moment ago.
+  invalidateSettingsCache();
   const settings = await getSettings();
 
   if (!flags.liveExecution()) {
@@ -188,7 +187,7 @@ export async function POST(req: Request) {
   // ---- idempotency (Postgres) -------------------------------------------
   let clientOrderId = newClientOrderId();
   if (body.client_order_id !== undefined) {
-    if (typeof body.client_order_id !== "string" || !/^[A-Za-z0-9._:-]{1,64}$/.test(body.client_order_id)) {
+    if (!isValidClientOrderId(body.client_order_id)) {
       return Response.json(
         { error: "client_order_id must be 1-64 characters of [A-Za-z0-9._:-]" },
         { status: 400 }
@@ -210,6 +209,18 @@ export async function POST(req: Request) {
           code: "ORDER_STATUS_UNKNOWN",
           clientOrderId,
           reconcile: `/api/orders/status?clientOrderId=${encodeURIComponent(clientOrderId)}`,
+        },
+        { status: 409 }
+      );
+    }
+    if (existing.status === "failed") {
+      // The venue provably refused this key. Returning ok:true here would tell
+      // the operator an order exists when nothing does; a retry needs a NEW key.
+      return Response.json(
+        {
+          error: "This client_order_id refers to a submission the venue refused. Nothing was created; retry with a new id.",
+          code: "ORDER_FAILED_TERMINAL",
+          clientOrderId,
         },
         { status: 409 }
       );

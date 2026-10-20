@@ -9,7 +9,7 @@
  * required; news is intentionally not wired to any scraper — there is no
  * license-clean, key-free source that we can honestly label.
  */
-import { cached } from "@/lib/market/cache";
+import { cached } from "@/lib/cache";
 
 export interface MacroPoint {
   date: string;
@@ -42,6 +42,11 @@ const SERIES: Array<{ id: string; title: string; unit: string }> = [
   { id: "DGS10", title: "10-year Treasury", unit: "%" },
   { id: "CPIAUCSL", title: "CPI (all urban)", unit: "index" },
 ];
+
+const NEWS_UNAVAILABLE: Unavailable = {
+  available: false,
+  reason: "News is unavailable: no licensed provider is configured. Headlines are never generated.",
+};
 
 const TTL_MS = 10 * 60 * 1000;
 const TIMEOUT_MS = 8_000;
@@ -98,10 +103,7 @@ export async function getResearch(): Promise<ResearchEnvelope> {
         available: false,
         reason: "Macro data is unavailable: FRED_API_KEY is not configured on this deployment.",
       },
-      news: {
-        available: false,
-        reason: "News is unavailable: no licensed provider is configured. Headlines are never generated.",
-      },
+      news: NEWS_UNAVAILABLE,
       fetchedAt,
     };
   }
@@ -112,10 +114,7 @@ export async function getResearch(): Promise<ResearchEnvelope> {
     );
     return {
       macro,
-      news: {
-        available: false,
-        reason: "News is unavailable: no licensed provider is configured. Headlines are never generated.",
-      },
+      news: NEWS_UNAVAILABLE,
       fetchedAt,
     };
   } catch (e) {
@@ -126,10 +125,7 @@ export async function getResearch(): Promise<ResearchEnvelope> {
           e instanceof Error ? e.message : "the provider did not answer"
         }.`,
       },
-      news: {
-        available: false,
-        reason: "News is unavailable: no licensed provider is configured. Headlines are never generated.",
-      },
+      news: NEWS_UNAVAILABLE,
       fetchedAt,
     };
   }

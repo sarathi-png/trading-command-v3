@@ -483,7 +483,7 @@ export const postgresRepo: Repo = {
         status: value.status ?? "open",
         filledPrice: value.filledPrice ?? null,
         reduceOnly: value.reduceOnly ?? false,
-        clientOrderId: value.clientOrderId ?? null,
+        clientOrderId: value.clientOrderId,
       })
       // A retried submission (double-click or network retry) must resolve to
       // the SAME order, not a second fill. The unique index decides the winner
@@ -491,7 +491,6 @@ export const postgresRepo: Repo = {
       .onConflictDoNothing({ target: paperOrdersTable.clientOrderId })
       .returning();
     if (row) return { order: toPaperOrder(row), created: true };
-    if (!value.clientOrderId) throw new Error("Paper order insert failed");
     const [existing] = await db
       .select()
       .from(paperOrdersTable)

@@ -87,8 +87,8 @@ export const paperOrdersTable = pgTable("paper_orders", {
   status: text("status").notNull().default("open"), // open | filled | cancelled | rejected
   filledPrice: real("filled_price"),
   reduceOnly: boolean("reduce_only").notNull().default(false),
-  // Idempotency key supplied by the client. Nullable only for pre-0002 rows.
-  clientOrderId: text("client_order_id").unique(),
+  // Idempotency key supplied by the client; every paper order has one.
+  clientOrderId: text("client_order_id").notNull().unique("paper_orders_client_order_id_key"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -131,7 +131,7 @@ export const alertRulesTable = pgTable("alert_rules", {
  */
 export const liveOrdersTable = pgTable("live_orders", {
   id: uuid("id").primaryKey().defaultRandom(),
-  clientOrderId: text("client_order_id").notNull().unique(),
+  clientOrderId: text("client_order_id").notNull().unique("paper_orders_client_order_id_key"),
   symbol: text("symbol").notNull(),
   side: text("side").notNull(),
   type: text("type").notNull(),

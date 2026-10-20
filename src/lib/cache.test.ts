@@ -1,11 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { cached, clearMarketCache } from "./cache";
+import { cached, clearCache } from "./cache";
 
-describe("market cache", () => {
+describe("shared cache", () => {
   it("serves a hit within the TTL", async () => {
-    clearMarketCache();
+    clearCache();
     let calls = 0;
     const load = async () => {
       calls += 1;
@@ -17,7 +17,7 @@ describe("market cache", () => {
   });
 
   it("reloads after the TTL", async () => {
-    clearMarketCache();
+    clearCache();
     let calls = 0;
     const load = async () => ++calls;
     await cached("k", -1, load);
@@ -25,7 +25,7 @@ describe("market cache", () => {
   });
 
   it("de-duplicates concurrent misses", async () => {
-    clearMarketCache();
+    clearCache();
     let calls = 0;
     let release: (value: number) => void = () => undefined;
     const gate = new Promise<number>((resolve) => {
@@ -43,15 +43,24 @@ describe("market cache", () => {
   });
 
   it("does not cache failures", async () => {
-    clearMarketCache();
+    clearCache();
     let calls = 0;
     const load = async () => {
       calls += 1;
-      if (calls === 1) throw new Error("venue down");
+      if (calls === 1) throw new Error("upstream down");
       return "ok";
     };
-    await assert.rejects(cached("k", 1000, load), /venue down/);
+    await assert.rejects(cached("k", 1000, load), /upstream down/);
     assert.equal(await cached("k", 1000, load), "ok");
     assert.equal(calls, 2);
+  });
+
+  it("clears one namespace without touching another", async () => {
+    clearCache();
+    await cached("market:a", 1000, async () => 1);
+    await cached("research:a", 1000, async () => 2);
+    clearCache("market:");
+    assert.equal(await cached("market:a", 1000, async () => 3), 3);
+    assert.equal(await cached("research:a", 1000, async () => 4), 2);
   });
 });

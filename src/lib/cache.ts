@@ -1,9 +1,9 @@
 /**
  * Small TTL cache with single-flight de-duplication.
  *
- * Every workstation panel polls, and several panels ask for the same ticker or
- * candle set in the same second. Without this, one page load fans out into
- * dozens of identical CoinDCX requests and risks the venue's rate limit.
+ * Every workstation panel polls, and several panels ask for the same ticker,
+ * candle set or macro series in the same second. Without this, one page load
+ * fans out into dozens of identical upstream requests and risks a rate limit.
  *
  * Rules:
  *   - only successful results are cached (errors always propagate fresh);
@@ -22,7 +22,6 @@ function evictIfNeeded(): void {
   for (const [key, entry] of store) {
     if (entry.expiresAt <= now) store.delete(key);
   }
-  // Still too large: drop oldest insertion order (Map preserves it).
   while (store.size > MAX_ENTRIES) {
     const oldest = store.keys().next().value;
     if (oldest === undefined) break;
@@ -50,8 +49,13 @@ export async function cached<T>(key: string, ttlMs: number, load: () => Promise<
   return promise;
 }
 
-/** Test/ops helper. */
-export function clearMarketCache(): void {
-  store.clear();
-  inflight.clear();
+/** Test/ops helper. Prefix-based clearing keeps namespaces independent. */
+export function clearCache(prefix?: string): void {
+  if (!prefix) {
+    store.clear();
+    inflight.clear();
+    return;
+  }
+  for (const key of store.keys()) if (key.startsWith(prefix)) store.delete(key);
+  for (const key of inflight.keys()) if (key.startsWith(prefix)) inflight.delete(key);
 }

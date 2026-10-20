@@ -3,6 +3,7 @@ import { exchangeAccountConfigured } from "@/lib/credentials";
 import { flags } from "@/lib/flags";
 import { getSettings, logAudit, updateSettings } from "@/lib/settings";
 import { isSupportedSymbol } from "@/lib/exchange/symbols";
+import { normalizeRiskLimits } from "@/lib/risk";
 import type { AppSettings } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -101,6 +102,10 @@ export async function POST(req: Request) {
       return Response.json({ error: "Live arming requires explicit confirmation token." }, { status: 400 });
     }
     await logAudit("live_mode_armed", {});
+  }
+  if (patch.riskLimits) {
+    // Never persist an unbounded cap; normalize once, at the boundary.
+    patch.riskLimits = normalizeRiskLimits({ ...current.riskLimits, ...patch.riskLimits });
   }
   if (patch.riskLimits && JSON.stringify(patch.riskLimits) !== JSON.stringify(current.riskLimits)) {
     // Risk limits are a safety control; changing them is an auditable event.

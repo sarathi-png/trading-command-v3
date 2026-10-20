@@ -16,6 +16,10 @@ function merge(base: AppSettings, patch: Partial<AppSettings>): AppSettings {
     modules: { ...base.modules, ...(patch.modules ?? {}) },
     strategiesEnabled: { ...base.strategiesEnabled, ...(patch.strategiesEnabled ?? {}) },
     riskLimits: { ...base.riskLimits, ...(patch.riskLimits ?? {}) },
+    // Legacy rows could contain `liveArmed: "yes"` from the pre-fix route.
+    // Coerce on READ too, so an upgraded database cannot start armed without
+    // the explicit boolean + confirmation token.
+    liveArmed: (patch.liveArmed ?? base.liveArmed) === true,
     // Watchlists are user data, not reference data. Forcing knownSymbols()
     // here made every save a no-op and every read return all 20 venue pairs.
     watchlist: normalizeWatchlist(patch.watchlist ?? base.watchlist),
@@ -23,7 +27,7 @@ function merge(base: AppSettings, patch: Partial<AppSettings>): AppSettings {
 }
 
 /** Keep only strings, drop duplicates, and cap the list at a sane size. */
-export function normalizeWatchlist(list: unknown): string[] {
+function normalizeWatchlist(list: unknown): string[] {
   if (!Array.isArray(list)) return [...DEFAULT_SETTINGS.watchlist];
   const seen = new Set<string>();
   const out: string[] = [];

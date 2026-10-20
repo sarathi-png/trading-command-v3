@@ -2,17 +2,39 @@
 --
 -- Paper orders previously had no idempotency key: a double-click or a retried
 -- request created two rows and, for market orders, two fills. This adds a
--- nullable client_order_id with a unique index. PostgreSQL treats NULLs as
--- distinct, so legacy rows (and any caller that omits the key) remain valid,
--- while every non-null key can be claimed exactly once.
+-- NOT NULL client_order_id with a unique constraint. Legacy rows are backfilled
+-- from their primary key, so the column can be enforced immediately without
+-- losing data and without leaving a nullable hole that looks idempotent.
 --
--- Idempotent: safe to run repeatedly. Run BEFORE `npm run db:push` so drizzle
--- sees no drift:
+-- Idempotent and safe on a fresh database (no paper_orders table yet), which is
+-- important because `drizzle-kit push` has no migrations table. Run BEFORE
+-- `npm run db:push`:
 --   psql "$DATABASE_URL" -f db/migrations/0002_paper_order_idempotency.sql
 --   npm run db:push
+--
+-- The constraint is a FULL unique one (not partial): `ON CONFLICT
+-- (client_order_id)` cannot infer a partial index, and a failed inference makes
+-- every paper insert error with 42P10.
 
-ALTER TABLE paper_orders ADD COLUMN IF NOT EXISTS client_order_id text;
+DO $$
+BEGIN
+  IF to_regclass('public.paper_orders') IS NOT NULL THEN
+    ALTER TABLE paper_orders ADD COLUMN IF NOT EXISTS client_order_id text;
 
-CREATE UNIQUE INDEX IF NOT EXISTS paper_orders_client_order_id_uidx
-  ON paper_orders (client_order_id)
-  WHERE client_order_id IS NOT NULL;
+    -- Legacy rows predate client keys. Their primary key is unique already, so
+    -- it is a safe, traceable backfill (prefix distinguishes it from new ids).
+    UPDATE paper_orders
+       SET client_order_id = 'legacy-' || id::text
+     WHERE client_order_id IS NULL;
+
+    ALTER TABLE paper_orders ALTER COLUMN client_order_id SET NOT NULL;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+       WHERE conname = 'paper_orders_client_order_id_key'
+    ) THEN
+      ALTER TABLE paper_orders
+        ADD CONSTRAINT paper_orders_client_order_id_key UNIQUE (client_order_id);
+    END IF;
+  END IF;
+END $$;

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { useApp, useMarket } from "@/stores";
 import { logout } from "@/lib/api";
-import { SUPPORTED_TIMEFRAMES } from "@/lib/exchange/coindcx/timeframes";
+import { TIMEFRAMES } from "@/lib/types";
 import { cx } from "@/lib/format";
 
 interface Command {
@@ -45,7 +45,7 @@ export default function CommandPalette() {
           perform: () => { setSymbol(s); router.push("/chart"); setPalette(false); },
         }))
       : [];
-    const tfs: Command[] = SUPPORTED_TIMEFRAMES.map((tf) => ({
+    const tfs: Command[] = TIMEFRAMES.map((tf) => ({
       id: `tf-${tf}`, label: `Change timeframe to ${tf}`, group: "Timeframe",
       perform: () => { setTimeframe(tf); setPalette(false); },
     }));

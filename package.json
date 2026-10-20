@@ -19,7 +19,7 @@
     "export:candles": "npm run build && node scripts/validate-real-data.js",
     "validate:real": "npm run export:candles",
     "validate:csv": "npm run build && node scripts/validate-from-csv.js",
-    "test:safety": "tsc -p tsconfig.safety.json && node --test output/safety-js/lib/risk.test.js output/safety-js/lib/market/validate.test.js output/safety-js/lib/market/cache.test.js output/safety-js/lib/exchange/coindcx/timeframes.test.js",
+    "test:safety": "tsc -p tsconfig.safety.json && node --test output/safety-js/lib/risk.test.js output/safety-js/lib/market/validate.test.js output/safety-js/lib/cache.test.js output/safety-js/lib/exchange/coindcx/timeframes.test.js",
     "test:auth": "tsc -p tsconfig.auth.json && node --test output/auth-js/lib/auth.test.js",
     "test:features": "tsc -p tsconfig.features.json && node --test output/features-js/lib/notifications/*.test.js output/features-js/lib/market/movers.test.js output/features-js/lib/journal/core.test.js output/features-js/lib/displayCurrency.test.js output/features-js/lib/exchange/liveWallet.test.js"
   },

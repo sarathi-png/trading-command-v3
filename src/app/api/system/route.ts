@@ -18,6 +18,7 @@ import type { SystemStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 10;
 
 let pingCache: { at: number; ok: boolean; error?: string } | null = null;
 

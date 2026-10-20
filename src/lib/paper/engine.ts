@@ -10,7 +10,7 @@ import { allocatePaperClose } from "./accounting";
 import { normalisePaperAccounting, recordPaperClose, snapshotPaperContext } from "../journal/service";
 import { getRepo } from "@/lib/repo";
 import { PAPER_FEE_RATE } from "../flags";
-import { evaluateOrderRisk } from "../risk";
+import { evaluateOrderRisk, normalizeRiskLimits } from "../risk";
 import { getTickers } from "../market/service";
 import { getSettings, logAudit } from "../settings";
 
@@ -81,6 +81,9 @@ export async function placePaperOrder(
   const todayPnl = await repo.sumJournalPnl({ mode: "paper", closedSince: dayStart });
 
   const settings = await getSettings();
+  // Paper is governed by the SAME bounded limits as live. Passing raw stored
+  // values let a nonsense setting (1e12) disable every cap.
+  const safeLimits = normalizeRiskLimits(limits);
   const realized = await repo.sumJournalPnl({ mode: "paper" });
   const marks = new Map((await getTickers(positions.map(p => p.symbol))).map(t => [t.symbol, t.price]));
   const openPnl = positions.reduce((sum, p) => sum + ((marks.get(p.symbol) ?? p.entry) - p.entry) * p.qty * (p.side === "long" ? 1 : -1), 0);
@@ -88,10 +91,10 @@ export async function placePaperOrder(
     { symbol, qty, price: refPrice, reduceOnly: Boolean(input.reduceOnly) },
     {
       limits: {
-        maxDailyLoss: limits.maxDailyLoss,
-        maxOrderValue: limits.maxOrderValue,
-        maxLeverage: limits.maxLeverage ?? 0,
-        maxOpenPositions: limits.maxOpenPositions,
+        maxDailyLoss: safeLimits.maxDailyLoss,
+        maxOrderValue: safeLimits.maxOrderValue,
+        maxLeverage: limits.maxLeverage === undefined ? 0 : safeLimits.maxLeverage,
+        maxOpenPositions: safeLimits.maxOpenPositions,
       },
       openSymbols: positions.map((p) => p.symbol),
       currentNotional: positions.reduce((a, p) => a + Math.abs(p.qty) * (marks.get(p.symbol) ?? p.entry), 0),
