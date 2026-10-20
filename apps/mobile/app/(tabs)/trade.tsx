@@ -57,7 +57,9 @@ export default function TradeScreen() {
     try {
       const next = await api.get<PaperState>("/api/paper");
       setState(next);
-      setError(null);
+      // The paper route returns 200 with an explanatory `error` when the module
+      // is disabled; that must not look like an empty account.
+      setError(next.error ?? null);
     } catch (cause) {
       setError(errorText(cause));
     } finally {

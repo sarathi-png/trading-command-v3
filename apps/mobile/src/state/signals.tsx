@@ -35,7 +35,9 @@ export function SignalsProvider({ children }: { children: ReactNode }) {
   const [signals, setSignals] = useState<SignalRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lastOpenedAt, setLastOpenedAt] = useState(() => Date.now());
+  // Zero means "the inbox has not been opened yet this session", so active
+  // signals fetched at launch surface as unread. Opening the inbox sets it.
+  const [lastOpenedAt, setLastOpenedAt] = useState(0);
 
   const refresh = useCallback(async () => {
     if (status !== "signedIn") return;

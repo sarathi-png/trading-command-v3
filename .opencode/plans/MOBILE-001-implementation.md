@@ -265,11 +265,13 @@ All three are addressed in §9: the app is in-repo with an isolated install, and
 | Commit | Scope | Verification |
 |---|---|---|
 | `04da5cb` | T1 scaffold + core (`apps/mobile`, root excludes, API client, SecureStore session, ticket intent, formatting) | `apps/mobile` typecheck, eslint, `npm test` (23 pass); root `typecheck`, `lint` |
-| `1f4a50c` | T2–T8 screens (login, home, trade, inbox, providers, README) | `apps/mobile` typecheck, eslint, `npm test` (23 pass), `expo export --platform ios`; full root `npm test` PASS |
+| `1f4a50c` | T2–T8 screens (login, home, trade, inbox, providers, README) | `apps/mobile` typecheck, eslint, `npm test` (23 pass), `expo export --platform ios` and `--platform android`; full root `npm test` PASS |
+
+Follow-up fixes after the screen commit: signals fetched before the inbox is first opened count as unread; a paper `GET` that returns an explanatory `error` is surfaced instead of looking like an empty account; the close request sends the position symbol so the server can price it.
 
 ### What the app phase actually verified
 
-- **Bundle:** `npx expo export --platform ios` produced a 2.6 MB Hermes bundle and 23 assets (1165 modules). This compiles every route and provider, so a missing import or invalid JSX fails the check.
+- **Bundle:** `npx expo export` produced a 2.6 MB Hermes bundle for iOS and for Android (1165 modules, 23 assets). This compiles every route and provider, so a missing import or invalid JSX fails the check.
 - **Platform-free tests:** `src/api/client.ts`, `src/lib/intent.ts`, and `src/lib/format.ts` compile with `tsconfig.test.json` and run under `node --test`. Coverage includes workspace-header exemptions, 401 sign-out, timeout aborts, signal→ticket mapping, `sig:<id>` ids, paper-mode blocking, and the "never render zero for missing" rule.
 - **Root isolation:** the Next.js `typecheck`, `lint`, `next build`, and paper/live API tests pass with `apps/mobile` present. `apps/` is excluded from the root tsconfig, ESLint, and the Vercel upload.
 
