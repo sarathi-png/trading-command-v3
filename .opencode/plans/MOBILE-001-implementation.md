@@ -250,8 +250,38 @@ Deployment: **not attempted**. `allow_production_deploy=false`; this phase is ve
 - `/api/settings` works without a workspace header (cold-start mode read).
 - `/api/signals` returns deduplicated alerts with real prices and normalized symbols/timeframes.
 
-### Still open before the app phase
+### Open items recorded at the end of the backend phase
 
 1. `apps/mobile` scaffold and the root excludes (T1) — the only task that touches the web build config.
 2. Decide whether the app ships inside this Vercel project's repo or is deployed separately (layout decision 1 answered in-repo, deployment still local/dev only).
 3. No production deploy until explicit approval.
+
+All three are addressed in §9: the app is in-repo with an isolated install, and nothing was deployed.
+
+---
+
+## 9. Implementation log (app phase)
+
+| Commit | Scope | Verification |
+|---|---|---|
+| `04da5cb` | T1 scaffold + core (`apps/mobile`, root excludes, API client, SecureStore session, ticket intent, formatting) | `apps/mobile` typecheck, eslint, `npm test` (23 pass); root `typecheck`, `lint` |
+| `1f4a50c` | T2–T8 screens (login, home, trade, inbox, providers, README) | `apps/mobile` typecheck, eslint, `npm test` (23 pass), `expo export --platform ios`; full root `npm test` PASS |
+
+### What the app phase actually verified
+
+- **Bundle:** `npx expo export --platform ios` produced a 2.6 MB Hermes bundle and 23 assets (1165 modules). This compiles every route and provider, so a missing import or invalid JSX fails the check.
+- **Platform-free tests:** `src/api/client.ts`, `src/lib/intent.ts`, and `src/lib/format.ts` compile with `tsconfig.test.json` and run under `node --test`. Coverage includes workspace-header exemptions, 401 sign-out, timeout aborts, signal→ticket mapping, `sig:<id>` ids, paper-mode blocking, and the "never render zero for missing" rule.
+- **Root isolation:** the Next.js `typecheck`, `lint`, `next build`, and paper/live API tests pass with `apps/mobile` present. `apps/` is excluded from the root tsconfig, ESLint, and the Vercel upload.
+
+### Honest limits of this verification
+
+- No simulator or physical device was available in this environment, so the Expo Go / device smoke test (M0's "builds for iOS and Android") is **not** ticked. The iOS bundle export is the strongest check performed.
+- The deployed `https://trading-command-v3.vercel.app` does not yet include `POST /api/auth/mobile`; the app defaults to `http://localhost:3000` until that deployment ships.
+- No production deploy, no EAS build, no push permission prompt.
+
+### Device-run checklist (remaining)
+
+1. Start the API (`npm run dev`) and confirm `POST /api/auth/mobile` returns `{ token, expiresAt }`.
+2. `cd apps/mobile && EXPO_PUBLIC_API_URL=http://localhost:3000 npx expo start`, open in Expo Go or a dev build.
+3. Sign in, switch the server to PAPER from the trade screen, place and close a paper order, then open an inbox signal and confirm the ticket is pre-filled but not placed.
+4. Kill and relaunch the app: the session should restore; after 12 h (or a server-side token invalidation) it should return to login.

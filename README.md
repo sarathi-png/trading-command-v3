@@ -89,6 +89,8 @@ Browser → /api/* (Vercel serverless functions, auth by proxy.ts)
   service for a Delta-era deployment, but **this application never calls it** —
   the end-to-end test asserts that it receives zero requests. It is not part of
   any deployment step.
+- `apps/mobile/` is a standalone Expo client with its own install and lockfile.
+  It is excluded from the web typecheck, lint, and Vercel upload.
 
 ### Live trading is off by default — and gated twice over
 
@@ -120,6 +122,7 @@ be disabled. Full list in `.env.example`.
 - `docs/SECURITY.md` — secrets handling, safety gates
 - `docs/DELTA_SETUP.md` — Delta-era reference (superseded, kept for history)
 - `docs/TRADING_GATEWAY_DEPLOYMENT.md` / `trading-gateway/README.md` — the retired gateway service (not used by this app)
+- `apps/mobile/README.md` — Expo mobile client: paper-only entry, signal inbox, no chart or push in v1
 - `docs/STRATEGY_ENGINE.md` — strategies, structure & S/R detection
 - `docs/PAPER_TRADING.md` — paper engine semantics
 - `docs/WEBHOOKS.md` — optional TradingView webhook (disabled by default)
