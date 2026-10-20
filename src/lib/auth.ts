@@ -2,10 +2,12 @@
  * Authentication for the dashboard API.
  *
  * These routes can move real money, so every caller must prove they are the
- * operator before anything else happens. Two credentials are accepted:
+ * operator before anything else happens. Three credentials are accepted:
  *
  *   - a signed session cookie issued by POST /api/auth/login (browser use)
  *   - `Authorization: Bearer <API_PASSWORD>` (scripts, curl, smoke tests)
+ *   - `Authorization: Bearer <signed-session>` issued by POST /api/auth/mobile
+ *     (the mobile app, which must never store the password itself)
  *
  * FAIL CLOSED. If API_PASSWORD is unset, authentication is *unconfigured* and
  * every protected route is refused. A missing env var must never be read as
@@ -128,14 +130,20 @@ export async function verifySession(
 export async function isAuthenticated(req: NextRequest): Promise<boolean> {
   if (!authConfigured()) return false;
   const bearer = bearerFrom(req.headers.get("authorization"));
-  if (bearer && passwordMatches(bearer)) return true;
+  if (bearer) {
+    // Scripts may still present the operator password directly.
+    if (passwordMatches(bearer)) return true;
+    // Mobile clients present a signed session token obtained from
+    // POST /api/auth/mobile. It is HMAC-verified and expiring, exactly like the
+    // browser cookie, and is accepted outside the embedded-preview opt-in.
+    if (await verifySession(bearer, sessionSecret())) return true;
+  }
   if (process.env.EMBEDDED_PREVIEW_COOKIES === "true") {
     // Preview gateways may consume/replace Authorization for their own access
     // control. This application-specific header carries only a signed session,
     // never the operator password, and is still checked for signature + expiry.
     const previewToken = req.headers.get("x-tc-preview-session");
     if (await verifySession(previewToken, sessionSecret())) return true;
-    if (bearer && await verifySession(bearer, sessionSecret())) return true;
   }
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   return verifySession(token, sessionSecret());

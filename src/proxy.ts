@@ -9,17 +9,26 @@
  * Allow-listed:
  *   /api/auth/login    - issues the session cookie
  *   /api/auth/logout   - clears it
+ *   /api/auth/mobile   - issues a bearer session for the mobile app
  *   /api/health        - liveness probe for the container/orchestrator
  *   /api/integrations/tradingview/webhook
  *                       - machine-to-machine; authenticated by its own
  *                         shared secret + timestamp window in that handler
  */
 import { NextResponse, type NextRequest } from "next/server";
-import { authConfigured, isAuthenticated, timingSafeEqual } from "./lib/auth";
+import {
+  authConfigured,
+  bearerFrom,
+  isAuthenticated,
+  sessionSecret,
+  timingSafeEqual,
+  verifySession,
+} from "./lib/auth";
 
 const PUBLIC_API = new Set([
   "/api/auth/login",
   "/api/auth/logout",
+  "/api/auth/mobile",
   "/api/health",
   "/api/integrations/tradingview/webhook",
 ]);
@@ -46,11 +55,19 @@ export async function proxy(req: NextRequest) {
     );
   }
 
-  // Accepts either the bearer token or the signed session cookie.
+  // Accepts a signed session (cookie or bearer) or the operator password.
   if (await isAuthenticated(req)) {
     const workspace = req.headers.get("x-tc-workspace");
-    const browser = !req.headers.get("authorization");
-    if (browser && pathname !== "/api/settings" && !["paper", "live"].includes(workspace ?? "")) {
+    // A browser (cookie) and a mobile client (signed bearer session) must both
+    // declare which workspace they are acting in. A password bearer is a
+    // script/curl caller and keeps its historical behaviour: it must opt in to
+    // the paper/live route separation explicitly through the same header only
+    // when it wants that workspace enforced.
+    const bearer = bearerFrom(req.headers.get("authorization"));
+    const sessionBearer = bearer ? await verifySession(bearer, sessionSecret()) : false;
+    const mustDeclareWorkspace =
+      (!bearer || sessionBearer) && pathname !== "/api/settings";
+    if (mustDeclareWorkspace && !["paper", "live"].includes(workspace ?? "")) {
       return NextResponse.json({ error: "Select a Live or Paper workspace first." }, { status: 428 });
     }
     if (workspace === "live" && pathname.startsWith("/api/paper")) {

@@ -71,6 +71,33 @@ describe('preview session authentication (gateway header replacement)',()=>{
   });
 });
 
+describe('mobile bearer sessions',()=>{
+  it('accepts a signed session token as Authorization: Bearer',async()=>{
+    delete process.env.EMBEDDED_PREVIEW_COOKIES;
+    const token=await signSession(Date.now()+60_000,secret);
+    assert.equal(await isAuthenticated(request({authorization:`Bearer ${token}`})),true);
+  });
+  it('rejects expired, tampered and foreign-secret session bearers',async()=>{
+    delete process.env.EMBEDDED_PREVIEW_COOKIES;
+    const valid=await signSession(Date.now()+60_000,secret);
+    const tampered=valid.slice(0,-1)+(valid.at(-1)==='0'?'1':'0');
+    for(const token of ['not-a-session',tampered,await signSession(Date.now()-1000,secret),await signSession(Date.now()+60_000,'other-secret')]) {
+      assert.equal(await isAuthenticated(request({authorization:`Bearer ${token}`})),false);
+    }
+  });
+  it('refuses a valid session bearer when auth is unconfigured',async()=>{
+    const token=await signSession(Date.now()+60_000,secret);
+    delete process.env.API_PASSWORD;
+    assert.equal(await isAuthenticated(request({authorization:`Bearer ${token}`})),false);
+    process.env.API_PASSWORD='test-only-password';
+  });
+  it('keeps accepting the operator password as a bearer',async()=>{
+    delete process.env.EMBEDDED_PREVIEW_COOKIES;
+    assert.equal(await isAuthenticated(request({authorization:'Bearer test-only-password'})),true);
+    assert.equal(await isAuthenticated(request({authorization:'Bearer wrong'})),false);
+  });
+});
+
 describe('failed-login throttling',()=>{
   it('allows attempts below the limit and refuses the limit-th attempt onward',()=>{
     resetAuthThrottle();

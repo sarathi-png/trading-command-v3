@@ -119,6 +119,35 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.equal((await fetch(`${url}/api/account`, { headers: { cookie } })).status, 428);
     assert.equal((await fetch(`${url}/api/account`, { headers: { cookie, "x-tc-workspace": "paper" } })).status, 200);
 
+    // Mobile: one password exchange, then a signed bearer session. No cookie.
+    const badMobileLogin = await fetch(`${url}/api/auth/mobile`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: "wrong-password" }),
+    });
+    assert.equal(badMobileLogin.status, 401);
+    const mobileLogin = await fetch(`${url}/api/auth/mobile`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: "paper-test-password" }),
+    });
+    assert.equal(mobileLogin.status, 200);
+    assert.equal(mobileLogin.headers.get("set-cookie"), null, "mobile login must not issue a cookie");
+    const mobileSession = await mobileLogin.json();
+    assert.equal(typeof mobileSession.token, "string");
+    assert.ok(mobileSession.expiresAt > Date.now());
+    const bearer = { authorization: `Bearer ${mobileSession.token}` };
+
+    // A session bearer is treated like a browser session: it must declare a
+    // workspace, and the paper workspace must not reach live order routes.
+    assert.equal((await fetch(`${url}/api/account`, { headers: bearer })).status, 428);
+    assert.equal((await fetch(`${url}/api/account`, { headers: { ...bearer, "x-tc-workspace": "paper" } })).status, 200);
+    assert.equal((await fetch(`${url}/api/orders`, { headers: { ...bearer, "x-tc-workspace": "paper" } })).status, 403);
+    assert.equal((await fetch(`${url}/api/settings`, { headers: bearer })).status, 200);
+    assert.equal((await fetch(`${url}/api/account`, { headers: { authorization: `Bearer ${mobileSession.token}x` } })).status, 401);
+    // Password bearers keep their historical script behaviour.
+    assert.equal((await fetch(`${url}/api/account`, { headers: { authorization: "Bearer paper-test-password" } })).status, 200);
+
     const request = (route, options = {}) =>
       fetch(`${url}${route}`, {
         ...options,
