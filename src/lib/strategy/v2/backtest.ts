@@ -5,12 +5,54 @@ import { evaluateChandelierDonchian, calculatePositionSize, DEFAULT_CHANDELIER_D
 import { toHeikinAshi } from "./heikin-ashi";
 import { chandelierExit } from "./chandelier";
 
+/** Engine config version, stamped onto every result for reproducibility. */
+export const BACKTEST_ENGINE_VERSION = "chandelier-donchian-backtest-v1";
+
+/** How results are filled, stated on every result so assumptions travel with the numbers. */
+export const FILL_MODEL =
+  "Closed-bar signals; next real open fills; prior-bar trailing stops; a gap through the stop fills at the worse opening price; fees and slippage charged per side at the configured rates. No synthetic fills.";
+
+/**
+ * Clean a raw candle series for backtesting: drop non-finite values,
+ * impossible geometry, duplicate timestamps and non-monotonic ordering.
+ * Returns the cleaned series plus human-readable data-quality warnings.
+ * Never invents data.
+ */
+export function sanitizeCandles(raw: Candle[]): { candles: Candle[]; warnings: string[] } {
+  const warnings: string[] = [];
+  if (!Array.isArray(raw)) return { candles: [], warnings: ["Candle input was not an array."] };
+  const seen = new Set<number>();
+  const out: Candle[] = [];
+  let dropped = 0;
+  let duplicates = 0;
+  let lastTime = -Infinity;
+  for (const c of raw) {
+    if (!c || typeof c.time !== "number" || ![c.open, c.high, c.low, c.close, c.volume].every(Number.isFinite)) {
+      dropped++;
+      continue;
+    }
+    if (c.high < c.low || c.close <= 0 || c.open <= 0) {
+      dropped++;
+      continue;
+    }
+    if (seen.has(c.time)) { duplicates++; continue; }
+    if (c.time <= lastTime) { dropped++; continue; } // non-monotonic
+    seen.add(c.time);
+    out.push({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: Math.max(0, c.volume) });
+    lastTime = c.time;
+  }
+  if (dropped) warnings.push(`${dropped} invalid or out-of-order candles were dropped.`);
+  if (duplicates) warnings.push(`${duplicates} duplicate-timestamp candles were dropped.`);
+  return { candles: out, warnings };
+}
+
 /** Closed-bar signals; next real open fills; prior-bar stops. No synthetic fills. */
 export function runBacktest(
   candles: Candle[],
   config: ChandelierDonchianConfig = DEFAULT_CHANDELIER_DONCHIAN_CONFIG,
   backtestConfig: BacktestConfig = DEFAULT_BACKTEST_CONFIG,
-  tradeStartIndex = 0
+  tradeStartIndex = 0,
+  dataWarnings: string[] = []
 ): BacktestResult {
   validateStrategyConfig(config);
   if (!Number.isFinite(backtestConfig.initialCapital) || backtestConfig.initialCapital <= 0 ||
@@ -27,19 +69,25 @@ export function runBacktest(
   let position: BacktestTrade | null = null;
   let activeStop = 0;
   let entryIndex = 0;
-  const mark = (value: number) => {
+  let feesTotal = 0;
+  let slippageTotal = 0;
+  const equityCurve: { time: number; equity: number }[] = [];
+  const mark = (value: number, time: number) => {
     peakEquity = Math.max(peakEquity, value);
     maxDrawdown = Math.max(maxDrawdown, peakEquity - value);
     maxDrawdownPct = Math.max(maxDrawdownPct, (peakEquity - value) / peakEquity * 100);
+    equityCurve.push({ time, equity: Number(value.toFixed(2)) });
   };
   const close = (bar: Candle, price: number, reason: BacktestTrade["exitReason"], i: number) => {
     if (!position) return;
-    const pnl = calculatePnl(position, price, backtestConfig);
+    const { pnl, fees, slippage } = calculatePnl(position, price, backtestConfig);
+    feesTotal += fees;
+    slippageTotal += slippage;
     trades.push({ ...position, exitTime: bar.time, exitPrice: price, pnl,
       pnlPct: pnl / (position.entryPrice * position.qty) * 100,
       exitReason: reason, barsHeld: i - entryIndex + 1 });
     equity += pnl;
-    mark(equity);
+    mark(equity, bar.time);
     position = null;
   };
   const warmup = Math.max(config.chandelier.atrLength, ...config.donchian.periods) + 50;
@@ -75,18 +123,25 @@ export function runBacktest(
     } else if (config.timeStop.enabled && i - entryIndex + 1 >= config.timeStop.bars) {
       close(bar, bar.close, "time_stop", i);
     } else {
-      mark(equity + calculatePnl(position, bar.close, backtestConfig));
+      mark(equity + calculatePnl(position, bar.close, backtestConfig).pnl, bar.time);
     }
   }
   if (position && candles.length) close(candles.at(-1)!, candles.at(-1)!.close, "end_of_data", candles.length - 1);
-  return computeMetrics(trades, maxDrawdown, maxDrawdownPct);
+  return computeMetrics(trades, maxDrawdown, maxDrawdownPct, {
+    initialCapital: backtestConfig.initialCapital,
+    endingEquity: equity,
+    fees: feesTotal,
+    slippage: slippageTotal,
+    equityCurve,
+    dataWarnings,
+  });
 }
 
 function calculatePnl(
   trade: BacktestTrade,
   exitPrice: number,
   config: BacktestConfig
-): number {
+): { pnl: number; fees: number; slippage: number } {
   const grossPnl = trade.side === "long"
     ? (exitPrice - trade.entryPrice) * trade.qty
     : (trade.entryPrice - exitPrice) * trade.qty;
@@ -94,13 +149,23 @@ function calculatePnl(
   const fees = (trade.entryPrice + exitPrice) * trade.qty * config.feeRate;
   const slippage = (trade.entryPrice + exitPrice) * trade.qty * config.slippage;
 
-  return grossPnl - fees - slippage;
+  return { pnl: grossPnl - fees - slippage, fees, slippage };
+}
+
+interface MetricsExtras {
+  initialCapital: number;
+  endingEquity: number;
+  fees: number;
+  slippage: number;
+  equityCurve: { time: number; equity: number }[];
+  dataWarnings: string[];
 }
 
 function computeMetrics(
   trades: BacktestTrade[],
   maxDrawdown: number,
-  maxDrawdownPct: number
+  maxDrawdownPct: number,
+  extras: MetricsExtras
 ): BacktestResult {
   const winningTrades = trades.filter((t) => t.pnl > 0);
   const losingTrades = trades.filter((t) => t.pnl < 0);
@@ -132,6 +197,8 @@ function computeMetrics(
     ? trades.reduce((sum, t) => sum + t.barsHeld, 0) / trades.length
     : 0;
 
+  const netProfit = extras.endingEquity - extras.initialCapital;
+
   return {
     totalTrades,
     winningTrades: winningTrades.length,
@@ -147,6 +214,18 @@ function computeMetrics(
     avgLoss: Number(avgLoss.toFixed(2)),
     avgHoldBars: Number(avgHoldBars.toFixed(1)),
     trades,
+    initialCapital: extras.initialCapital,
+    endingEquity: Number(extras.endingEquity.toFixed(2)),
+    netProfit: Number(netProfit.toFixed(2)),
+    netReturnPct: Number((netProfit / extras.initialCapital * 100).toFixed(2)),
+    grossProfit: Number(grossProfit.toFixed(2)),
+    grossLoss: Number(grossLoss.toFixed(2)),
+    fees: Number(extras.fees.toFixed(2)),
+    slippageCost: Number(extras.slippage.toFixed(2)),
+    equityCurve: extras.equityCurve,
+    fillModel: FILL_MODEL,
+    configVersion: BACKTEST_ENGINE_VERSION,
+    dataWarnings: extras.dataWarnings,
   };
 }
 
@@ -171,6 +250,18 @@ export function runWalkForward(candles: Candle[], config: ChandelierDonchianConf
 /** Independent windows: report worst window drawdown, not a fabricated compounded curve. */
 export function aggregateWalkForward(results: BacktestResult[]): BacktestResult {
   const trades = results.flatMap(r => r.trades);
+  const first = results[0];
+  const initialCapital = first?.initialCapital ?? DEFAULT_BACKTEST_CONFIG.initialCapital;
+  const endingEquity = initialCapital + trades.reduce((sum, t) => sum + t.pnl, 0);
   return computeMetrics(trades, Math.max(0, ...results.map(r => r.maxDrawdown)),
-    Math.max(0, ...results.map(r => r.maxDrawdownPct)));
+    Math.max(0, ...results.map(r => r.maxDrawdownPct)), {
+    initialCapital,
+    endingEquity,
+    fees: results.reduce((sum, r) => sum + r.fees, 0),
+    slippage: results.reduce((sum, r) => sum + r.slippageCost, 0),
+    // Per-fold curves have different time axes; the aggregate keeps the
+    // trades and the worst-case drawdown instead of a fabricated compound curve.
+    equityCurve: [],
+    dataWarnings: ["Walk-forward aggregate: per-fold equity curves are reported separately; the combined curve is not compounded."],
+  });
 }

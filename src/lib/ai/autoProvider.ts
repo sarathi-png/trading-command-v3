@@ -7,7 +7,13 @@ const cooldowns = new Map<string, number>();
 const MAX_ATTEMPTS = 3;
 
 /** Every completion, including failed attempts, is charged to the local budget. */
-export async function callFreeProvider(provider: Exclude<AiProviderId, "rules">, context: AiContext, apiKey: string, fetchImpl: typeof fetch = fetch): Promise<AiCallResult> {
+export async function callFreeProvider(
+  provider: Exclude<AiProviderId, "rules">,
+  context: AiContext,
+  apiKey: string,
+  fetchImpl: typeof fetch = fetch,
+  options?: { timeoutMs?: number; prompt?: { system: string; user: string } }
+): Promise<AiCallResult> {
   const fail = (error: string): AiCallResult => ({ ok: false, kind: "not-configured", error, model: "auto-free", latencyMs: 0 });
   let models;
   try { models = await discoverFreeModels(provider, apiKey, fetchImpl); }
@@ -36,7 +42,11 @@ export async function callFreeProvider(provider: Exclude<AiProviderId, "rules">,
       return lastModelIssue ?? fail(`Free-tier spacing: next call allowed in ${budget.waitSeconds}s.`);
     }
     await recordCall(provider);
-    const result = await callProvider(provider, context, { apiKey, model: model.id, structured: model.structured, fetchImpl });
+    const result = await callProvider(provider, context, {
+      apiKey, model: model.id, structured: model.structured, fetchImpl,
+      ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options?.prompt ? { prompt: options.prompt } : {}),
+    });
     if (result.ok) return result;
 
     // Model-specific failure — per-model rate limit, retired model, or unusable
@@ -55,4 +65,13 @@ export async function callFreeProvider(provider: Exclude<AiProviderId, "rules">,
   return lastModelIssue
     ? { ...lastModelIssue, error: `${lastModelIssue.error} No other verified free model produced a usable answer in this request.` }
     : fail("No verified free model produced a usable answer. Using technical rules.");
+}
+
+/**
+ * Test hook: clear the in-process per-model cooldowns so test
+ * cases do not leak cooldown state into each other. Never called
+ * outside the test harness.
+ */
+export function __clearCooldownsForTests(): void {
+  cooldowns.clear();
 }

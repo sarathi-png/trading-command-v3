@@ -33,6 +33,8 @@ export default function CommandPalette() {
       { id: "go-positions", label: "Show Positions", group: "Navigate", hint: "P", perform: go("/positions") },
       { id: "go-orders", label: "Show Orders", group: "Navigate", perform: go("/orders") },
       { id: "go-strategy", label: "Open Strategy", group: "Navigate", perform: go("/strategy") },
+      { id: "go-research", label: "Open AI Research", group: "Navigate", perform: go("/research") },
+      { id: "go-backtests", label: "Open Backtests", group: "Navigate", perform: go("/backtests") },
       { id: "go-journal", label: "Open Trade Journal", group: "Navigate", hint: "J", perform: go("/journal") },
       { id: "go-analytics", label: "Open Analytics", group: "Navigate", perform: go("/analytics") },
       { id: "go-alerts", label: "Open Alerts", group: "Navigate", hint: "A", perform: go("/alerts") },

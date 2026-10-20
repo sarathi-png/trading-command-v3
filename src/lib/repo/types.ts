@@ -8,6 +8,9 @@
  * callers no longer depend on which backend is active.
  */
 import type { DrawingPoint, DrawingType, SignalOutcome, SignalStatus, Timeframe } from "@/lib/types";
+import type { BacktestJob, BacktestJobInsert, ResearchRun, ResearchRunInsert } from "@/lib/research/types";
+
+export type { BacktestJob, BacktestJobInsert, ResearchRun, ResearchRunInsert };
 
 export type Timestamp = string; // ISO-8601
 export type MaybeTs = Timestamp | null;
@@ -137,6 +140,19 @@ export interface Repo {
   findLiveOrderByClientId(clientOrderId: string): Promise<LiveOrderRow | null>;
   insertLiveOrder(value: LiveOrderInsert): Promise<void>;
   updateLiveOrderByClientId(clientOrderId: string, patch: Partial<LiveOrderRow>): Promise<void>;
+
+  // ---- AI research runs ----
+  listResearchRuns(opts?: { symbol?: string; limit?: number }): Promise<ResearchRun[]>;
+  insertResearchRun(value: ResearchRunInsert): Promise<ResearchRun>;
+  getResearchRun(id: string): Promise<ResearchRun | null>;
+  updateResearchRun(id: string, patch: Partial<ResearchRun>): Promise<ResearchRun | null>;
+
+  // ---- backtest jobs ----
+  listBacktestJobs(opts?: { limit?: number; symbol?: string }): Promise<BacktestJob[]>;
+  insertBacktestJob(value: BacktestJobInsert): Promise<BacktestJob>;
+  getBacktestJob(id: string): Promise<BacktestJob | null>;
+  findBacktestJobByKey(idempotencyKey: string): Promise<BacktestJob | null>;
+  updateBacktestJob(id: string, patch: Partial<BacktestJob>): Promise<BacktestJob | null>;
 }
 export interface PaperOrderRow {
   id: string;

@@ -6,7 +6,7 @@ import {
   useCallback, useEffect, useMemo, useRef, useState, type ReactNode,
 } from "react";
 import {
-  BarChart2, BarChart3, Bell, BookOpen, Bot, Briefcase, CandlestickChart, ChevronLeft, ChevronRight,
+  BarChart2, BarChart3, Beaker, Bell, BookOpen, Bot, BrainCircuit, Briefcase, CandlestickChart, ChevronLeft, ChevronRight,
   Command, LayoutDashboard, Layers, LineChart, List, ListFilter, LogOut, Menu, Settings,
   Target, ArrowUpDown, X, Zap, Sun, Moon,
 } from "lucide-react";
@@ -35,6 +35,8 @@ const NAV = [
   { href: "/positions", label: "POSITIONS", icon: Layers },
   { href: "/orders", label: "ORDERS", icon: ArrowUpDown },
   { href: "/strategy", label: "STRATEGY", icon: Target },
+  { href: "/research", label: "AI RESEARCH", icon: BrainCircuit },
+  { href: "/backtests", label: "BACKTESTS", icon: Beaker },
   { href: "/journal", label: "JOURNAL", icon: BookOpen },
   { href: "/analytics", label: "ANALYTICS", icon: BarChart3 },
   { href: "/alerts", label: "ALERTS", icon: Bell },

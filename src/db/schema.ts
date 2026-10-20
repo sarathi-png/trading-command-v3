@@ -153,3 +153,63 @@ export const auditLogTable = pgTable("audit_log", {
   detail: jsonb("detail").notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
+
+/**
+ * AI-assisted strategy research runs. The report and the market
+ * evidence shown to the model are stored verbatim so a result can
+ * be re-opened, compared and audited. `status` is constrained by
+ * the migration's CHECK.
+ */
+export const researchRunsTable = pgTable("research_runs", {
+  id: text("id").primaryKey(),
+  workspace: text("workspace").notNull().default("paper"),
+  symbol: text("symbol").notNull(),
+  timeframe: text("timeframe").notNull(),
+  strategyType: text("strategy_type").notNull(),
+  objective: text("objective").notNull(),
+  constraints: text("constraints").notNull().default(""),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  status: text("status").notNull(), // completed | failed
+  report: jsonb("report"),
+  marketEvidence: jsonb("market_evidence"),
+  error: text("error"),
+  revisionOf: text("revision_of"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+/**
+ * Backtest jobs. Small, bounded runs complete synchronously inside
+ * the creating request; walk-forward runs are segmented so the work
+ * can be resumed across serverless invocations with progress
+ * persisted here. `status` is constrained by the migration's CHECK.
+ */
+export const backtestJobsTable = pgTable("backtest_jobs", {
+  id: text("id").primaryKey(),
+  idempotencyKey: text("idempotency_key").notNull().unique(),
+  workspace: text("workspace").notNull().default("paper"),
+  symbol: text("symbol").notNull(),
+  timeframe: text("timeframe").notNull(),
+  config: jsonb("config").notNull(),
+  capital: real("capital").notNull(),
+  feeRate: real("fee_rate").notNull(),
+  slippage: real("slippage").notNull(),
+  candleLimit: integer("candle_limit").notNull(),
+  walkForward: boolean("walk_forward").notNull().default(false),
+  trainWindow: integer("train_window"),
+  testWindow: integer("test_window"),
+  status: text("status").notNull().default("queued"), // queued | running | completed | failed
+  segmentsTotal: integer("segments_total").notNull().default(1),
+  segmentsDone: integer("segments_done").notNull().default(0),
+  result: jsonb("result"),
+  segmentResults: jsonb("segment_results"),
+  dataWarnings: jsonb("data_warnings").notNull().default([]),
+  fillModel: text("fill_model").notNull(),
+  researchRunId: text("research_run_id"),
+  error: text("error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+});
