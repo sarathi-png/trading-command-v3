@@ -1,6 +1,6 @@
 # MOBILE-001 — Implementation plan (rev 2)
 
-- **Status:** PLAN + BACKEND PHASE IN PROGRESS. App code is intentionally not started.
+- **Status:** BACKEND PHASE COMPLETE (B1–B4 committed). App phase (T1–T8) not started.
 - **Branch:** `mobile-app` (from `master` @ `0128278`). Never `master`.
 - **Spec:** `.opencode/plans/MOBILE-001.md` · **Constraints:** `.opencode/plans/TCV3-001.md`
 - **Config:** `allow_production_deploy=false`, `max_review_cycles=3`
@@ -227,3 +227,31 @@ Deployment: **verification-only**. No production deploy (`allow_production_deplo
 | `simplify` | MOSTLY APPROPRIATE | Deterministic UUID instead of a `source_key` migration (drops migration, schema change, and Neon ordering risk); drop the redundant `seen` Map; timeframe/symbol **normalization** instead of rejection (real TradingView sends `60`, `D`, `BINANCE:BTCUSDT`); merge 12 app tasks to 8; defer the chart to M3; drop `expiresInMs` |
 
 **Conflict:** `simplify` recommended dropping server-side workspace enforcement for session bearers. `check` classified it as a safety weakening. `check` wins; the rule stays, with the test matrix that makes it unambiguous.
+
+---
+
+## 8. Implementation log (backend phase)
+
+| Commit | Scope | Verification |
+|---|---|---|
+| `962b3e2` | Plan rev 1 | — |
+| `c076ab5` | B1 login throttling | `typecheck`, `lint`, `test:auth` (13 pass), `build`, `test:paper` (429 + `Retry-After` asserted end-to-end) |
+| `4c51193` | B2 mobile bearer session | `typecheck`, `lint`, `test:auth` (17 pass), `build`, `test:paper` (mobile token issues no cookie; 428 without workspace; 403 paper→`/api/orders`; 401 tampered; password bearer still 200) |
+| `182a047` | B3 webhook payload validation | `typecheck`, `lint`, `test:safety` (48 pass), `build`, `test:paper` |
+| `088f8a0` | B4 deterministic signal id | `typecheck`, `lint`, `test:safety` (51 pass), `build`, `test:paper` (same alert twice → one row, same `signalId`, no order), full `npm test` PASS |
+
+Toolchain: Node 22.14 at `~/.local/node/bin` (not on default PATH).
+Deployment: **not attempted**. `allow_production_deploy=false`; this phase is verification-only.
+
+### What the mobile client can now rely on
+
+- `POST /api/auth/mobile` → `{ token, expiresAt }`; no cookie, no password retention.
+- Any `/api/*` call with `Authorization: Bearer <token>` plus `x-tc-workspace: paper`.
+- `/api/settings` works without a workspace header (cold-start mode read).
+- `/api/signals` returns deduplicated alerts with real prices and normalized symbols/timeframes.
+
+### Still open before the app phase
+
+1. `apps/mobile` scaffold and the root excludes (T1) — the only task that touches the web build config.
+2. Decide whether the app ships inside this Vercel project's repo or is deployed separately (layout decision 1 answered in-repo, deployment still local/dev only).
+3. No production deploy until explicit approval.
