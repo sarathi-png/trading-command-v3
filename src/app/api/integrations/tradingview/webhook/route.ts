@@ -9,6 +9,8 @@ import { getRepo } from "@/lib/repo";
 import type { SignalRow } from "@/lib/repo";
 import { flags } from "@/lib/flags";
 import { getSettings, logAudit } from "@/lib/settings";
+import { timingSafeEqual } from "@/lib/auth";
+import { parseTradingViewAlert } from "@/lib/integrations/tradingview/payload";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -49,28 +51,28 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload" }, { status: 400 });
   }
 
-  // Secret: environment wins, otherwise the value saved in Settings.
+  // Secret: environment wins, otherwise the value saved in Settings. Compared
+  // in constant time so the response cannot be used as a timing oracle.
   const secret = process.env.TRADINGVIEW_WEBHOOK_SECRET || settings.tradingviewSecret;
-  const provided =
-    req.headers.get("x-webhook-secret") ?? String(body.secret ?? "");
-  if (!secret || provided !== secret) {
+  const headerSecret = req.headers.get("x-webhook-secret");
+  const bodySecret = typeof body.secret === "string" ? body.secret : "";
+  const provided = headerSecret ?? bodySecret;
+  if (!secret || !provided || !timingSafeEqual(provided, secret)) {
     await logAudit("webhook_rejected", { reason: "bad_secret" });
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const tsRaw = body.timestamp ?? body.ts;
-  const ts = typeof tsRaw === "number" ? tsRaw : Date.parse(String(tsRaw ?? ""));
-  if (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 5 * 60000) {
-    return Response.json({ error: "Stale or missing timestamp" }, { status: 400 });
+  // Normalize and validate. A missing/non-numeric price or an unmappable
+  // interval is refused: storing a placeholder would put invented data in the
+  // signal inbox. See docs/WEBHOOKS.md.
+  const parsed = parseTradingViewAlert(body, Date.now());
+  if (!parsed.ok) {
+    await logAudit("webhook_rejected", { reason: "invalid_payload" });
+    return Response.json({ error: parsed.error }, { status: 400 });
   }
+  const alert = parsed.alert;
 
-  const symbol = String(body.symbol ?? "").toUpperCase();
-  const action = String(body.action ?? "").toUpperCase();
-  if (!symbol || !["LONG", "SHORT", "CLOSE", "WATCH"].includes(action)) {
-    return Response.json({ error: "Payload must include symbol and action LONG|SHORT|CLOSE|WATCH" }, { status: 400 });
-  }
-
-  const hash = `${symbol}:${action}:${ts}`;
+  const hash = `${alert.symbol}:${alert.action}:${alert.timestamp}`;
   if (seen.has(hash)) {
     return Response.json({ ok: true, deduplicated: true });
   }
@@ -78,23 +80,22 @@ export async function POST(req: Request) {
   for (const [k, v] of seen) if (now - v > 10 * 60000) seen.delete(k);
 
   const status =
-    action === "LONG" ? "LONG_SETUP" : action === "SHORT" ? "SHORT_SETUP" : action === "WATCH" ? "WATCH" : "INVALIDATED";
-  const price = typeof body.price === "number" ? body.price : 0;
+    alert.action === "LONG" ? "LONG_SETUP" : alert.action === "SHORT" ? "SHORT_SETUP" : alert.action === "WATCH" ? "WATCH" : "INVALIDATED";
 
   const row = await (await getRepo()).insertSignal({
-    symbol,
-    timeframe: String(body.timeframe ?? "15m") as SignalRow["timeframe"],
-    strategy: `tradingview:${String(body.strategy ?? "external")}`,
+    symbol: alert.symbol,
+    timeframe: alert.timeframe,
+    strategy: `tradingview:${alert.strategy}`,
     status: status as SignalRow["status"],
-    price,
-    entry: typeof body.entry === "number" ? body.entry : price || null,
-    stop: typeof body.stop === "number" ? body.stop : null,
-    target: typeof body.target === "number" ? body.target : null,
+    price: alert.price,
+    entry: alert.entry,
+    stop: alert.stop,
+    target: alert.target,
     rr: null,
-    reasons: [String(body.message ?? "External TradingView alert (validated)")],
+    reasons: [alert.message],
     outcome: "ACTIVE",
   });
 
-  await logAudit("webhook_signal_accepted", { symbol, action });
+  await logAudit("webhook_signal_accepted", { symbol: alert.symbol, action: alert.action });
   return Response.json({ ok: true, signalId: row.id });
 }

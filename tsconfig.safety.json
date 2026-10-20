@@ -8,9 +8,15 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "strict": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "baseUrl": ".",
-    "paths": { "@/*": ["./src/*"] }
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
   },
   "include": [
     "src/lib/types.ts",
@@ -28,6 +34,8 @@
     "src/lib/analytics/metrics.ts",
     "src/lib/analytics/metrics.test.ts",
     "src/lib/exchange/coindcx/timeframes.ts",
-    "src/lib/exchange/coindcx/timeframes.test.ts"
+    "src/lib/exchange/coindcx/timeframes.test.ts",
+    "src/lib/integrations/tradingview/payload.ts",
+    "src/lib/integrations/tradingview/payload.test.ts"
   ]
 }
