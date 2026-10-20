@@ -56,6 +56,7 @@ describe("indicators", () => {
   it("RSI of strictly decreasing closes is 0", () => {
     const cs = uptrend(40).map((c, i) => ({ ...c, close: 200 - i * 0.6 }));
     assert.equal(rsi(cs)[39], 0);
+    assert.equal(rsi(cs.map(() => ({ time: 0, open: 1, high: 1, low: 1, close: 1, volume: 0 })))[39], 50, "flat RSI is neutral");
   });
   it("SMA closed form", () => {
     const s = sma([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 9);

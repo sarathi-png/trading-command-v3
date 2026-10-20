@@ -26,6 +26,7 @@ export function runBacktest(
   let maxDrawdownPct = 0;
   let position: BacktestTrade | null = null;
   let activeStop = 0;
+  let activeTarget: number | null = null;
   let entryIndex = 0;
   const mark = (value: number) => {
     peakEquity = Math.max(peakEquity, value);
@@ -63,15 +64,26 @@ export function runBacktest(
       position = { entryTime: bar.time, exitTime: 0, entryPrice: bar.open, exitPrice: 0,
         side, qty: sizing.qty, pnl: 0, pnlPct: 0, exitReason: "chandelier", barsHeld: 0 };
       activeStop = signal.stop;
+      // The strategy already publishes a 2R target; simulate it instead of
+      // silently ignoring it (previous behaviour overstated drawdown/hold time).
+      activeTarget = signal.target;
       entryIndex = i;
     }
     if (!position) continue;
     const priorStop = position.side === "long" ? indicators.longStop[i - 1] : indicators.shortStop[i - 1];
     if (Number.isFinite(priorStop)) activeStop = position.side === "long"
       ? Math.max(activeStop, priorStop) : Math.min(activeStop, priorStop);
-    if (position.side === "long" ? bar.low <= activeStop : bar.high >= activeStop) {
+    const stopHit = position.side === "long" ? bar.low <= activeStop : bar.high >= activeStop;
+    const targetHit = activeTarget !== null &&
+      (position.side === "long" ? bar.high >= activeTarget : bar.low <= activeTarget);
+    // When a bar spans both levels the intrabar order is unknowable; assume
+    // the stop filled first. That is the conservative bias, never the flattering one.
+    if (stopHit) {
       // A gap through the stop fills at the worse opening price.
       close(bar, position.side === "long" ? Math.min(bar.open, activeStop) : Math.max(bar.open, activeStop), "chandelier", i);
+    } else if (targetHit) {
+      // A gap beyond the target fills at the (better) opening price.
+      close(bar, position.side === "long" ? Math.max(bar.open, activeTarget!) : Math.min(bar.open, activeTarget!), "target", i);
     } else if (config.timeStop.enabled && i - entryIndex + 1 >= config.timeStop.bars) {
       close(bar, bar.close, "time_stop", i);
     } else {
@@ -91,9 +103,11 @@ function calculatePnl(
     ? (exitPrice - trade.entryPrice) * trade.qty
     : (trade.entryPrice - exitPrice) * trade.qty;
 
+  // Costs are charged on both legs. Slippage is direction-agnostic here because
+  // it is always adverse: it widens the round-trip spread rather than moving
+  // the recorded fill away from the signal price.
   const fees = (trade.entryPrice + exitPrice) * trade.qty * config.feeRate;
   const slippage = (trade.entryPrice + exitPrice) * trade.qty * config.slippage;
-
   return grossPnl - fees - slippage;
 }
 

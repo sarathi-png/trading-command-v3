@@ -37,12 +37,14 @@ export function rsi(candles: Candle[], period = 14): (number | null)[] {
     if (d > 0) g += d; else l -= d;
   }
   g /= period; l /= period;
-  out[period] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  // A perfectly flat window has no momentum: RSI is neutral (50), not
+  // overbought. The AI technical layer already returns 50; keep them identical.
+  out[period] = g === 0 && l === 0 ? 50 : l === 0 ? 100 : 100 - 100 / (1 + g / l);
   for (let i = period + 1; i < cl.length; i++) {
     const d = cl[i] - cl[i - 1];
     g = (g * (period - 1) + Math.max(d, 0)) / period;
     l = (l * (period - 1) + Math.max(-d, 0)) / period;
-    out[i] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+    out[i] = g === 0 && l === 0 ? 50 : l === 0 ? 100 : 100 - 100 / (1 + g / l);
   }
   return out;
 }

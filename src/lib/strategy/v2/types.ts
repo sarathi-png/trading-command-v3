@@ -119,7 +119,7 @@ export interface BacktestTrade {
   qty: number;
   pnl: number;
   pnlPct: number;
-  exitReason: "chandelier" | "opposite" | "time_stop" | "end_of_data";
+  exitReason: "chandelier" | "target" | "opposite" | "time_stop" | "end_of_data";
   barsHeld: number;
 }
 
