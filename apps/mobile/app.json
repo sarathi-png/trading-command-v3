@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Trading Command",
+    "slug": "trading-command-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "tradingcommand",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tradingcommand.mobile"
+    },
+    "android": {
+      "package": "com.tradingcommand.mobile"
+    },
+    "plugins": ["expo-router", "expo-secure-store"],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

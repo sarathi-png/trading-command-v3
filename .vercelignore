@@ -1,0 +1,4 @@
+# The Expo client is a separate app with its own install and build.
+# Keeping it out of the Vercel upload avoids shipping React Native to a
+# Next.js deployment that never imports it.
+apps/

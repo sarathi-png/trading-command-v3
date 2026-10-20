@@ -42,6 +42,9 @@
     "node_modules",
     "check_*.ts",
     "scripts",
+    // The Expo client is a separate app with its own tsconfig and lockfile.
+    // Check it with `npm --prefix apps/mobile run typecheck`.
+    "apps",
     // The trading gateway is a separate deployable with its own tsconfig
     // (NodeNext, its own build). Check it with `npm run typecheck` inside
     // trading-gateway/ — see package.json "test:gateway" in the root.
