@@ -25,6 +25,8 @@
     "src/lib/data/provider.test.ts",
     "src/lib/chart/overlays.ts",
     "src/lib/chart/overlays.test.ts",
+    "src/lib/analytics/metrics.ts",
+    "src/lib/analytics/metrics.test.ts",
     "src/lib/exchange/coindcx/timeframes.ts",
     "src/lib/exchange/coindcx/timeframes.test.ts"
   ]
