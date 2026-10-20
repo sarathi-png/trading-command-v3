@@ -108,8 +108,32 @@ export interface BacktestResult {
   avgLoss: number;
   avgHoldBars: number;
   trades: BacktestTrade[];
+  /* --- additive research/backtest metrics (v1.2) ---
+     Older consumers ignore these; the fields above are unchanged. */
+  /** Starting capital the run was seeded with. */
+  initialCapital: number;
+  /** Equity after the last trade is closed (capital + net P&L). */
+  endingEquity: number;
+  /** endingEquity - initialCapital. */
+  netProfit: number;
+  /** netProfit / initialCapital * 100. */
+  netReturnPct: number;
+  /** Sum of winning trade P&L (positive). */
+  grossProfit: number;
+  /** Sum of losing trade P&L (positive magnitude). */
+  grossLoss: number;
+  /** Total fees charged across all trades. */
+  fees: number;
+  /** Total estimated slippage charged across all trades (already embedded in fills). */
+  slippageCost: number;
   /** Mark-to-market equity at each simulated bar (starting-capital baseline). */
   equityCurve: { time: number; equity: number }[];
+  /** Execution assumption string, so a result is self-describing. */
+  fillModel: string;
+  /** Engine config version this result was produced by. */
+  configVersion: string;
+  /** Data-quality notes (missing/duplicate/invalid candles, source). */
+  dataWarnings: string[];
   /** Methodology/sample warnings. Never a substitute for the numbers. */
   warnings: string[];
 }

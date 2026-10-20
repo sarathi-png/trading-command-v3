@@ -60,6 +60,29 @@ src/lib/exchange/              the only code that talks to a venue
 `coindcx/*`, nothing in `src/app` or `src/components` imports either, and no
 client component may: the modules read credentials from `process.env`.
 
+### AI research & backtesting
+
+```
+src/lib/research/            AI-assisted research + backtest jobs
+  types.ts                   ResearchRun / BacktestJob models, fill model
+  validate.ts                untrusted model output → strict allowlists
+  prompt.ts                  the research system/user prompt
+  service.ts                 runResearch: evidence → provider → validate → persist
+  backtestService.ts         persisted job workflow, idempotency, walk-forward
+  backtest.test.ts, research.test.ts
+src/lib/rateLimit.ts         in-process sliding window (per client IP)
+src/app/api/research/        POST/GET, [id], [id]/promote
+src/app/api/backtests/       POST/GET, [id], [id]/step
+```
+
+Research and backtests extend the **existing** TypeScript engine
+(`src/lib/strategy/v2/backtest.ts`); nothing was replaced. Backtest jobs
+are **persisted rows** in PostgreSQL (table `backtest_jobs`), never an
+in-memory queue — a serverless function cannot assume a long-lived process.
+A plain backtest is one bounded synchronous run (≤ 500 candles); a
+walk-forward run is a job advanced one fold per request. See
+`docs/AI_RESEARCH.md`.
+
 ## What stays where (and why)
 
 | Concern | Where | Why |
@@ -70,6 +93,7 @@ client component may: the modules read credentials from `process.env`.
 | Public market data | Vercel → CoinDCX public REST | no credentials needed; no reason to add a hop |
 | Wallet, positions, orders, fills, transactions | Vercel → CoinDCX private REST (signed per request) | the credential is an environment variable read by the server function |
 | Order idempotency | PostgreSQL (`live_orders.client_order_id`, unique) | the venue has **no client order id**, so this is the only durable deduplication. No cross-request in-memory state exists |
+| Research runs & backtest jobs | PostgreSQL (`research_runs`, `backtest_jobs`) | persisted rows, not an in-memory queue — a serverless function has no durable process. Idempotency key is workspace-scoped |
 | Market-data streaming | not used | a websocket needs a long-lived process; the dashboard polls REST. Documented in `coindcx/websocket.ts` |
 
 ## Order lifecycle (live path)

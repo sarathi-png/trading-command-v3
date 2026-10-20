@@ -10,6 +10,7 @@ import { readDoc, writeDoc } from "@/lib/fileStore";
 import type {
   AlertRuleRow,
   AuditRow,
+  BacktestJob,
   DrawingRow,
   JournalInsert,
   JournalPnlFilter,
@@ -19,6 +20,7 @@ import type {
   PaperOrderRow,
   PaperPositionRow,
   Repo,
+  ResearchRun,
   SettingRow,
   SignalRow,
   Timestamp,
@@ -34,6 +36,8 @@ export const DOC_PAPER_FILLS = "paper_fills.json";
 export const DOC_ALERTS = "alerts.json";
 export const DOC_DRAWINGS = "drawings.json";
 export const DOC_LIVE_ORDERS = "live_orders.json";
+export const DOC_RESEARCH_RUNS = "research_runs.json";
+export const DOC_BACKTEST_JOBS = "backtest_jobs.json";
 
 /** Every document the mirror may push upstream (see lib/hfSync.ts). */
 export const ALL_DOCS = [
@@ -47,6 +51,8 @@ export const ALL_DOCS = [
   DOC_ALERTS,
   DOC_DRAWINGS,
   DOC_LIVE_ORDERS,
+  DOC_RESEARCH_RUNS,
+  DOC_BACKTEST_JOBS,
 ] as const;
 
 /** Serialises mutations per document (writeDoc only serialises the writes). */
@@ -547,5 +553,106 @@ export const fileRepo: Repo = {
       next[idx] = { ...rows[idx], ...patch, clientOrderId: rows[idx].clientOrderId };
       return next;
     });
+  },
+
+  // ---- AI research runs ----
+  async listResearchRuns(opts) {
+    let rows = readDoc<ResearchRun[]>(DOC_RESEARCH_RUNS, []);
+    if (opts?.symbol) rows = rows.filter((r) => r.symbol === opts.symbol);
+    return [...rows].sort(byTimeDesc).slice(0, opts?.limit ?? 100);
+  },
+  async insertResearchRun(value) {
+    const created = ts(value.createdAt, now());
+    const row: ResearchRun = {
+      id: value.id ?? randomUUID(),
+      workspace: value.workspace ?? "paper",
+      symbol: value.symbol,
+      timeframe: value.timeframe,
+      strategyType: value.strategyType,
+      objective: value.objective,
+      constraints: value.constraints ?? "",
+      provider: value.provider,
+      model: value.model,
+      status: value.status,
+      report: value.report ?? null,
+      marketEvidence: value.marketEvidence ?? null,
+      error: value.error ?? null,
+      revisionOf: value.revisionOf ?? null,
+      createdAt: created,
+      updatedAt: ts(value.updatedAt, created),
+    };
+    await mutate<ResearchRun[]>(DOC_RESEARCH_RUNS, [], (rows) => [row, ...rows]);
+    return row;
+  },
+  async getResearchRun(id) {
+    return readDoc<ResearchRun[]>(DOC_RESEARCH_RUNS, []).find((r) => r.id === id) ?? null;
+  },
+  async updateResearchRun(id, patch) {
+    let updated: ResearchRun | null = null;
+    await mutate<ResearchRun[]>(DOC_RESEARCH_RUNS, [], (rows) => {
+      const next = replaceById(rows, id, patch);
+      if (next) updated = next.find((r) => r.id === id) ?? null;
+      return next;
+    });
+    return updated;
+  },
+
+  // ---- backtest jobs ----
+  async listBacktestJobs(opts) {
+    let rows = readDoc<BacktestJob[]>(DOC_BACKTEST_JOBS, []);
+    if (opts?.symbol) rows = rows.filter((r) => r.symbol === opts.symbol);
+    return [...rows].sort(byTimeDesc).slice(0, opts?.limit ?? 100);
+  },
+  async insertBacktestJob(value) {
+    const created = ts(value.createdAt, now());
+    const row: BacktestJob = {
+      id: value.id ?? randomUUID(),
+      idempotencyKey: value.idempotencyKey,
+      workspace: value.workspace ?? "paper",
+      symbol: value.symbol,
+      timeframe: value.timeframe,
+      config: value.config,
+      capital: value.capital,
+      feeRate: value.feeRate,
+      slippage: value.slippage,
+      candleLimit: value.candleLimit,
+      walkForward: value.walkForward ?? false,
+      trainWindow: value.trainWindow ?? null,
+      testWindow: value.testWindow ?? null,
+      status: value.status ?? "queued",
+      segmentsTotal: value.segmentsTotal ?? 1,
+      segmentsDone: value.segmentsDone ?? 0,
+      result: value.result ?? null,
+      segmentResults: value.segmentResults ?? null,
+      dataWarnings: value.dataWarnings ?? [],
+      fillModel: value.fillModel,
+      researchRunId: value.researchRunId ?? null,
+      error: value.error ?? null,
+      createdAt: created,
+      updatedAt: ts(value.updatedAt, created),
+      startedAt: null,
+      completedAt: null,
+    };
+    await mutate<BacktestJob[]>(DOC_BACKTEST_JOBS, [], (rows) => [row, ...rows]);
+    return row;
+  },
+  async getBacktestJob(id) {
+    return readDoc<BacktestJob[]>(DOC_BACKTEST_JOBS, []).find((j) => j.id === id) ?? null;
+  },
+  async findBacktestJobByKey(idempotencyKey) {
+    return (
+      readDoc<BacktestJob[]>(DOC_BACKTEST_JOBS, [])
+        .filter((j) => j.idempotencyKey === idempotencyKey)
+        .sort(byTimeDesc)[0] ?? null
+    );
+  },
+  async updateBacktestJob(id, patch) {
+    let updated: BacktestJob | null = null;
+    await mutate<BacktestJob[]>(DOC_BACKTEST_JOBS, [], (rows) => {
+      const next = replaceById(rows, id, patch);
+      if (next) updated = next.find((j) => j.id === id) ?? null;
+      return next;
+    });
+    return updated;
   },
 };
