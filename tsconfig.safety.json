@@ -8,15 +8,9 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "strict": true,
-    "types": [
-      "node"
-    ],
+    "types": ["node"],
     "baseUrl": ".",
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ]
-    }
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": [
     "src/lib/types.ts",
