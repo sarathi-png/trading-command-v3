@@ -238,6 +238,27 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.deepEqual(journal.entries[0].predictionContext, [], "no invented AI association");
     assert.equal(journal.sync.configured, false);
     assert.equal(journal.fills.length, 0, "no invented CoinDCX activity");
+
+    const analytics = await request(
+      "/api/analytics?symbol=BTCUSD&direction=long&page=1&pageSize=25",
+      { headers: { "x-tc-workspace": "paper" } }
+    ).then((response) => response.json());
+    assert.equal(analytics.mode, "paper");
+    assert.equal(analytics.metrics.totalTrades, 1, "server metrics count the closed paper trade");
+    assert.equal(analytics.metrics.wins + analytics.metrics.losses, 1);
+    assert.equal(analytics.total, 1);
+    assert.equal(analytics.page, 1);
+    assert.equal(analytics.pageCount, 1);
+    assert.equal(analytics.entries[0].symbol, "BTCUSD");
+    assert.equal(analytics.entries[0].direction, "long");
+    assert.match(analytics.notice, /Paper workspace/);
+
+    const emptyAnalytics = await request(
+      "/api/analytics?symbol=ETHUSD&page=1&pageSize=25",
+      { headers: { "x-tc-workspace": "paper" } }
+    ).then((response) => response.json());
+    assert.equal(emptyAnalytics.metrics.totalTrades, 0, "filters are applied before aggregation");
+    assert.equal(emptyAnalytics.entries.length, 0);
     // The watchlist is user data: saving it must round-trip, not be replaced by
     // the full venue symbol list (the previous behaviour made saving a no-op).
     const watchlist = ["BTCUSD", "DOGEUSD"];
