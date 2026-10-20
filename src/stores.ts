@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { api } from "./lib/api";
 import type { AppSettings, LayoutPreset, SystemStatus, Ticker, Timeframe } from "./lib/types";
 import { DEFAULT_SETTINGS } from "./lib/settingsDefaults";
+import { SIDEBAR_STORAGE_KEY } from "./lib/navConfig";
 
 export interface UiNotification {
   id: string;
@@ -160,9 +161,17 @@ export const useApp = create<AppState>((set, get) => ({
   setPalette: (open) => set({ paletteOpen: open }),
   setHelp: (open) => set({ helpOpen: open }),
   toggleSidebar: () => {
-    // A manual toggle pins the choice for this session (see AppShell).
-    if (typeof window !== "undefined") window.dispatchEvent(new Event("tc:sidebar-pinned"));
-    set((st) => ({ sidebarCollapsed: !st.sidebarCollapsed }));
+    // A manual toggle pins the choice and persists it across reloads.
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("tc:sidebar-pinned"));
+    }
+    set((st) => {
+      const sidebarCollapsed = !st.sidebarCollapsed;
+      if (typeof window !== "undefined") {
+        try { window.localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebarCollapsed ? "1" : "0"); } catch { /* storage may be disabled */ }
+      }
+      return { sidebarCollapsed };
+    });
   },
 }));
 
