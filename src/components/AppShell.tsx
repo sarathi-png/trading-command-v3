@@ -6,15 +6,14 @@ import {
   useCallback, useEffect, useMemo, useRef, useState, type ReactNode,
 } from "react";
 import {
-  BarChart2, BarChart3, Beaker, Bell, BookOpen, Bot, BrainCircuit, Briefcase, CandlestickChart, ChevronLeft, ChevronRight,
-  Command, LayoutDashboard, Layers, LineChart, List, ListFilter, LogOut, Menu, Settings,
-  Target, ArrowUpDown, X, Zap, Sun, Moon,
+  Bell, ChevronLeft, ChevronRight, Command, ListFilter, LogOut, Menu, X, Sun, Moon,
 } from "lucide-react";
 import { useAlerts, useApp, useMarket } from "@/stores";
 import { useViewport } from "@/lib/useResponsive";
 import { api, ApiError, logout } from "@/lib/api";
 import { cx, fmtPct, fmtPrice, fmtTime } from "@/lib/format";
-import { usePoll } from "@/lib/hooks";
+import { usePoll, useFocusTrap } from "@/lib/hooks";
+import { NAV_ITEMS, MOBILE_NAV_ITEMS, SIDEBAR_STORAGE_KEY, isNavActive } from "@/lib/navConfig";
 import type { AlertRule, SystemStatus, Ticker } from "@/lib/types";
 import CommandPalette from "./CommandPalette";
 import JournalMonitor from "./JournalMonitor";
@@ -27,23 +26,7 @@ import Onboarding, { Logo } from "./Onboarding";
 import { Btn, Chip, StatusDot } from "./ui";
 
 
-const NAV = [
-  { href: "/", label: "OVERVIEW", icon: LayoutDashboard },
-  { href: "/chart", label: "CANDLESTICK", icon: LineChart },
-  { href: "/heikin-ashi", label: "HEIKIN-ASHI", icon: LineChart },
-  { href: "/markets", label: "MARKETS", icon: CandlestickChart },
-  { href: "/positions", label: "POSITIONS", icon: Layers },
-  { href: "/orders", label: "ORDERS", icon: ArrowUpDown },
-  { href: "/strategy", label: "STRATEGY", icon: Target },
-  { href: "/research", label: "AI RESEARCH", icon: BrainCircuit },
-  { href: "/backtests", label: "BACKTESTS", icon: Beaker },
-  { href: "/journal", label: "JOURNAL", icon: BookOpen },
-  { href: "/analytics", label: "ANALYTICS", icon: BarChart3 },
-  { href: "/alerts", label: "ALERTS", icon: Bell },
-  { href: "/automation", label: "AUTOMATION", icon: Bot, tag: "OFF" },
-  { href: "/ai-connection", label: "AI CONNECTION", icon: Bot },
-  { href: "/settings", label: "SETTINGS", icon: Settings },
-];
+
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const viewport = useViewport();
@@ -81,6 +64,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
      ---------------------------------------------------------------------- */
   const toggleSidebar = useApp((s) => s.toggleSidebar);
   const sidebarPinned = useRef(false);
+  useEffect(() => {
+    // Restore an explicit choice and pin it so the device-class auto-collapse
+    // cannot override what the operator already decided.
+    try {
+      const saved = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
+      if (saved === null) return;
+      sidebarPinned.current = true;
+      useApp.setState({ sidebarCollapsed: saved === "1" });
+    } catch {
+      // Storage disabled: keep the per-session default.
+    }
+  }, []);
   useEffect(() => {
     if (!viewport.ready || sidebarPinned.current) return;
     const shouldCollapse = viewport.device === "tablet" || viewport.device === "laptop";
@@ -350,6 +345,7 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
   const { setPalette, patchSettings } = useApp();
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileTrapRef = useFocusTrap<HTMLDivElement>(mobileMenuOpen);
   const symbols = settings.watchlist.includes(activeSymbol)
     ? settings.watchlist
     : [activeSymbol, ...settings.watchlist];
@@ -458,34 +454,26 @@ function TopBar({ onReconnect }: { onReconnect: () => void }) {
       {mobileMenuOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex flex-col">
           <div className="absolute inset-0 bg-black/70" onClick={() => setMobileMenuOpen(false)} />
-          <div className="relative panel w-full max-w-sm flex flex-col h-full slide-in shadow-2xl">
+          <div ref={mobileTrapRef} className="relative panel w-full max-w-sm flex flex-col h-full slide-in shadow-2xl">
             <header className="flex items-center justify-between px-3 h-11 border-b border-edge">
               <p className="microlabel">MENU</p>
               <button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="text-dim hover:text-mut">
                 <X size={18} />
               </button>
             </header>
-            <nav className="flex-1 overflow-y-auto p-3 space-y-1">
-              {[
-                { href: "/", label: "Overview", icon: LayoutDashboard },
-                { href: "/chart", label: "Chart", icon: CandlestickChart },
-                { href: "/positions", label: "Positions", icon: Briefcase },
-                { href: "/orders", label: "Orders", icon: List },
-                { href: "/journal", label: "Journal", icon: BookOpen },
-                { href: "/analytics", label: "Analytics", icon: BarChart2 },
-                { href: "/strategy", label: "Strategy", icon: Zap },
-                { href: "/automation", label: "Automation", icon: Bot },
-                { href: "/alerts", label: "Alerts", icon: Bell },
-                { href: "/ai-connection", label: "AI CONNECTION", icon: Bot },
-  { href: "/settings", label: "Settings", icon: Settings },
-              ].map((item) => (
-                <Link key={item.href} href={item.href} onClick={() => setMobileMenuOpen(false)}
-                  className={cx("flex items-center gap-3 px-3 py-2.5 rounded text-[11px] text-mut hover:text-ink hover:bg-panel2/50 transition-colors",
-                    pathname === item.href ? "text-accent bg-accent-dim" : "")}>
-                  <item.icon size={16} />
-                  {item.label}
-                </Link>
-              ))}
+            <nav className="flex-1 overflow-y-auto p-3 space-y-1" aria-label="Workspace">
+              {NAV_ITEMS.map((item) => {
+                const active = isNavActive(pathname, item.href);
+                return (
+                  <Link key={item.href} href={item.href} onClick={() => setMobileMenuOpen(false)}
+                    aria-current={active ? "page" : undefined}
+                    className={cx("flex items-center gap-3 px-3 py-2.5 rounded text-[11px] text-mut hover:text-ink hover:bg-panel2/50 transition-colors",
+                      active ? "text-accent bg-accent-dim" : "")}>
+                    <item.icon size={16} />
+                    {item.label}
+                  </Link>
+                );
+              })}
               <div className="border-t border-edge pt-3 mt-3">
                 <button onClick={() => void logout()} className="flex items-center gap-3 px-3 py-2.5 rounded text-[11px] text-dn hover:bg-dn/10 transition-colors w-full">
                   <LogOut size={16} />
@@ -553,8 +541,8 @@ function Sidebar() {
         )}
       </div>
       <div className="flex-1 overflow-y-auto py-4">
-        {NAV.map((item) => {
-          const active = pathname === item.href;
+        {NAV_ITEMS.map((item) => {
+          const active = isNavActive(pathname, item.href);
           const Icon = item.icon;
           return (
             <Link
@@ -650,22 +638,18 @@ function StatusBar() {
 function MobileNav() {
   const pathname = usePathname();
   const [more, setMore] = useState(false);
-  const items = [
-    { href: "/", label: "Home", icon: LayoutDashboard },
-    { href: "/chart", label: "Chart", icon: LineChart },
-    { href: "/positions", label: "Positions", icon: Layers },
-    { href: "/strategy", label: "Signals", icon: Target },
-  ];
+  const moreTrapRef = useFocusTrap<HTMLDivElement>(more);
   return (
     <>
       <nav className="md:hidden fixed bottom-0 inset-x-0 h-14 bg-panel2 border-t border-edge grid grid-cols-5 z-50" aria-label="Mobile">
-        {items.map((it) => {
+        {MOBILE_NAV_ITEMS.map((it) => {
           const Icon = it.icon;
-          const active = pathname === it.href;
+          const active = isNavActive(pathname, it.href);
           return (
-            <Link key={it.href} href={it.href} className={cx("flex flex-col items-center justify-center gap-0.5 text-[9px]", active ? "text-accent" : "text-dim")}>
+            <Link key={it.href} href={it.href} aria-current={active ? "page" : undefined}
+              className={cx("flex flex-col items-center justify-center gap-0.5 text-[9px]", active ? "text-accent" : "text-dim")}>
               <Icon size={16} />
-              {it.label}
+              {it.shortLabel}
             </Link>
           );
         })}
@@ -676,14 +660,16 @@ function MobileNav() {
       {more && (
         <div className="md:hidden fixed inset-0 z-90" role="dialog" aria-modal="true">
           <div className="absolute inset-0 bg-black/70" onClick={() => setMore(false)} />
-          <div className="absolute bottom-0 inset-x-0 panel rounded-b-none p-3 slide-in">
+          <div ref={moreTrapRef} className="absolute bottom-0 inset-x-0 panel rounded-b-none p-3 slide-in">
             <div className="flex items-center justify-between mb-2">
               <p className="microlabel">MORE</p>
               <button onClick={() => setMore(false)} aria-label="Close"><X size={14} className="text-dim" /></button>
             </div>
             <div className="grid grid-cols-3 gap-2">
-              {NAV.map((n) => (
-                <Link key={n.href} href={n.href} onClick={() => setMore(false)} className="panel-2 p-2.5 text-[10px] tracking-wide text-mut hover:text-ink flex items-center gap-1.5">
+              {NAV_ITEMS.map((n) => (
+                <Link key={n.href} href={n.href} onClick={() => setMore(false)}
+                  aria-current={isNavActive(pathname, n.href) ? "page" : undefined}
+                  className="panel-2 p-2.5 text-[10px] tracking-wide text-mut hover:text-ink flex items-center gap-1.5 aria-[current=page]:text-accent">
                   <n.icon size={13} /> {n.label}
                 </Link>
               ))}
@@ -757,6 +743,7 @@ function NotifBell() {
 /* ================= help =================================================== */
 
 function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const trapRef = useFocusTrap<HTMLDivElement>(open);
   if (!open) return null;
   const rows = [
     ["Ctrl / ⌘ + K", "Command palette"],
@@ -775,7 +762,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center p-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative panel w-full max-w-sm slide-in">
+      <div ref={trapRef} className="relative panel w-full max-w-sm slide-in">
         <header className="flex items-center justify-between px-4 h-10 border-b border-edge">
           <p className="microlabel">KEYBOARD SHORTCUTS</p>
           <button onClick={onClose} aria-label="Close help"><X size={13} className="text-dim" /></button>

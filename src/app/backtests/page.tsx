@@ -231,9 +231,9 @@ function AssumptionsPanel() {
   return (
     <PremiumPanel title="FILL MODEL & ASSUMPTIONS" elevation={1}>
       <div className="p-3 space-y-2 text-[11px] text-mut leading-snug">
-        <p><strong className="text-ink">Fill model:</strong> signals are evaluated on closed candles only; an order fills at the NEXT real candle's open. Trailing stops are checked against the prior bar, and a gap through a stop fills at the worse opening price. No synthetic fills, no intra-bar price invention.</p>
+        <p><strong className="text-ink">Fill model:</strong> signals are evaluated on closed candles only; an order fills at the NEXT real candle&apos;s open. Trailing stops are checked against the prior bar, and a gap through a stop fills at the worse opening price. No synthetic fills, no intra-bar price invention.</p>
         <p><strong className="text-ink">Costs:</strong> fees and slippage are charged on both entry and exit at the rates above.</p>
-        <p><strong className="text-ink">Look-ahead:</strong> a bar's own high/low/close can never influence a decision made at that bar.</p>
+        <p><strong className="text-ink">Look-ahead:</strong> a bar&apos;s own high/low/close can never influence a decision made at that bar.</p>
         <p><strong className="text-ink">Walk-forward:</strong> fixed-parameter rolling validation — parameters are NOT refit per fold, so this is validation, not optimisation.</p>
         <p className="text-warn flex items-start gap-1.5">
           <TriangleAlert size={11} className="flex-none mt-0.5" />

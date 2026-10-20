@@ -340,7 +340,15 @@ describe("runResearch orchestration", () => {
   });
 
   const candles = makeCandles(200, "up");
-  const fetchCandles = async () => ({ candles, source: "demo" as const });
+  const candlesEnvelope = (series: Candle[]) => ({
+    candles: series,
+    data: series,
+    provider: "demo" as const,
+    source: "demo" as const,
+    asOf: Date.now(),
+    stale: false,
+  });
+  const fetchCandles = async () => candlesEnvelope(candles);
 
   /** A fetch fake that serves the free-model catalog and a research answer. */
   function fakeFetch(answer: unknown, opts?: { failModels?: boolean; failChat?: boolean }) {
@@ -412,7 +420,7 @@ describe("runResearch orchestration", () => {
     const few = makeCandles(RESEARCH_MIN_CANDLES - 10, "up");
     const outcome = await runResearch(request, {
       fetchImpl: fakeFetch(validRawReport()),
-      fetchCandles: async () => ({ candles: few, source: "demo" as const }),
+      fetchCandles: async () => candlesEnvelope(few),
     });
     assert.equal(outcome.ok, false);
     assert.match(outcome.error, /not enough closed candles/i);

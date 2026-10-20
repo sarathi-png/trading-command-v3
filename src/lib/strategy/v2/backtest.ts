@@ -1,8 +1,9 @@
 import type { Candle } from "@/lib/types";
 import { validateStrategyConfig } from "./types";
-import type { ChandelierDonchianConfig, BacktestResult, BacktestTrade, BacktestConfig } from "./types";
-import { evaluateChandelierDonchian, calculatePositionSize, DEFAULT_CHANDELIER_DONCHIAN_CONFIG } from "./chandelier-donchian";
-import { toHeikinAshi } from "./heikin-ashi";
+import type { ChandelierDonchianConfig, BacktestResult, BacktestTrade, BacktestConfig, HeikinAshiCandle } from "./types";
+import { calculatePositionSize, decideSignal, DEFAULT_CHANDELIER_DONCHIAN_CONFIG } from "./chandelier-donchian";
+import { toHeikinAshi, haColor } from "./heikin-ashi";
+import { donchianRibbon } from "./donchian";
 import { chandelierExit } from "./chandelier";
 
 /** Engine config version, stamped onto every result for reproducibility. */
@@ -59,15 +60,18 @@ export function runBacktest(
       ![backtestConfig.feeRate, backtestConfig.slippage].every(v => Number.isFinite(v) && v >= 0)) {
     throw new Error("Invalid backtest capital or costs");
   }
-  const indicators = chandelierExit(config.heikinAshi ? toHeikinAshi(candles) : candles,
-    config.chandelier.atrLength, config.chandelier.multiplier);
+  const series: Candle[] = config.heikinAshi ? toHeikinAshi(candles) : candles;
+  const indicators = chandelierExit(series, config.chandelier.atrLength, config.chandelier.multiplier);
+  const donchian = donchianRibbon(series, config.donchian.periods);
   const trades: BacktestTrade[] = [];
+  let stopFirstBars = 0;
   let equity = backtestConfig.initialCapital;
   let peakEquity = equity;
   let maxDrawdown = 0;
   let maxDrawdownPct = 0;
   let position: BacktestTrade | null = null;
   let activeStop = 0;
+  let activeTarget: number | null = null;
   let entryIndex = 0;
   let feesTotal = 0;
   let slippageTotal = 0;
@@ -90,43 +94,115 @@ export function runBacktest(
     mark(equity, bar.time);
     position = null;
   };
+  const pushCurve = (bar: Candle) => {
+    const value = equity + (position ? calculatePnl(position, bar.close, backtestConfig).pnl : 0);
+    const point = equityCurve.at(-1);
+    if (point && point.time === bar.time) point.equity = value;
+    else equityCurve.push({ time: bar.time, equity: value });
+  };
   const warmup = Math.max(config.chandelier.atrLength, ...config.donchian.periods) + 50;
   for (let i = Math.max(warmup, tradeStartIndex); i < candles.length; i++) {
     const bar = candles[i];
-    // slice excludes this bar: its high/low/close cannot affect an opening decision.
-    const signal = evaluateChandelierDonchian(candles.slice(0, i), config);
+    // The decision uses the previous closed bar only. Its high/low/close cannot
+    // affect an opening decision. Indicators are precomputed once above, so the
+    // loop is O(bars) instead of recomputing every prefix from bar zero.
+    const decisionIndex = i - 1;
+    const decisionBar = series[decisionIndex];
+    const chandelierTrend = indicators.trend[decisionIndex];
+    const chandelierSignal = chandelierTrend === "long" && Number.isFinite(indicators.longStop[decisionIndex])
+      ? "buy" as const
+      : chandelierTrend === "short" && Number.isFinite(indicators.shortStop[decisionIndex])
+        ? "sell" as const
+        : "none" as const;
+    const signal = decideSignal({
+      marketClose: candles[decisionIndex].close,
+      timestamp: decisionBar.time,
+      chandelierSignal,
+      longStop: indicators.longStop[decisionIndex],
+      shortStop: indicators.shortStop[decisionIndex],
+      donchianTrend: donchian.trend[decisionIndex] ?? "neutral",
+      haColor: config.heikinAshi
+        ? haColor(decisionBar as HeikinAshiCandle)
+        : decisionBar.close >= decisionBar.open ? "green" : "red",
+      periods: config.donchian.periods,
+    });
     if (position && ((position.side === "long" && signal.status === "SHORT_SETUP") ||
         (position.side === "short" && signal.status === "LONG_SETUP"))) {
-      close(bar, bar.open, "opposite", i);
+      close(bar, position.side === "long"
+        ? bar.open * (1 - backtestConfig.slippage)
+        : bar.open * (1 + backtestConfig.slippage), "opposite", i);
+      pushCurve(bar);
       continue;
     }
     if (!position && equity > 0 && signal.entry !== null && signal.stop !== null &&
         (signal.status === "LONG_SETUP" || signal.status === "SHORT_SETUP")) {
       const side = signal.status === "LONG_SETUP" ? "long" : "short";
-      if (side === "long" ? bar.open <= signal.stop : bar.open >= signal.stop) continue;
-      const sizing = calculatePositionSize(equity, bar.open, signal.stop, {
+      // Slippage is applied to the fill itself (adverse direction), not as a
+      // separate cost, so position size and the equity curve see the real fill.
+      const entryPrice = side === "long"
+        ? bar.open * (1 + backtestConfig.slippage)
+        : bar.open * (1 - backtestConfig.slippage);
+      if (side === "long" ? entryPrice <= signal.stop : entryPrice >= signal.stop) continue;
+      const sizing = calculatePositionSize(equity, entryPrice, signal.stop, {
         ...config.risk, leverage: backtestConfig.leverage, riskPct: backtestConfig.riskPct,
       });
       if (sizing.qty <= 0) continue;
-      position = { entryTime: bar.time, exitTime: 0, entryPrice: bar.open, exitPrice: 0,
+      position = { entryTime: bar.time, exitTime: 0, entryPrice, exitPrice: 0,
         side, qty: sizing.qty, pnl: 0, pnlPct: 0, exitReason: "chandelier", barsHeld: 0 };
       activeStop = signal.stop;
+      // The strategy already publishes a 2R target; simulate it instead of
+      // silently ignoring it (previous behaviour overstated drawdown/hold time).
+      activeTarget = signal.target;
       entryIndex = i;
     }
-    if (!position) continue;
+    if (!position) { pushCurve(bar); continue; }
     const priorStop = position.side === "long" ? indicators.longStop[i - 1] : indicators.shortStop[i - 1];
     if (Number.isFinite(priorStop)) activeStop = position.side === "long"
       ? Math.max(activeStop, priorStop) : Math.min(activeStop, priorStop);
-    if (position.side === "long" ? bar.low <= activeStop : bar.high >= activeStop) {
-      // A gap through the stop fills at the worse opening price.
-      close(bar, position.side === "long" ? Math.min(bar.open, activeStop) : Math.max(bar.open, activeStop), "chandelier", i);
+    const stopHit = position.side === "long" ? bar.low <= activeStop : bar.high >= activeStop;
+    const targetHit = activeTarget !== null &&
+      (position.side === "long" ? bar.high >= activeTarget : bar.low <= activeTarget);
+    // When a bar spans both levels the intrabar order is unknowable; assume
+    // the stop filled first. That is the conservative bias, never the flattering one.
+    if (stopHit) {
+      stopFirstBars += targetHit ? 1 : 0;
+      // A gap through the stop fills at the worse opening price, plus adverse slippage.
+      const raw = position.side === "long" ? Math.min(bar.open, activeStop) : Math.max(bar.open, activeStop);
+      close(bar, position.side === "long"
+        ? raw * (1 - backtestConfig.slippage)
+        : raw * (1 + backtestConfig.slippage), "chandelier", i);
+    } else if (targetHit) {
+      // A gap beyond the target fills at the (better) opening price.
+      close(bar, position.side === "long" ? Math.max(bar.open, activeTarget!) : Math.min(bar.open, activeTarget!), "target", i);
     } else if (config.timeStop.enabled && i - entryIndex + 1 >= config.timeStop.bars) {
-      close(bar, bar.close, "time_stop", i);
+      close(bar, position.side === "long"
+        ? bar.close * (1 - backtestConfig.slippage)
+        : bar.close * (1 + backtestConfig.slippage), "time_stop", i);
     } else {
       mark(equity + calculatePnl(position, bar.close, backtestConfig).pnl, bar.time);
     }
+    pushCurve(bar);
   }
-  if (position && candles.length) close(candles.at(-1)!, candles.at(-1)!.close, "end_of_data", candles.length - 1);
+  if (position && candles.length) {
+    const last = candles.at(-1)!;
+    close(last, position.side === "long"
+      ? last.close * (1 - backtestConfig.slippage)
+      : last.close * (1 + backtestConfig.slippage), "end_of_data", candles.length - 1);
+    const point = equityCurve.at(-1);
+    if (point && point.time === last.time) point.equity = equity;
+    else equityCurve.push({ time: last.time, equity });
+  }
+  const warnings = [
+    "When a bar spans both the stop and the target, the stop is assumed first (conservative).",
+  ];
+  if (trades.some((trade) => trade.exitReason === "end_of_data")) {
+    warnings.push("A position was still open at the last bar and is marked end_of_data, not realized by a venue.");
+  }
+  if (trades.length < 20) {
+    warnings.push(`Only ${trades.length} trade(s): treat every statistic as a small sample.`);
+  }
+  if (config.timeStop.enabled) warnings.push(`Time stop closes after ${config.timeStop.bars} bar(s).`);
+  if (stopFirstBars > 0) warnings.push(`${stopFirstBars} bar(s) touched stop and target; stop-first bias applied.`);
   return computeMetrics(trades, maxDrawdown, maxDrawdownPct, {
     initialCapital: backtestConfig.initialCapital,
     endingEquity: equity,
@@ -134,6 +210,7 @@ export function runBacktest(
     slippage: slippageTotal,
     equityCurve,
     dataWarnings,
+    warnings,
   });
 }
 
@@ -146,10 +223,12 @@ function calculatePnl(
     ? (exitPrice - trade.entryPrice) * trade.qty
     : (trade.entryPrice - exitPrice) * trade.qty;
 
+  // Fees are charged on both legs; slippage is already embedded in the fills.
   const fees = (trade.entryPrice + exitPrice) * trade.qty * config.feeRate;
   const slippage = (trade.entryPrice + exitPrice) * trade.qty * config.slippage;
 
-  return { pnl: grossPnl - fees - slippage, fees, slippage };
+  // Slippage is embedded in the fill prices above; report it, don't charge it twice.
+  return { pnl: grossPnl - fees, fees, slippage };
 }
 
 interface MetricsExtras {
@@ -159,6 +238,7 @@ interface MetricsExtras {
   slippage: number;
   equityCurve: { time: number; equity: number }[];
   dataWarnings: string[];
+  warnings: string[];
 }
 
 function computeMetrics(
@@ -226,6 +306,7 @@ function computeMetrics(
     fillModel: FILL_MODEL,
     configVersion: BACKTEST_ENGINE_VERSION,
     dataWarnings: extras.dataWarnings,
+    warnings: extras.warnings,
   };
 }
 
@@ -263,5 +344,6 @@ export function aggregateWalkForward(results: BacktestResult[]): BacktestResult 
     // trades and the worst-case drawdown instead of a fabricated compound curve.
     equityCurve: [],
     dataWarnings: ["Walk-forward aggregate: per-fold equity curves are reported separately; the combined curve is not compounded."],
+    warnings: ["Walk-forward windows are independent; no compounded equity curve is implied."],
   });
 }

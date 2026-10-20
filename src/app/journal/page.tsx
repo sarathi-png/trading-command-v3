@@ -27,10 +27,15 @@ export default function JournalPage() {
   useDisplayCurrency();
   const { settings } = useApp();
   const [fSymbol, setFSymbol] = useState(""), [fMode] = useState(settings.mode), [fDir, setFDir] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
   const [editing, setEditing] = useState<Row | null>(null), [busy, setBusy] = useState(false), [message, setMessage] = useState("");
   const { data, refresh, loading, error } = usePoll(() => api.get<History>(`/api/journal${fSymbol ? `?symbol=${encodeURIComponent(fSymbol)}` : ""}`), 15_000, { deps: [fSymbol] });
   const entries = useMemo(() => (data?.entries ?? []).filter(r => (!fMode || r.mode === fMode) && (!fDir || r.direction === fDir)), [data, fMode, fDir]);
   const closed = entries.filter(e => e.closedAt && e.exit !== null);
+  const pageCount = Math.max(1, Math.ceil(entries.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const visible = entries.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const pnlFor = (mode: string) => closed.filter(e => e.mode === mode).reduce((sum,e) => sum + e.pnl,0);
   async function sync() {
     setBusy(true);
@@ -90,17 +95,17 @@ export default function JournalPage() {
         <Btn disabled={busy} onClick={()=>void sync()}><RefreshCw size={12}/> SYNC NEXT BATCH</Btn>
       </div>
     </Panel>}
-    <Panel title="CLOSED TRADE LOG · RECENT 800">
+    <Panel title={`CLOSED TRADE LOG · PAGE ${currentPage} / ${pageCount}`}>
       <div className="flex items-center gap-2 flex-wrap px-3 py-2 border-b border-edge">
-        <Input aria-label="Filter symbol" placeholder="symbol" value={fSymbol} onChange={e=>setFSymbol(e.target.value.toUpperCase())} className="w-24"/>
+        <Input aria-label="Filter symbol" placeholder="symbol" value={fSymbol} onChange={e=>{setFSymbol(e.target.value.toUpperCase());setPage(1);}} className="w-24"/>
         <Chip>{settings.mode === "live" ? "LIVE HISTORY ONLY" : "PAPER HISTORY ONLY"}</Chip>
-        <Select aria-label="Filter direction" value={fDir} onChange={e=>setFDir(e.target.value)}><option value="">all directions</option><option value="long">long</option><option value="short">short</option></Select>
+        <Select aria-label="Filter direction" value={fDir} onChange={e=>{setFDir(e.target.value);setPage(1);}}><option value="">all directions</option><option value="long">long</option><option value="short">short</option></Select>
         <Btn disabled={busy||!data?.total} onClick={()=>void exportHistory()}><Download size={12}/> EXPORT P&L + AI CONTEXT</Btn>
         <Btn disabled={!closed.length} onClick={()=>void share()}><Share2 size={12}/> COPY SUMMARY</Btn>
       </div>
       {loading&&!data ? <div className="p-3"><Skeleton className="h-20"/></div> : !entries.length ? <EmptyState icon={<BookOpen size={18}/>} title="No automatic closed trades yet" hint="Paper closes record automatically; CoinDCX reads need valid credentials and completed sync pages. No sample profits or manual entries."/> : <div className="overflow-x-auto"><table className="w-full text-[11px]">
         <thead><tr className="microlabel border-b border-edge text-left">{["OPENED","SYMBOL / SOURCE","DIR","ENTRY → EXIT","COIN QTY","NET P&L / BASIS","PRIOR AI CONTEXT","NOTES"].map(h=><th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr></thead>
-        <tbody>{entries.map(e=><tr key={e.id} className="border-b border-edge/50 hover:bg-panel2/50">
+        <tbody>{visible.map(e=><tr key={e.id} className="border-b border-edge/50 hover:bg-panel2/50">
           <td className="px-3 py-2 num text-dim whitespace-nowrap">{fmtDateTime(Date.parse(e.openedAt),settings.timezone)}</td>
           <td className="px-3 py-2 num">{e.symbol}<p className="text-[9px] text-dim">{e.source === "coindcx" ? "COINDCX FILLS" : "PAPER EXECUTION"}</p></td>
           <td className={cx("px-3 py-2",e.direction==="long"?"text-up":"text-dn")}>{e.direction.toUpperCase()}</td>
@@ -109,6 +114,13 @@ export default function JournalPage() {
           <td className="px-3 py-2 min-w-48">{e.predictionContext.length ? <details><summary className="text-accent cursor-pointer">{e.predictionContext.length} prior calls · context only</summary>{e.predictionContext.map(p=><p key={p.id} className="text-[10px] mt-1" title={p.rationale}>{p.chartType} · {p.provider} · {p.direction} · {p.agrees?"aligned":"disagreed"}<br/><span className="text-dim">{p.model} · {p.id}</span></p>)}</details> : <span className="text-dim">No retained compatible prior call</span>}</td>
           <td className="px-3 py-2"><button onClick={()=>setEditing(e)} aria-label={`Annotate ${e.symbol} trade`} className="p-2 text-dim hover:text-ink"><Pencil size={13}/></button></td>
         </tr>)}</tbody></table></div>}
+      {entries.length > pageSize && <div className="flex items-center justify-between gap-2 border-t border-edge px-3 py-2">
+        <p className="text-[10px] text-dim">{(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, entries.length)} of {entries.length} filtered records</p>
+        <div className="flex gap-1">
+          <Btn variant="ghost" disabled={currentPage <= 1} onClick={()=>setPage(p=>Math.max(1,p-1))}>PREV</Btn>
+          <Btn variant="ghost" disabled={currentPage >= pageCount} onClick={()=>setPage(p=>p+1)}>NEXT</Btn>
+        </div>
+      </div>}
     </Panel>
     <Panel title="EXECUTION ACTIVITY · OPEN AND CLOSED FILLS">
       <div className="p-3 text-[11px] space-y-2">

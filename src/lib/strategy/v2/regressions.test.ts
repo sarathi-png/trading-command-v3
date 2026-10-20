@@ -1,9 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { donchianRibbon } from "./donchian";
-import { chandelierExit } from "./chandelier";
-import { calculatePositionSize, evaluateChandelierDonchian } from "./chandelier-donchian";
+import { chandelierExit, wilderAtr } from "./chandelier";
+import { atr as sharedAtr } from "../../indicators";
+import { calculatePositionSize, decideSignal, evaluateChandelierDonchian } from "./chandelier-donchian";
+import { toHeikinAshi, haColor } from "./heikin-ashi";
 import { DEFAULT_CHANDELIER_DONCHIAN_CONFIG as defaults, validateStrategyConfig } from "./types";
+import type { HeikinAshiCandle } from "./types";
 import { runBacktest, runWalkForward } from "./backtest";
 import { evaluateSetupOutcome, summariseOutcomes, sideOf } from "./outcomes";
 import { breakoutStrategy, buildAnalysis } from "../engine";
@@ -26,6 +29,16 @@ describe("strategy correctness regressions", () => {
   it("Chandelier handles empty data and waits for ATR warmup", () => {
     assert.deepEqual(chandelierExit([]).trend, []);
     assert.ok(Number.isNaN(chandelierExit(candles.slice(0, 10), 20, 3).longStop[9]));
+  });
+  it("chandelier ATR is the shared Wilder ATR series", () => {
+    const canonical = sharedAtr(candles, 14);
+    const adapted = wilderAtr(candles, 14);
+    assert.equal(adapted.length, canonical.length);
+    for (let i = 0; i < canonical.length; i++) {
+      const a = canonical[i];
+      if (a === null) assert.ok(Number.isNaN(adapted[i]), `bar ${i} should be unavailable`);
+      else assert.ok(Math.abs(a - adapted[i]) < 1e-12, `bar ${i} differs`);
+    }
   });
   it("defaults to ATR length 1 and multiplier 2 while respecting explicit overrides", () => {
     assert.deepEqual(chandelierExit(candles), chandelierExit(candles, 1, 2));
@@ -63,11 +76,40 @@ describe("strategy correctness regressions", () => {
     assert.ok(r.totalTrades > 0);
     for (const t of r.trades) {
       const index = candles.findIndex(c => c.time === t.entryTime);
-      assert.equal(t.entryPrice, candles[index].open);
+      const slipped = t.side === "long"
+        ? candles[index].open * (1 + 0.0001)
+        : candles[index].open * (1 - 0.0001);
+      assert.ok(Math.abs(t.entryPrice - slipped) < 1e-9, "entry includes adverse slippage");
       assert.ok(index >= 60);
       if (t.exitReason === "time_stop") assert.equal(t.barsHeld, 3);
     }
     assert.equal(r.dsr, null);
+  });
+  it("precomputed backtest decisions match the prefix evaluator bar for bar", () => {
+    const series = config.heikinAshi ? toHeikinAshi(candles) : candles;
+    const indicators = chandelierExit(series, config.chandelier.atrLength, config.chandelier.multiplier);
+    const donchian = donchianRibbon(series, config.donchian.periods);
+    for (const i of [120, 180, 250, 319]) {
+      const j = i - 1;
+      const trend = indicators.trend[j];
+      const fast = decideSignal({
+        marketClose: candles[j].close,
+        timestamp: series[j].time,
+        chandelierSignal: trend === "long" && Number.isFinite(indicators.longStop[j])
+          ? "buy" : trend === "short" && Number.isFinite(indicators.shortStop[j]) ? "sell" : "none",
+        longStop: indicators.longStop[j],
+        shortStop: indicators.shortStop[j],
+        donchianTrend: donchian.trend[j] ?? "neutral",
+        haColor: config.heikinAshi ? haColor(series[j] as HeikinAshiCandle) : series[j].close >= series[j].open ? "green" : "red",
+        periods: config.donchian.periods,
+      });
+      const prefix = evaluateChandelierDonchian(candles.slice(0, i), config);
+      assert.equal(fast.status, prefix.status, `status at ${i}`);
+      assert.equal(fast.entry, prefix.entry, `entry at ${i}`);
+      assert.equal(fast.stop, prefix.stop, `stop at ${i}`);
+      assert.equal(fast.target, prefix.target, `target at ${i}`);
+      assert.equal(fast.ts, prefix.ts);
+    }
   });
   it("walk-forward accepts exact final window and rejects overlap/zero steps", () => {
     assert.equal(runWalkForward(candles.slice(0, 100), config, 70, 30).length, 1);

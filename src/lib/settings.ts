@@ -1,5 +1,4 @@
 import { requestWorkspace } from "./workspace";
-import { knownSymbols } from "./exchange/symbols";
 import { getRepo } from "@/lib/repo";
 import type { AppSettings } from "./types";
 
@@ -17,8 +16,30 @@ function merge(base: AppSettings, patch: Partial<AppSettings>): AppSettings {
     modules: { ...base.modules, ...(patch.modules ?? {}) },
     strategiesEnabled: { ...base.strategiesEnabled, ...(patch.strategiesEnabled ?? {}) },
     riskLimits: { ...base.riskLimits, ...(patch.riskLimits ?? {}) },
-    watchlist: knownSymbols(),
+    // Legacy rows could contain `liveArmed: "yes"` from the pre-fix route.
+    // Coerce on READ too, so an upgraded database cannot start armed without
+    // the explicit boolean + confirmation token.
+    liveArmed: (patch.liveArmed ?? base.liveArmed) === true,
+    // Watchlists are user data, not reference data. Forcing knownSymbols()
+    // here made every save a no-op and every read return all 20 venue pairs.
+    watchlist: normalizeWatchlist(patch.watchlist ?? base.watchlist),
   };
+}
+
+/** Keep only strings, drop duplicates, and cap the list at a sane size. */
+function normalizeWatchlist(list: unknown): string[] {
+  if (!Array.isArray(list)) return [...DEFAULT_SETTINGS.watchlist];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of list) {
+    if (typeof raw !== "string") continue;
+    const symbol = raw.trim().toUpperCase();
+    if (!symbol || seen.has(symbol)) continue;
+    seen.add(symbol);
+    out.push(symbol);
+    if (out.length >= 40) break;
+  }
+  return out.length > 0 ? out : [...DEFAULT_SETTINGS.watchlist];
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -33,7 +54,7 @@ export async function getSettings(): Promise<AppSettings> {
     const legacy = await (await getRepo()).getSetting(KEY) as Partial<AppSettings> | null;
     if (legacy) stored = { ...legacy, liveArmed: false, mode: workspace, ...(workspace === "live" ? { dataSource: "live" as const } : {}) };
   }
-  const value = stored ? merge(DEFAULT_SETTINGS, stored) : { ...DEFAULT_SETTINGS, watchlist: knownSymbols() };
+  const value = stored ? merge(DEFAULT_SETTINGS, stored) : { ...DEFAULT_SETTINGS };
   // Pre-migration rows stored the venue as the data source ("delta"). The value
   // now means "a real venue", so map it forward instead of silently dropping a
   // user back to demo data.

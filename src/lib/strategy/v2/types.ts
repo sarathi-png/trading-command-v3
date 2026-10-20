@@ -124,9 +124,9 @@ export interface BacktestResult {
   grossLoss: number;
   /** Total fees charged across all trades. */
   fees: number;
-  /** Total estimated slippage charged across all trades. */
+  /** Total estimated slippage charged across all trades (already embedded in fills). */
   slippageCost: number;
-  /** Mark-to-market equity sampled once per closed bar. */
+  /** Mark-to-market equity at each simulated bar (starting-capital baseline). */
   equityCurve: { time: number; equity: number }[];
   /** Execution assumption string, so a result is self-describing. */
   fillModel: string;
@@ -134,6 +134,8 @@ export interface BacktestResult {
   configVersion: string;
   /** Data-quality notes (missing/duplicate/invalid candles, source). */
   dataWarnings: string[];
+  /** Methodology/sample warnings. Never a substitute for the numbers. */
+  warnings: string[];
 }
 
 export interface BacktestTrade {
@@ -145,7 +147,7 @@ export interface BacktestTrade {
   qty: number;
   pnl: number;
   pnlPct: number;
-  exitReason: "chandelier" | "opposite" | "time_stop" | "end_of_data";
+  exitReason: "chandelier" | "target" | "opposite" | "time_stop" | "end_of_data";
   barsHeld: number;
 }
 

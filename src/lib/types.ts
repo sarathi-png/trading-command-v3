@@ -209,6 +209,8 @@ export interface AppSettings {
   tradingviewEnabled: boolean;
   /** Webhook shared secret (used when TRADINGVIEW_WEBHOOK_SECRET env is unset). */
   tradingviewSecret: string;
+  /** Server-derived: whether a webhook secret (stored or env) exists. Never the value. */
+  webhookSecretConfigured?: boolean;
   /** UI theme: "dark" or "light" */
   theme: "dark" | "light";
   /** Chandelier Exit + Donchian Ribbon strategy configuration */
@@ -267,6 +269,17 @@ export interface SystemStatus {
     clientOrderIds: boolean;
     orderReconciliation: boolean;
     error?: string;
+  };
+  /** Market-data provider selected by the current data source. */
+  market?: {
+    provider: string;
+    label: string;
+    dataSource: "live" | "demo";
+    timeframes: Timeframe[];
+    maxCandles: number;
+    orderbook: boolean;
+    recentTrades: boolean;
+    fanoutLimit: number;
   };
   flags: Record<string, boolean>;
 }

@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import {
   analyseTechnical,
   detectPatterns,
-  ema,
   TECHNICAL_VERSION,
 } from "./technical";
+import { ema } from "../indicators";
 import { buildAiContext } from "./context";
 import { recallMemory } from "./memory";
 import { technicalConflicts } from "./rules";
@@ -144,7 +144,7 @@ describe("versioned candle pattern geometry", () => {
 });
 describe("indicators and causal strategy checklists", () => {
   it("SMA-seeds EMA and marks warmup honestly", () => {
-    assert.deepEqual(ema([1, 2, 3, 4], 3), [null, null, 2, 3]);
+    assert.deepEqual(ema([1, 2, 3, 4], 3), [null, null, 2.25, 3.125]);
   });
   it("uses population standard deviation for Bollinger Bands", () => {
     const c = Array.from({ length: 30 }, (_, i) => ({

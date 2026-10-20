@@ -14,10 +14,12 @@ import { exchangeAccountConfigured } from "@/lib/credentials";
 import { flags, APP_VERSION } from "@/lib/flags";
 import { exchangeCapabilities, exchangeConfigState, exchangePing } from "@/lib/exchange/service";
 import { getSettings } from "@/lib/settings";
+import { marketCapabilities } from "@/lib/market/service";
 import type { SystemStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 10;
 
 let pingCache: { at: number; ok: boolean; error?: string } | null = null;
 
@@ -52,6 +54,7 @@ export async function GET() {
   const credsConfigured = await exchangeAccountConfigured();
   const config = exchangeConfigState();
   const capabilities = exchangeCapabilities();
+  const market = await marketCapabilities();
 
   const status: SystemStatus = {
     db: dbOk,
@@ -77,6 +80,16 @@ export async function GET() {
       clientOrderIds: capabilities.clientOrderIds,
       orderReconciliation: capabilities.orderReconciliation,
       ...(pingCache?.error ? { error: pingCache.error } : {}),
+    },
+    market: {
+      provider: market.id,
+      label: market.label,
+      dataSource: market.source,
+      timeframes: market.timeframes,
+      maxCandles: market.maxCandles,
+      orderbook: market.orderbook,
+      recentTrades: market.recentTrades,
+      fanoutLimit: market.fanoutLimit,
     },
     flags: {
       EXCHANGE_MARKET: flags.exchangeMarket(),

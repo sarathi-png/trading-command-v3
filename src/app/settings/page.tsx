@@ -399,7 +399,7 @@ export default function SettingsPage() {
       {/* tradingview */}
       <TradingViewPanel
         enabled={settings.tradingviewEnabled}
-        secret={settings.tradingviewSecret}
+        secretConfigured={Boolean(settings.webhookSecretConfigured)}
         webhookEnv={system?.flags?.TRADINGVIEW_WEBHOOK ?? false}
         onToggle={(v) => void patchSettings({ tradingviewEnabled: v })}
         onSecret={(v) => void patchSettings({ tradingviewSecret: v })}
@@ -458,14 +458,15 @@ export default function SettingsPage() {
  * already exists at /api/integrations/tradingview/webhook (validated, rate
  * limited, signals-only — it never places orders).
  */
-function TradingViewPanel({ enabled, secret, webhookEnv, onToggle, onSecret }: {
+function TradingViewPanel({ enabled, secretConfigured, webhookEnv, onToggle, onSecret }: {
   enabled: boolean;
-  secret: string;
+  secretConfigured: boolean;
   webhookEnv: boolean;
   onToggle: (v: boolean) => void;
   onSecret: (v: string) => void;
 }) {
   const { notify } = useApp();
+  const [secretDraft, setSecretDraft] = useState("");
   const origin = useSyncExternalStore(subscribeToOrigin, getBrowserOrigin, getServerOrigin);
 
   const active = enabled || webhookEnv;
@@ -516,9 +517,17 @@ function TradingViewPanel({ enabled, secret, webhookEnv, onToggle, onSecret }: {
 
         <label className="block space-y-1">
           <span className="microlabel">WEBHOOK SECRET</span>
-          <Input type="password" value={secret} placeholder="shared secret for TradingView alerts"
-            onChange={(e) => onSecret(e.target.value)} className="max-w-md" />
+          <div className="flex gap-2 max-w-md">
+            <Input type="password" value={secretDraft}
+              placeholder={secretConfigured ? "configured — enter a new secret to replace" : "shared secret for TradingView alerts"}
+              onChange={(e) => setSecretDraft(e.target.value)} className="flex-1" />
+            <Btn disabled={secretDraft.trim().length === 0}
+              onClick={() => { onSecret(secretDraft.trim()); setSecretDraft(""); }}>
+              SAVE
+            </Btn>
+          </div>
           <span className="text-[10px] text-dim">
+            {secretConfigured ? "A secret is configured. The stored value is never sent to the browser. " : "No secret is configured yet. "}
             Sent as the <span className="num text-mut">secret</span> field in the payload (or header{" "}
             <span className="num text-mut">x-webhook-secret</span>). TRADINGVIEW_WEBHOOK_SECRET env wins if set.
           </span>

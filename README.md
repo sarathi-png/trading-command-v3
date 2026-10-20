@@ -133,7 +133,8 @@ be disabled. Full list in `.env.example`.
 - `docs/AI_RESEARCH.md` — AI-assisted strategy research (`/research`) and backtesting (`/backtests`): validated reports, full metrics, walk-forward/OOS, paper handoff
 - `docs/DESIGN_BENCHMARK.md` — premium-interface benchmark, anti-pattern audit, capability matrix
 - `docs/FUTURE_ROADMAP.md` — competitive landscape, gap analysis, unique/futuristic roadmap
-- `docs/DEPLOYMENT.md` — local, Docker, Cloudflare Tunnel
+- `docs/DEPLOYMENT.md` — local verification, health checks, production guardrails
+- `docs/LIMITS.md` — hosting/trading/data/backtest limits and honest capability map
 
 ## Keyboard
 

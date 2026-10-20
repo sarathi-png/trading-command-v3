@@ -13,6 +13,8 @@ import os from "node:os";
 import path from "node:path";
 import type { Candle } from "@/lib/types";
 import { buildAiContext } from "./context";
+import { analyseTechnical } from "./technical";
+import { closes as closeSeries, ema, rsi } from "../indicators";
 import { ruleVerdict, ruleEvidence } from "./rules";
 import { extractJson, validatePrediction, degradationNotice } from "./prompt";
 import { callProvider, extractMessageContent } from "./providers";
@@ -501,4 +503,18 @@ describe("free-tier budget guard", () => {
     assert.equal(cached?.id, b.id);
   });
 
+});
+
+describe("shared indicator parity", () => {
+  it("AI evidence reads the same EMA/RSI values as the shared module", () => {
+    const candles = makeCandles(160, "up");
+    const evidence = analyseTechnical(candles);
+    const expectedRsi = rsi(candles).at(-1) ?? null;
+    const expectedEma21 = ema(closeSeries(candles), 21).at(-1) ?? null;
+    assert.ok(evidence.indicators.rsi14 !== null && expectedRsi !== null);
+    assert.ok(Math.abs(evidence.indicators.rsi14! - expectedRsi!) < 1e-12);
+    assert.ok(evidence.indicators.ema[21] !== null && expectedEma21 !== null);
+    assert.ok(Math.abs(evidence.indicators.ema[21]! - expectedEma21!) < 1e-12);
+    assert.equal(evidence.indicators.rsi14, rsi(candles, 14).at(-1));
+  });
 });

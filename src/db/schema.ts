@@ -87,6 +87,8 @@ export const paperOrdersTable = pgTable("paper_orders", {
   status: text("status").notNull().default("open"), // open | filled | cancelled | rejected
   filledPrice: real("filled_price"),
   reduceOnly: boolean("reduce_only").notNull().default(false),
+  // Idempotency key supplied by the client; every paper order has one.
+  clientOrderId: text("client_order_id").notNull().unique("paper_orders_client_order_id_key"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -103,6 +105,25 @@ export const paperPositionsTable = pgTable("paper_positions", {
   realizedPnl: real("realized_pnl").notNull().default(0),
   openedAt: timestamp("opened_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+/**
+ * Immutable paper fill ledger. One row per position-changing event, so the
+ * paper account can be audited independently of the mutable position row and
+ * the journal (which only records closes).
+ */
+export const paperFillsTable = pgTable("paper_fills", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id"),
+  positionId: uuid("position_id"),
+  symbol: text("symbol").notNull(),
+  side: text("side").notNull(), // long | short
+  kind: text("kind").notNull(), // open | add | reduce | close
+  qty: real("qty").notNull(),
+  price: real("price").notNull(),
+  fee: real("fee").notNull().default(0),
+  realizedPnl: real("realized_pnl").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
 /** Local alert rules evaluated against the live ticker stream. */
@@ -129,7 +150,7 @@ export const alertRulesTable = pgTable("alert_rules", {
  */
 export const liveOrdersTable = pgTable("live_orders", {
   id: uuid("id").primaryKey().defaultRandom(),
-  clientOrderId: text("client_order_id").notNull().unique(),
+  clientOrderId: text("client_order_id").notNull().unique("paper_orders_client_order_id_key"),
   symbol: text("symbol").notNull(),
   side: text("side").notNull(),
   type: text("type").notNull(),

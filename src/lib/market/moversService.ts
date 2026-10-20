@@ -1,4 +1,5 @@
 import { activeDataSource, getCandles, getTickers } from "./service";
+import { MARKET_FANOUT_LIMIT, mapLimit } from "@/lib/data/provider";
 import {
   rankMovers,
   assessMover,
@@ -30,35 +31,29 @@ async function build(source: "live" | "demo"): Promise<MoversReport> {
   const rank = rankMovers(tickers);
   const queue = [...rank.gainers, ...rank.losers];
   const rows = new Map<string, MoverRow>();
-  let index = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(3, queue.length) }, async () => {
-      while (index < queue.length) {
-        const ticker = queue[index++];
-        try {
-          const data = await getCandles(ticker.symbol, "5m", 500);
-          if (data.source !== source) throw Error("Source changed");
-          rows.set(ticker.symbol, {
-            ticker,
-            assessment: assessMover(ticker.symbol, data.candles),
-          });
-        } catch {
-          rows.set(ticker.symbol, {
-            ticker,
-            assessment: {
-              stance: "WAIT",
-              reasons: [
-                "Candle analysis unavailable. A 24-hour move alone is not a trade signal.",
-              ],
-              entry: null,
-              stop: null,
-              barTime: null,
-            },
-          });
-        }
-      }
-    }),
-  );
+  await mapLimit(queue, MARKET_FANOUT_LIMIT, async (ticker) => {
+    try {
+      const data = await getCandles(ticker.symbol, "5m", 500);
+      if (data.source !== source) throw Error("Source changed");
+      rows.set(ticker.symbol, {
+        ticker,
+        assessment: assessMover(ticker.symbol, data.candles),
+      });
+    } catch {
+      rows.set(ticker.symbol, {
+        ticker,
+        assessment: {
+          stance: "WAIT",
+          reasons: [
+            "Candle analysis unavailable. A 24-hour move alone is not a trade signal.",
+          ],
+          entry: null,
+          stop: null,
+          barTime: null,
+        },
+      });
+    }
+  });
   return {
     gainers: rank.gainers.map((t) => rows.get(t.symbol)!),
     losers: rank.losers.map((t) => rows.get(t.symbol)!),

@@ -1,32 +1,14 @@
 import type { Candle } from "@/lib/types";
+import { atr as atrSeries } from "../../indicators";
 import type { ChandelierResult } from "./types";
 
-function trueRange(candles: Candle[], i: number): number {
-  const h = candles[i].high;
-  const l = candles[i].low;
-  const pc = i > 0 ? candles[i - 1].close : candles[i].close;
-  return Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
-}
-
-/** Wilder's ATR. Exported so the AI snapshot and the chart read the same value. */
+/**
+ * NaN-flavoured view of the canonical Wilder ATR. The strategy/chart code
+ * predates the shared module and uses NaN as "unavailable"; the values are the
+ * same series, not a second implementation.
+ */
 export function wilderAtr(candles: Candle[], period: number): number[] {
-  const atr: number[] = new Array(candles.length).fill(NaN);
-  if (candles.length < period + 1) return atr;
-
-  const trs: number[] = [];
-  for (let i = 1; i < candles.length; i++) {
-    trs.push(trueRange(candles, i));
-  }
-
-  let rma = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  atr[period] = rma;
-
-  for (let i = period; i < trs.length; i++) {
-    rma = (rma * (period - 1) + trs[i]) / period;
-    atr[i + 1] = rma;
-  }
-
-  return atr;
+  return atrSeries(candles, period).map((v) => v ?? NaN);
 }
 
 export function chandelierExit(

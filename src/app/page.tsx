@@ -7,6 +7,9 @@ import DecisionReadiness from "@/components/DecisionReadiness";
 import { Activity, ArrowUpRight } from "lucide-react";
 import ChartPanel from "@/components/chart/ChartPanel";
 import ExchangeAccountPanel from "@/components/ExchangeAccountPanel";
+import ResearchPanel from "@/components/ResearchPanel";
+import WatchlistRail from "@/components/watchlist/WatchlistRail";
+import ProviderStatus from "@/components/dashboard/ProviderStatus";
 import { PositionsTable, RiskCard, SignalPanel } from "@/components/panels";
 import { Chip, EmptyState, MetricCard, PremiumPanel, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -24,7 +27,7 @@ interface AccountRes {
 
 export default function OverviewPage() {
   useDisplayCurrency();
-  const { activeSymbol, timeframe, settings, patchSettings } = useApp();
+  const { activeSymbol, timeframe, settings, patchSettings, system } = useApp();
   const router = useRouter();
   const viewport = useViewport();
 
@@ -67,6 +70,16 @@ export default function OverviewPage() {
           <p className="microlabel mb-2">WORKSPACE / OVERVIEW</p>
           <h1 className="text-2xl font-semibold tracking-tight">Your market. In focus.</h1>
           <p className="text-mut text-xs mt-2">Monitor the market, evaluate the evidence, then manage your risk.</p>
+          <div className="flex flex-wrap gap-1.5 mt-3">
+            <Chip tone={settings.mode === "live" ? (settings.liveArmed ? "danger" : "warn") : settings.mode === "paper" ? "warn" : "default"}>
+              {settings.mode === "live" ? (settings.liveArmed ? "LIVE ARMED" : "LIVE / DISARMED") : settings.mode === "paper" ? "PAPER MODE" : "READ ONLY"}
+            </Chip>
+            <Chip>{settings.dataSource.toUpperCase()} DATA</Chip>
+            <Chip>{system?.market?.provider ?? "PROVIDER NOT REPORTED"}</Chip>
+            <Chip tone={settings.mode === "paper" ? "warn" : undefined}>
+              {settings.mode === "live" ? (settings.liveArmed ? "EXECUTION ARMED" : "EXECUTION DISABLED") : "SIMULATED EXECUTION"}
+            </Chip>
+          </div>
         </div>
         <Link href="/chart" className="inline-flex items-center gap-2 bg-accent text-[#071713] rounded-md px-4 py-2.5 text-xs font-semibold">Open workspace <ArrowUpRight size={15} /></Link>
       </header>
@@ -170,6 +183,11 @@ export default function OverviewPage() {
             )}
           </PremiumPanel>
         )}
+      </div>
+      <div className="auto-panels">
+        <WatchlistRail />
+        <ResearchPanel />
+        <ProviderStatus />
       </div>
       {settings.mode === "live" && <ExchangeAccountPanel />}
       <p className="text-[11px] text-dim pb-2">Signals are research candidates, not recommendations. Simulated results do not establish a trading edge.</p>

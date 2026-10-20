@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { api } from "./lib/api";
 import type { AppSettings, LayoutPreset, SystemStatus, Ticker, Timeframe } from "./lib/types";
 import { DEFAULT_SETTINGS } from "./lib/settingsDefaults";
+import { SIDEBAR_STORAGE_KEY } from "./lib/navConfig";
 
 export interface UiNotification {
   id: string;
@@ -101,12 +102,13 @@ export const useApp = create<AppState>((set, get) => ({
   applySettings: (s) => { setDisplayCurrency(s); set({ settings: s, settingsLoaded: true }); },
 
   patchSettings: async (patch, persist = true) => {
+    const previous = get().settings;
     const next = {
-      ...get().settings,
+      ...previous,
       ...patch,
-      modules: { ...get().settings.modules, ...(patch.modules ?? {}) },
-      strategiesEnabled: { ...get().settings.strategiesEnabled, ...(patch.strategiesEnabled ?? {}) },
-      riskLimits: { ...get().settings.riskLimits, ...(patch.riskLimits ?? {}) },
+      modules: { ...previous.modules, ...(patch.modules ?? {}) },
+      strategiesEnabled: { ...previous.strategiesEnabled, ...(patch.strategiesEnabled ?? {}) },
+      riskLimits: { ...previous.riskLimits, ...(patch.riskLimits ?? {}) },
     };
     setDisplayCurrency(next);
     set({ settings: next });
@@ -115,8 +117,15 @@ export const useApp = create<AppState>((set, get) => ({
         const res = await api.post<{ settings: AppSettings }>("/api/settings", patch);
         setDisplayCurrency(res.settings);
         set({ settings: res.settings });
-      } catch {
-        /* keep optimistic value; server cache resyncs on next load */
+      } catch (e) {
+        // Do not leave the UI claiming a safety setting the server rejected.
+        setDisplayCurrency(previous);
+        set({ settings: previous });
+        get().notify({
+          title: "Setting not saved",
+          body: e instanceof Error ? e.message : "The server rejected this change.",
+          tone: "danger",
+        });
       }
     }
   },
@@ -152,9 +161,17 @@ export const useApp = create<AppState>((set, get) => ({
   setPalette: (open) => set({ paletteOpen: open }),
   setHelp: (open) => set({ helpOpen: open }),
   toggleSidebar: () => {
-    // A manual toggle pins the choice for this session (see AppShell).
-    if (typeof window !== "undefined") window.dispatchEvent(new Event("tc:sidebar-pinned"));
-    set((st) => ({ sidebarCollapsed: !st.sidebarCollapsed }));
+    // A manual toggle pins the choice and persists it across reloads.
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("tc:sidebar-pinned"));
+    }
+    set((st) => {
+      const sidebarCollapsed = !st.sidebarCollapsed;
+      if (typeof window !== "undefined") {
+        try { window.localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebarCollapsed ? "1" : "0"); } catch { /* storage may be disabled */ }
+      }
+      return { sidebarCollapsed };
+    });
   },
 }));
 

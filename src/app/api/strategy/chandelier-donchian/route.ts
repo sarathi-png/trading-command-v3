@@ -10,6 +10,7 @@ import { TIMEFRAMES, TF_MINUTES, type Timeframe, type AppSettings } from "@/lib/
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 10;
 
 function getStrategyConfig(settings: AppSettings): ChandelierDonchianConfig {
   const raw = settings.chandelierDonchian;

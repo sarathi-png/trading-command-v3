@@ -195,7 +195,15 @@ describe("backtest job workflow", () => {
   before(() => { invalidateAll(); });
 
   const candles = fixtureCandles(500);
-  const fetchCandles = async () => ({ candles, source: "demo" as const });
+  const candlesEnvelope = (series: Candle[]) => ({
+    candles: series,
+    data: series,
+    provider: "demo" as const,
+    source: "demo" as const,
+    asOf: Date.now(),
+    stale: false,
+  });
+  const fetchCandles = async () => candlesEnvelope(candles);
   const params = {
     symbol: "BTCUSD", timeframe: "15m", config: CONFIG,
     capital: 10000, feeRate: 0.0005, slippage: 0.0001, candleLimit: 500,
@@ -225,7 +233,7 @@ describe("backtest job workflow", () => {
   it("fails (persisted) when history is insufficient", async () => {
     const few = fixtureCandles(MIN_CANDLES - 10);
     const outcome = await createBacktestJob({ ...params, idempotencyKey: "bt_ok_insufficient" }, {
-      fetchCandles: async () => ({ candles: few, source: "demo" as const }),
+      fetchCandles: async () => candlesEnvelope(few),
     });
     assert.equal(outcome.ok, false);
     assert.equal(outcome.job!.status, "failed");

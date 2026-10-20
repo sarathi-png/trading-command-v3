@@ -49,12 +49,15 @@ import {
 import { orderOutcomeKnown } from "@/lib/exchange/errors";
 import { isSupportedSymbol } from "@/lib/exchange/symbols";
 import { evaluateOrderRisk, normalizeRiskLimits } from "@/lib/risk";
-import { getSettings, logAudit } from "@/lib/settings";
+import { getSettings, invalidateSettingsCache, logAudit } from "@/lib/settings";
 import { getRepo } from "@/lib/repo";
-import crypto from "node:crypto";
+import { isValidClientOrderId, newClientOrderId } from "@/lib/orderId";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+// Keep the function inside the free-tier ceiling. A submission that outlives
+// this window is recorded as UNKNOWN and reconciled, never retried blindly.
+export const maxDuration = 10;
 
 /**
  * Realised P&L since UTC midnight for the live account.
@@ -72,10 +75,6 @@ async function liveRealizedPnlToday(): Promise<number | null> {
   return realizedPnlTodayUtc();
 }
 
-/** Request key that makes a submission idempotent across retries. */
-function newClientOrderId(): string {
-  return `tc-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 12)}`;
-}
 
 export async function GET() {
   const settings = await getSettings();
@@ -105,6 +104,9 @@ interface LiveOrderBody {
 }
 
 export async function POST(req: Request) {
+  // Bypass the 5 s settings cache on the live path: a disarm on another
+  // instance must not be ignored because this lambda cached "armed" a moment ago.
+  invalidateSettingsCache();
   const settings = await getSettings();
 
   if (!flags.liveExecution()) {
@@ -136,15 +138,28 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const symbol = String(body.symbol ?? "").toUpperCase();
-  const side = body.side === "sell" ? "sell" : "buy";
-  const type = body.type === "limit_order" ? "limit_order" : "market_order";
-  const size = Math.abs(Number(body.size) || 0);
-  const reduceOnly = Boolean(body.reduce_only);
-  const limitPrice = typeof body.limit_price === "number" ? body.limit_price : null;
+  // Strict enums: an unknown side/type must not be coerced into a trade the
+  // operator did not request.
+  if (body.side !== "buy" && body.side !== "sell") {
+    return Response.json({ error: "side must be 'buy' or 'sell'" }, { status: 400 });
+  }
+  if (body.type !== "market_order" && body.type !== "limit_order") {
+    return Response.json({ error: "type must be 'market_order' or 'limit_order'" }, { status: 400 });
+  }
 
-  if (!symbol || size <= 0) {
-    return Response.json({ error: "symbol and positive size are required" }, { status: 400 });
+  const symbol = String(body.symbol ?? "").toUpperCase();
+  const side = body.side;
+  const type = body.type;
+  const size = Number(body.size);
+  const reduceOnly = Boolean(body.reduce_only);
+  const limitPrice =
+    body.limit_price === undefined || body.limit_price === null ? null : Number(body.limit_price);
+
+  if (!symbol || !Number.isFinite(size) || size <= 0) {
+    return Response.json({ error: "symbol and positive finite size are required" }, { status: 400 });
+  }
+  if (type === "limit_order" && (!Number.isFinite(limitPrice) || (limitPrice as number) <= 0)) {
+    return Response.json({ error: "limit orders require a positive limit_price" }, { status: 400 });
   }
   if (!isSupportedSymbol(symbol)) {
     // Fail before any network call: an unsupported pair must never be mapped
@@ -170,10 +185,16 @@ export async function POST(req: Request) {
   }
 
   // ---- idempotency (Postgres) -------------------------------------------
-  const clientOrderId =
-    typeof body.client_order_id === "string" && body.client_order_id.trim()
-      ? body.client_order_id.trim().slice(0, 64)
-      : newClientOrderId();
+  let clientOrderId = newClientOrderId();
+  if (body.client_order_id !== undefined) {
+    if (!isValidClientOrderId(body.client_order_id)) {
+      return Response.json(
+        { error: "client_order_id must be 1-64 characters of [A-Za-z0-9._:-]" },
+        { status: 400 }
+      );
+    }
+    clientOrderId = body.client_order_id;
+  }
 
   const repo = await getRepo();
   const existing = await repo.findLiveOrderByClientId(clientOrderId);
@@ -188,6 +209,31 @@ export async function POST(req: Request) {
           code: "ORDER_STATUS_UNKNOWN",
           clientOrderId,
           reconcile: `/api/orders/status?clientOrderId=${encodeURIComponent(clientOrderId)}`,
+        },
+        { status: 409 }
+      );
+    }
+    if (existing.status === "pending") {
+      // A claimed row with no venue response is ambiguous: the first request
+      // may still be in flight, or it died before submitting. Never claim success.
+      return Response.json(
+        {
+          error: "A submission with this client_order_id is still pending or was interrupted. Check its status before retrying.",
+          code: "ORDER_IN_PROGRESS",
+          clientOrderId,
+          reconcile: `/api/orders/status?clientOrderId=${encodeURIComponent(clientOrderId)}`,
+        },
+        { status: 409 }
+      );
+    }
+    if (existing.status === "failed") {
+      // The venue provably refused this key. Returning ok:true here would tell
+      // the operator an order exists when nothing does; a retry needs a NEW key.
+      return Response.json(
+        {
+          error: "This client_order_id refers to a submission the venue refused. Nothing was created; retry with a new id.",
+          code: "ORDER_FAILED_TERMINAL",
+          clientOrderId,
         },
         { status: 409 }
       );

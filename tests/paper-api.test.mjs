@@ -179,17 +179,36 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.ok(ticker?.price > 0);
     const qty = Math.min(0.001, 1000 / ticker.price);
 
+    const firstClientOrderId = `test-${Date.now()}-a`;
     const placed = await json("/api/paper", {
       action: "place",
       symbol: "BTCUSD",
       side: "buy",
       type: "market",
       qty,
+      client_order_id: firstClientOrderId,
     }).then((response) => response.json());
     assert.equal(placed.ok, true);
     assert.equal(placed.status, "filled");
     assert.equal(placed.positions.length, 1);
+    assert.equal(placed.fills.length, 1, "one immutable fill for the opening market order");
+    assert.equal(placed.fills[0].kind, "open");
+    assert.ok(placed.fills[0].fee > 0);
     const position = placed.positions[0];
+
+    // A retried submission with the same key must not open a second position.
+    const duplicate = await json("/api/paper", {
+      action: "place",
+      symbol: "BTCUSD",
+      side: "buy",
+      type: "market",
+      qty,
+      client_order_id: firstClientOrderId,
+    }).then((response) => response.json());
+    assert.equal(duplicate.deduplicated, true);
+    assert.equal(duplicate.orderId, placed.orderId);
+    assert.equal(duplicate.positions.length, 1);
+    assert.equal(duplicate.fills.length, 1, "a retry must not write a second fill");
 
     const closed = await json("/api/paper", {
       action: "close",
@@ -201,6 +220,12 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     const paperState = await request("/api/paper").then((response) => response.json());
     assert.equal(paperState.positions.length, 0);
     assert.ok(paperState.orders.some((order) => order.status === "filled"));
+    assert.equal(paperState.fills.length, 2, "open + close");
+    assert.deepEqual(paperState.fills.map((f) => f.kind).sort(), ["close", "open"]);
+    for (const fill of paperState.fills) {
+      assert.ok(Number.isFinite(fill.fee) && fill.fee >= 0);
+      assert.ok(Number.isFinite(fill.realizedPnl));
+    }
 
     const journal = await request("/api/journal?mode=paper").then((response) => response.json());
     assert.equal(journal.entries.length, 1);
@@ -213,8 +238,35 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.deepEqual(journal.entries[0].predictionContext, [], "no invented AI association");
     assert.equal(journal.sync.configured, false);
     assert.equal(journal.fills.length, 0, "no invented CoinDCX activity");
+
+    const analytics = await request(
+      "/api/analytics?symbol=BTCUSD&direction=long&page=1&pageSize=25",
+      { headers: { "x-tc-workspace": "paper" } }
+    ).then((response) => response.json());
+    assert.equal(analytics.mode, "paper");
+    assert.equal(analytics.metrics.totalTrades, 1, "server metrics count the closed paper trade");
+    assert.equal(analytics.metrics.wins + analytics.metrics.losses, 1);
+    assert.equal(analytics.total, 1);
+    assert.equal(analytics.page, 1);
+    assert.equal(analytics.pageCount, 1);
+    assert.equal(analytics.entries[0].symbol, "BTCUSD");
+    assert.equal(analytics.entries[0].direction, "long");
+    assert.match(analytics.notice, /Paper workspace/);
+
+    const emptyAnalytics = await request(
+      "/api/analytics?symbol=ETHUSD&page=1&pageSize=25",
+      { headers: { "x-tc-workspace": "paper" } }
+    ).then((response) => response.json());
+    assert.equal(emptyAnalytics.metrics.totalTrades, 0, "filters are applied before aggregation");
+    assert.equal(emptyAnalytics.entries.length, 0);
+    // The watchlist is user data: saving it must round-trip, not be replaced by
+    // the full venue symbol list (the previous behaviour made saving a no-op).
+    const watchlist = ["BTCUSD", "DOGEUSD"];
+    assert.equal((await json("/api/settings", { watchlist })).status, 200);
+    assert.deepEqual((await request("/api/settings").then(r=>r.json())).settings.watchlist, watchlist);
+    assert.equal((await json("/api/settings", { watchlist: ["NOTREALUSD"] })).status, 400);
     const known = (await request("/api/market/tickers").then(r=>r.json())).known;
-    assert.deepEqual((await request("/api/settings").then(r=>r.json())).settings.watchlist, known);
+    assert.ok(known.includes("BTCUSD"));
     assert.equal((await json("/api/journal", { action: "seed" })).status, 405);
     assert.equal((await json("/api/journal", { symbol: "BTCUSD", entry: 1, pnl: 10000 })).status, 405);
     assert.equal((await request(`/api/journal?id=${journal.entries[0].id}`, { method: "DELETE" })).status, 405);
@@ -233,8 +285,8 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.equal(unchanged.entries[0].entry, journal.entries[0].entry, "INR does not change execution units");
 
     // Partial closes and the remainder must charge each commission/profit once.
-    await json("/api/paper", {action:"place",symbol:"BTCUSD",side:"buy",type:"market",qty:qty*2});
-    await json("/api/paper", {action:"place",symbol:"BTCUSD",side:"sell",type:"market",qty,reduceOnly:true});
+    await json("/api/paper", {action:"place",symbol:"BTCUSD",side:"buy",type:"market",qty:qty*2,client_order_id:`test-${Date.now()}-b`});
+    await json("/api/paper", {action:"place",symbol:"BTCUSD",side:"sell",type:"market",qty,reduceOnly:true,client_order_id:`test-${Date.now()}-c`});
     const remainder = await request("/api/paper").then(r=>r.json());
     assert.equal(remainder.positions.length, 1);
     await json("/api/paper", {action:"close",symbol:"BTCUSD",positionId:remainder.positions[0].id});

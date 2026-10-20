@@ -5,6 +5,7 @@ import { importedFills, journalSyncStatus, withJournalContext } from "@/lib/jour
 import { annotationPatch, reservedJournalTag } from "@/lib/journal/annotations";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 10;
 export async function GET(req: Request) {
   const url = new URL(req.url), repo = await getRepo();
   const mode = await requestWorkspace() ?? parseWorkspace(url.searchParams.get("mode")) ?? (await getSettings()).mode;

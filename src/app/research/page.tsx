@@ -193,7 +193,7 @@ function ResearchResult({ run, issues }: { run: ResearchRun; issues: { message: 
       title: "Enable for paper trading?",
       body: (
         <div className="space-y-2">
-          <p>This writes the validated configuration into the Paper workspace's Chandelier + Donchian settings, where the existing paper-trading engine and risk limits will use it.</p>
+          <p>This writes the validated configuration into the Paper workspace&apos;s Chandelier + Donchian settings, where the existing paper-trading engine and risk limits will use it.</p>
           <p className="text-dn">No order is placed. You will still place every paper order by hand, and live execution is never armed by this action.</p>
         </div>
       ),

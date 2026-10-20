@@ -17,7 +17,7 @@ dist/
 next-env.d.ts
 
 # Local file-backed store (runtime data, see src/lib/fileStore.ts)
-data/
+/data/
 
 # Logs
 *.log
