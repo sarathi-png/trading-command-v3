@@ -22,6 +22,12 @@ Three things it does that most retail terminals do not:
    candlestick and Heikin-Ashi charts, and every call is recorded so its outcome
    can be scored against what price actually did.
 
+A fourth workflow lets you **research a strategy in plain English** (`/research`)
+and **backtest it over real candles** (`/backtests`) with full metrics, an
+explicit fill model and optional walk-forward / out-of-sample separation —
+before anything is armed. A validated config can be handed to **paper trading**
+with one explicit click, and never to live. See `docs/AI_RESEARCH.md`.
+
 > **Latest review (October 2026):** strategy correctness, runtime and interface audit —
 > findings, fixes, design benchmark and the forward roadmap are in
 > `docs/AUDIT_2026-10.md`. Headline items: Donchian windowing, backtest look-ahead and
@@ -127,6 +133,7 @@ be disabled. Full list in `.env.example`.
 - `docs/PAPER_TRADING.md` — paper engine semantics
 - `docs/WEBHOOKS.md` — optional TradingView webhook (disabled by default)
 - `docs/AI_PREDICTION.md` — AI signal prediction: 5m Chandelier/Donchian calls on both charts, free-tier keys, guard rails, scoring
+- `docs/AI_RESEARCH.md` — AI-assisted strategy research (`/research`) and backtesting (`/backtests`): validated reports, full metrics, walk-forward/OOS, paper handoff
 - `docs/DESIGN_BENCHMARK.md` — premium-interface benchmark, anti-pattern audit, capability matrix
 - `docs/FUTURE_ROADMAP.md` — competitive landscape, gap analysis, unique/futuristic roadmap
 - `docs/DEPLOYMENT.md` — local verification, health checks, production guardrails

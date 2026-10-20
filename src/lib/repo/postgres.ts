@@ -8,16 +8,19 @@
  * `@/db` is imported lazily: it throws at module load when DATABASE_URL is
  * absent, and this file must stay importable on a machine with no database.
  */
+import { randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
   alertRulesTable,
   auditLogTable,
+  backtestJobsTable,
   drawingsTable,
   journalTable,
   liveOrdersTable,
   paperFillsTable,
   paperOrdersTable,
   paperPositionsTable,
+  researchRunsTable,
   settingsTable,
   signalsTable,
 } from "@/db/schema";
@@ -25,6 +28,7 @@ import type {
   AlertRuleInsert,
   AlertRuleRow,
   AuditRow,
+  BacktestJob,
   DrawingInsert,
   DrawingRow,
   JournalInsert,
@@ -37,6 +41,7 @@ import type {
   PaperPositionInsert,
   PaperPositionRow,
   Repo,
+  ResearchRun,
   SignalRow,
   SignalInsert,
 } from "./types";
@@ -273,6 +278,58 @@ function toLiveOrder(r: typeof liveOrdersTable.$inferSelect): LiveOrderRow {
     response: (r.response as Record<string, unknown> | null) ?? null,
     createdAt: iso(r.createdAt, EPOCH),
     updatedAt: iso(r.updatedAt, EPOCH),
+  };
+}
+
+function toResearchRun(r: typeof researchRunsTable.$inferSelect): ResearchRun {
+  return {
+    id: r.id,
+    workspace: r.workspace,
+    symbol: r.symbol,
+    timeframe: r.timeframe,
+    strategyType: r.strategyType as ResearchRun["strategyType"],
+    objective: r.objective,
+    constraints: r.constraints ?? "",
+    provider: r.provider,
+    model: r.model,
+    status: r.status as ResearchRun["status"],
+    report: (r.report as ResearchRun["report"]) ?? null,
+    marketEvidence: (r.marketEvidence as ResearchRun["marketEvidence"]) ?? null,
+    error: r.error ?? null,
+    revisionOf: r.revisionOf ?? null,
+    createdAt: iso(r.createdAt, EPOCH),
+    updatedAt: iso(r.updatedAt, EPOCH),
+  };
+}
+
+function toBacktestJob(r: typeof backtestJobsTable.$inferSelect): BacktestJob {
+  return {
+    id: r.id,
+    idempotencyKey: r.idempotencyKey,
+    workspace: r.workspace,
+    symbol: r.symbol,
+    timeframe: r.timeframe,
+    config: (r.config as BacktestJob["config"]),
+    capital: r.capital,
+    feeRate: r.feeRate,
+    slippage: r.slippage,
+    candleLimit: r.candleLimit,
+    walkForward: r.walkForward,
+    trainWindow: r.trainWindow ?? null,
+    testWindow: r.testWindow ?? null,
+    status: r.status as BacktestJob["status"],
+    segmentsTotal: r.segmentsTotal,
+    segmentsDone: r.segmentsDone,
+    result: (r.result as BacktestJob["result"]) ?? null,
+    segmentResults: (r.segmentResults as BacktestJob["segmentResults"]) ?? null,
+    dataWarnings: arr<string>(r.dataWarnings),
+    fillModel: r.fillModel,
+    researchRunId: r.researchRunId ?? null,
+    error: r.error ?? null,
+    createdAt: iso(r.createdAt, EPOCH),
+    updatedAt: iso(r.updatedAt, EPOCH),
+    startedAt: isoOrNull(r.startedAt),
+    completedAt: isoOrNull(r.completedAt),
   };
 }
 
@@ -854,5 +911,165 @@ export const postgresRepo: Repo = {
         updatedAt: patch.updatedAt ? toDate(patch.updatedAt) : new Date(),
       })
       .where(eq(liveOrdersTable.clientOrderId, clientOrderId));
+  },
+
+  // ---- AI research runs ----
+  async listResearchRuns(opts) {
+    const db = await getDb();
+    const limit = Math.min(opts?.limit ?? 100, 500);
+    const rows = opts?.symbol
+      ? await db
+          .select()
+          .from(researchRunsTable)
+          .where(eq(researchRunsTable.symbol, opts.symbol))
+          .orderBy(desc(researchRunsTable.createdAt))
+          .limit(limit)
+      : await db
+          .select()
+          .from(researchRunsTable)
+          .orderBy(desc(researchRunsTable.createdAt))
+          .limit(limit);
+    return rows.map(toResearchRun);
+  },
+  async insertResearchRun(value) {
+    const db = await getDb();
+    const [row] = await db
+      .insert(researchRunsTable)
+      .values({
+        id: value.id ?? randomUUID(),
+        workspace: value.workspace ?? "paper",
+        symbol: value.symbol,
+        timeframe: value.timeframe,
+        strategyType: value.strategyType,
+        objective: value.objective,
+        constraints: value.constraints ?? "",
+        provider: value.provider,
+        model: value.model,
+        status: value.status,
+        report: value.report ?? null,
+        marketEvidence: value.marketEvidence ?? null,
+        error: value.error ?? null,
+        revisionOf: value.revisionOf ?? null,
+        createdAt: toDate(value.createdAt) ?? new Date(),
+        updatedAt: toDate(value.updatedAt) ?? new Date(),
+      })
+      .returning();
+    return toResearchRun(row);
+  },
+  async getResearchRun(id) {
+    const db = await getDb();
+    const [row] = await db
+      .select()
+      .from(researchRunsTable)
+      .where(eq(researchRunsTable.id, id))
+      .limit(1);
+    return row ? toResearchRun(row) : null;
+  },
+  async updateResearchRun(id, patch) {
+    const db = await getDb();
+    const [row] = await db
+      .update(researchRunsTable)
+      .set({
+        status: patch.status,
+        report: patch.report,
+        marketEvidence: patch.marketEvidence,
+        error: patch.error,
+        model: patch.model,
+        provider: patch.provider,
+        updatedAt: patch.updatedAt ? toDate(patch.updatedAt) : new Date(),
+      })
+      .where(eq(researchRunsTable.id, id))
+      .returning();
+    return row ? toResearchRun(row) : null;
+  },
+
+  // ---- backtest jobs ----
+  async listBacktestJobs(opts) {
+    const db = await getDb();
+    const limit = Math.min(opts?.limit ?? 100, 500);
+    const rows = opts?.symbol
+      ? await db
+          .select()
+          .from(backtestJobsTable)
+          .where(eq(backtestJobsTable.symbol, opts.symbol))
+          .orderBy(desc(backtestJobsTable.createdAt))
+          .limit(limit)
+      : await db
+          .select()
+          .from(backtestJobsTable)
+          .orderBy(desc(backtestJobsTable.createdAt))
+          .limit(limit);
+    return rows.map(toBacktestJob);
+  },
+  async insertBacktestJob(value) {
+    const db = await getDb();
+    const [row] = await db
+      .insert(backtestJobsTable)
+      .values({
+        id: value.id ?? randomUUID(),
+        idempotencyKey: value.idempotencyKey,
+        workspace: value.workspace ?? "paper",
+        symbol: value.symbol,
+        timeframe: value.timeframe,
+        config: value.config,
+        capital: value.capital,
+        feeRate: value.feeRate,
+        slippage: value.slippage,
+        candleLimit: value.candleLimit,
+        walkForward: value.walkForward ?? false,
+        trainWindow: value.trainWindow ?? null,
+        testWindow: value.testWindow ?? null,
+        status: value.status ?? "queued",
+        segmentsTotal: value.segmentsTotal ?? 1,
+        segmentsDone: value.segmentsDone ?? 0,
+        result: value.result ?? null,
+        segmentResults: value.segmentResults ?? null,
+        dataWarnings: value.dataWarnings ?? [],
+        fillModel: value.fillModel,
+        researchRunId: value.researchRunId ?? null,
+        error: value.error ?? null,
+        createdAt: toDate(value.createdAt) ?? new Date(),
+        updatedAt: toDate(value.updatedAt) ?? new Date(),
+      })
+      .returning();
+    return toBacktestJob(row);
+  },
+  async getBacktestJob(id) {
+    const db = await getDb();
+    const [row] = await db
+      .select()
+      .from(backtestJobsTable)
+      .where(eq(backtestJobsTable.id, id))
+      .limit(1);
+    return row ? toBacktestJob(row) : null;
+  },
+  async findBacktestJobByKey(idempotencyKey) {
+    const db = await getDb();
+    const [row] = await db
+      .select()
+      .from(backtestJobsTable)
+      .where(eq(backtestJobsTable.idempotencyKey, idempotencyKey))
+      .orderBy(desc(backtestJobsTable.createdAt))
+      .limit(1);
+    return row ? toBacktestJob(row) : null;
+  },
+  async updateBacktestJob(id, patch) {
+    const db = await getDb();
+    const [row] = await db
+      .update(backtestJobsTable)
+      .set({
+        status: patch.status,
+        segmentsDone: patch.segmentsDone,
+        result: patch.result,
+        segmentResults: patch.segmentResults,
+        dataWarnings: patch.dataWarnings,
+        error: patch.error,
+        startedAt: patch.startedAt ? toDate(patch.startedAt) : undefined,
+        completedAt: patch.completedAt ? toDate(patch.completedAt) : undefined,
+        updatedAt: new Date(),
+      })
+      .where(eq(backtestJobsTable.id, id))
+      .returning();
+    return row ? toBacktestJob(row) : null;
   },
 };

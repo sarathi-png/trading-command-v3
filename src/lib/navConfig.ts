@@ -7,8 +7,8 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  ArrowUpDown, BarChart3, Bell, BookOpen, Bot, CandlestickChart,
-  LayoutDashboard, Layers, LineChart, Settings, Target,
+  ArrowUpDown, BarChart3, Beaker, Bell, BookOpen, Bot, BrainCircuit,
+  CandlestickChart, LayoutDashboard, Layers, LineChart, Settings, Target,
 } from "lucide-react";
 
 export interface NavItem {
@@ -34,6 +34,8 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/positions", label: "POSITIONS", shortLabel: "Positions", paletteLabel: "Show Positions", hint: "P", icon: Layers, mobile: true },
   { href: "/orders", label: "ORDERS", shortLabel: "Orders", paletteLabel: "Show Orders", icon: ArrowUpDown },
   { href: "/strategy", label: "STRATEGY", shortLabel: "Signals", paletteLabel: "Open Strategy", icon: Target },
+  { href: "/research", label: "AI RESEARCH", shortLabel: "Research", paletteLabel: "Open AI Research", icon: BrainCircuit },
+  { href: "/backtests", label: "BACKTESTS", shortLabel: "Backtests", paletteLabel: "Open Backtests", icon: Beaker },
   { href: "/journal", label: "JOURNAL", shortLabel: "Journal", paletteLabel: "Open Trade Journal", hint: "J", icon: BookOpen },
   { href: "/analytics", label: "ANALYTICS", shortLabel: "Analytics", paletteLabel: "Open Analytics", icon: BarChart3 },
   { href: "/alerts", label: "ALERTS", shortLabel: "Alerts", paletteLabel: "Open Alerts", hint: "A", icon: Bell },

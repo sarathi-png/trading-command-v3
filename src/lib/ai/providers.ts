@@ -30,6 +30,12 @@ export interface CallOptions {
   structured?: boolean;
   /** Caller-provided fetch, so tests never touch the network. */
   fetchImpl?: typeof fetch;
+  /**
+   * Optional prompt override for non-prediction features (strategy
+   * research). The default prediction prompt stays untouched when
+   * absent, so the signal path is unchanged.
+   */
+  prompt?: { system: string; user: string };
 }
 
 function classifyStatus(status: number, body: string): { kind: AiFailureKind; error: string } {
@@ -70,8 +76,8 @@ export async function callProvider(
   const body: Record<string, unknown> = {
     model,
     messages: [
-      { role: "system", content: systemPrompt() },
-      { role: "user", content: userPrompt(context) },
+      { role: "system", content: options.prompt?.system ?? systemPrompt() },
+      { role: "user", content: options.prompt?.user ?? userPrompt(context) },
     ],
     temperature: 0.2,
     // Give reasoning models room to think AND then emit their final JSON answer.

@@ -150,4 +150,24 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     term: "Slippage and fees",
     plain: "Backtests charge a fee and a slippage assumption per side. Funding, partial fills and latency are not modelled, so treat results as approximate.",
   },
+  backtestConfig: {
+    term: "Backtest configuration",
+    plain: "The exact indicator settings, capital, leverage, risk and cost assumptions a backtest ran with, plus the engine version — stored so the run can be reproduced.",
+  },
+  fillModel: {
+    term: "Fill model",
+    plain: "How the backtest assumes orders execute: signals on closed candles, fills at the next candle's open, stops checked on the prior bar. No imaginary intra-bar prices.",
+  },
+  walkForward: {
+    term: "Walk-forward validation",
+    plain: "The sample is split into folds; each fold is tested on data its fixed parameters never saw. It checks whether the setup generalises — it does not re-fit parameters, so it is validation, not optimisation.",
+  },
+  outOfSample: {
+    term: "Out-of-sample",
+    plain: "Data the strategy was never evaluated on while being designed. Results on out-of-sample folds are more trustworthy than results on the data that shaped the idea.",
+  },
+  lookAheadBias: {
+    term: "Look-ahead bias",
+    plain: "Accidentally using a future candle in a past decision. This engine evaluates each bar using only earlier bars, so a signal can never be affected by data that had not printed yet.",
+  },
 };

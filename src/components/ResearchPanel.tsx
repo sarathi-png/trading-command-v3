@@ -2,7 +2,7 @@
 import { Chip, Panel, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { usePoll } from "@/lib/hooks";
-import type { ResearchEnvelope } from "@/lib/research/service";
+import type { ResearchEnvelope } from "@/lib/research/macro";
 
 /**
  * Macro + news research panel.
@@ -12,7 +12,7 @@ import type { ResearchEnvelope } from "@/lib/research/service";
  * or an invented headline.
  */
 export default function ResearchPanel() {
-  const { data, error } = usePoll(() => api.get<ResearchEnvelope>("/api/research"), 60_000);
+  const { data, error } = usePoll(() => api.get<ResearchEnvelope>("/api/research/macro"), 60_000);
 
   if (error) {
     return (
