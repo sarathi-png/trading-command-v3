@@ -6,10 +6,10 @@ import {
 import {
   Crosshair, Eye, EyeOff, Lock, LockOpen, Minus, MousePointer2,
   MoveUpRight, MoveVertical, Square, Target, Trash2, TrendingUp, Type,
-  CandlestickChart,
+  CandlestickChart, History, BarChart3,
 } from "lucide-react";
 import type {
-  IPriceLine, ISeriesApi, SeriesMarker, Time as LTime,
+  IChartApi, IPriceLine, ISeriesApi, SeriesMarker, Time as LTime,
 } from "lightweight-charts";
 import { api } from "@/lib/api";
 import { cx, fmtPrice } from "@/lib/format";
@@ -17,7 +17,9 @@ import { useApp } from "@/stores";
 import { useViewport } from "@/lib/useResponsive";
 import { activeChartSignal, analysisBelongsToChart } from "@/lib/chartScope";
 import { TIMEFRAMES } from "@/lib/types";
-import type { Analysis, Candle, Drawing, DrawingType, Timeframe } from "@/lib/types";
+import type { Analysis, Candle, Drawing, DrawingType, JournalEntry, Timeframe } from "@/lib/types";
+import type { BacktestTrade } from "@/lib/strategy/v2/types";
+import { backtestTradeMarkers, emaLine, journalTradeMarkers } from "@/lib/chart/overlays";
 import { DrawLayer, type HitResult } from "./drawLayer";
 import { toHeikinAshi } from "@/lib/strategy/v2/heikin-ashi";
 import ChartLegend from "./ChartLegend";
@@ -72,6 +74,11 @@ export default function ChartPanel({
   const [color, setColor] = useState(COLORS[0]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
+  const [showJournalTrades, setShowJournalTrades] = useState(true);
+  const [showBacktest, setShowBacktest] = useState(false);
+  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
+  const [backtestTrades, setBacktestTrades] = useState<BacktestTrade[]>([]);
+  const [displayVersion, setDisplayVersion] = useState(0);
   const chartType = initialChartType;
   const analysis = suppliedAnalysis && suppliedAnalysis.symbol === symbol && suppliedAnalysis.timeframe === timeframe &&
     analysisBelongsToChart(suppliedAnalysis, chartType === "heikin-ashi" ? "heikin-ashi" : "candles") ? suppliedAnalysis : null;
@@ -94,6 +101,8 @@ export default function ChartPanel({
   const linesRef = useRef<IPriceLine[]>([]);
   const overlayLinesRef = useRef<IPriceLine[]>([]);
   const candlesRef = useRef<Candle[]>([]);
+  const displayCandlesRef = useRef<Candle[]>([]);
+  const emaLinesRef = useRef<ISeriesApi<"Line">[]>([]);
   const drawingsRef = useRef<Drawing[]>(drawings);
   const toolRef = useRef<Tool>(tool);
   const colorRef = useRef(color);
@@ -250,7 +259,7 @@ export default function ChartPanel({
     if (!ready) return;
     // Resource switch: never show a prior symbol/source as the current chart.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    candlesRef.current = []; setLastCandle(null); setHover(null); applyCandles([]);
+    candlesRef.current = []; displayCandlesRef.current = []; setLastCandle(null); setHover(null); applyCandles([]);
     let stop = false;
     const load = async () => {
       try {
@@ -260,8 +269,10 @@ export default function ChartPanel({
         if (stop) return;
         candlesRef.current = res.candles;
         const displayCandles = chartType === "heikin-ashi" ? toHeikinAshi(res.candles) : res.candles;
+        displayCandlesRef.current = displayCandles;
         setLastCandle(displayCandles.at(-1) ?? null);
         applyCandles(displayCandles);
+        setDisplayVersion((v) => v + 1);
         setError(null);
       } catch (e) {
         if (!stop) setError(e instanceof Error ? e.message : "Candles unavailable");
@@ -396,13 +407,72 @@ export default function ChartPanel({
     }
   }, [strategyOverlay, showStrategyOverlay, ready, labelMode, showAllLabels]);
 
+  /* ---------------- EMA lines from the shared indicator module ---------------- */
+  useEffect(() => {
+    const chart = chartRef.current as unknown as IChartApi | null;
+    const LWC = lwcRef.current;
+    if (!chart || !LWC || !ready) return;
+    const clear = () => {
+      for (const line of emaLinesRef.current) {
+        try { chart.removeSeries(line); } catch { /* chart already disposed */ }
+      }
+      emaLinesRef.current = [];
+    };
+    clear();
+    if (!showStrategyOverlay) return clear;
+    const candles = displayCandlesRef.current;
+    for (const [period, colorV] of [[21, "#57E6D2"], [50, "#9AB2CE"]] as const) {
+      const data = emaLine(candles, period);
+      if (!data.length) continue;
+      const line = chart.addSeries(LWC.LineSeries, {
+        color: colorV, lineWidth: 1, priceLineVisible: false,
+        lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+      line.setData(data.map((p) => ({ time: p.time as never, value: p.value })));
+      emaLinesRef.current.push(line);
+    }
+    return clear;
+  }, [showStrategyOverlay, ready, displayVersion]);
+
+  /* ---------------- journal trade markers ---------------- */
+  useEffect(() => {
+    let stop = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setJournalEntries([]);
+    if (!showJournalTrades) return;
+    const load = async () => {
+      try {
+        const res = await api.get<{ entries: JournalEntry[] }>(`/api/journal?symbol=${symbol}`);
+        if (!stop) setJournalEntries(res.entries ?? []);
+      } catch { if (!stop) setJournalEntries([]); }
+    };
+    void load();
+    const id = setInterval(() => void load(), 60_000);
+    return () => { stop = true; clearInterval(id); };
+  }, [symbol, showJournalTrades, settings.mode]);
+
+  /* ---------------- backtest markers (separate toggle) ---------------- */
+  useEffect(() => {
+    let stop = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBacktestTrades([]);
+    if (!showBacktest) return;
+    const params = new URLSearchParams({
+      symbol, timeframe, backtest: "true",
+      chartType: chartType === "heikin-ashi" ? "heikin-ashi" : "candles",
+    });
+    api.get<{ backtest: { trades: BacktestTrade[] } | null }>(`/api/strategy/chandelier-donchian?${params}`)
+      .then((res) => { if (!stop) setBacktestTrades(res.backtest?.trades ?? []); })
+      .catch(() => { if (!stop) setBacktestTrades([]); });
+    return () => { stop = true; };
+  }, [showBacktest, symbol, timeframe, chartType, settings.dataSource, settings.chandelierDonchian]);
+
   /* ---------------- markers (structure + signal) ---------------- */
   useEffect(() => {
     const series = seriesRef.current as unknown as ISeriesApi<"Candlestick"> | null;
     if (!series || !markersRef.current) return;
-    if (!analysis) { markersRef.current.setMarkers([]); return; }
     const markers: SeriesMarker<LTime>[] = [];
-    if (settings.modules.marketStructure !== false) {
+    if (analysis && settings.modules.marketStructure !== false) {
       for (const s of analysis.swings.slice(-6)) {
         const isHigh = s.kind === "HH" || s.kind === "LH";
         markers.push({
@@ -415,22 +485,34 @@ export default function ChartPanel({
         });
       }
     }
-    const primary = activeChartSignal(analysis.signals);
-    const candles = candlesRef.current;
-    if (primary && candles.length > 1) {
-      const lastClosed = candles[candles.length - 2];
+    if (analysis) {
+      const primary = activeChartSignal(analysis.signals);
+      const candles = candlesRef.current;
+      if (primary && candles.length > 1) {
+        const lastClosed = candles[candles.length - 2];
+        markers.push({
+          time: lastClosed.time as never,
+          position: primary.status === "LONG_SETUP" ? "belowBar" : "aboveBar",
+          color: primary.status === "LONG_SETUP" ? "#2FD388" : "#F0524F",
+          shape: primary.status === "LONG_SETUP" ? "arrowUp" : "arrowDown",
+          text: primary.status === "LONG_SETUP" ? "LONG SETUP" : "SHORT SETUP",
+          size: 1.1,
+        });
+      }
+    }
+    const tradeSources = [
+      ...(showJournalTrades ? journalTradeMarkers(journalEntries, symbol) : []),
+      ...(showBacktest ? backtestTradeMarkers(backtestTrades) : []),
+    ];
+    for (const m of tradeSources) {
       markers.push({
-        time: lastClosed.time as never,
-        position: primary.status === "LONG_SETUP" ? "belowBar" : "aboveBar",
-        color: primary.status === "LONG_SETUP" ? "#2FD388" : "#F0524F",
-        shape: primary.status === "LONG_SETUP" ? "arrowUp" : "arrowDown",
-        text: primary.status === "LONG_SETUP" ? "LONG SETUP" : "SHORT SETUP",
-        size: 1.1,
+        time: m.time as never, position: m.position, color: m.color,
+        shape: m.shape, text: m.text, size: m.size,
       });
     }
     markers.sort((a, b) => (a.time as number) - (b.time as number));
     markersRef.current?.setMarkers(markers);
-  }, [analysis, ready, settings.modules.marketStructure]);
+  }, [analysis, ready, settings.modules.marketStructure, showJournalTrades, journalEntries, showBacktest, backtestTrades, symbol]);
 
   /* ---------------- pointer interactions ---------------- */
   useEffect(() => {
@@ -684,6 +766,30 @@ export default function ChartPanel({
             )}
           >
             <CandlestickChart size={14} />
+          </button>
+          <button
+            onClick={() => setShowJournalTrades((v) => !v)}
+            title="Toggle journal trade markers"
+            aria-label="Toggle journal trade markers"
+            aria-pressed={showJournalTrades}
+            className={cx(
+              "p-1.5 rounded flex-none",
+              showJournalTrades ? "bg-accent-dim text-accent" : "text-dim hover:text-ink hover:bg-panel2"
+            )}
+          >
+            <History size={14} />
+          </button>
+          <button
+            onClick={() => setShowBacktest((v) => !v)}
+            title="Toggle backtest markers (separate from real trades)"
+            aria-label="Toggle backtest markers"
+            aria-pressed={showBacktest}
+            className={cx(
+              "p-1.5 rounded flex-none",
+              showBacktest ? "bg-accent-dim text-accent" : "text-dim hover:text-ink hover:bg-panel2"
+            )}
+          >
+            <BarChart3 size={14} />
           </button>
           <div className="hidden md:block border-t border-edge my-1 mx-1" />
           <button
