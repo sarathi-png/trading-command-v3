@@ -126,7 +126,8 @@ be disabled. Full list in `.env.example`.
 - `docs/AI_PREDICTION.md` — AI signal prediction: 5m Chandelier/Donchian calls on both charts, free-tier keys, guard rails, scoring
 - `docs/DESIGN_BENCHMARK.md` — premium-interface benchmark, anti-pattern audit, capability matrix
 - `docs/FUTURE_ROADMAP.md` — competitive landscape, gap analysis, unique/futuristic roadmap
-- `docs/DEPLOYMENT.md` — local, Docker, Cloudflare Tunnel
+- `docs/DEPLOYMENT.md` — local verification, health checks, production guardrails
+- `docs/LIMITS.md` — hosting/trading/data/backtest limits and honest capability map
 
 ## Keyboard
 

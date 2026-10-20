@@ -152,6 +152,10 @@ export const fileRepo: Repo = {
       return false;
     }
   },
+  async schemaReady() {
+    // The JSON store has no migrations; its shape is owned by this code.
+    return { ok: true, missing: [] };
+  },
 
   // ---- settings ----
   async getSetting(key) {

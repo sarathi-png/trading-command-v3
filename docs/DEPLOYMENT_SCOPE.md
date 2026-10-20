@@ -3,6 +3,8 @@
 This deployment is intentionally **Vercel + Neon PostgreSQL only**. It does not
 run Python, Docker, a VPS, or a second host.
 
+See `docs/LIMITS.md` for the full limits list.
+
 ## What runs here
 
 | Capability | Status | Notes |

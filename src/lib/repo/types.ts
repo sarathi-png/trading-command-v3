@@ -80,6 +80,8 @@ export interface Repo {
   readonly backend: "postgres" | "file";
   /** Cheap liveness probe used by /api/health and /api/system. */
   probe(): Promise<boolean>;
+  /** Readiness check for the migrations this build depends on. */
+  schemaReady(): Promise<{ ok: boolean; missing: string[] }>;
 
   // ---- settings (key/value) ----
   getSetting(key: string): Promise<unknown | null>;

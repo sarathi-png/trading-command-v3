@@ -264,6 +264,33 @@ export const postgresRepo: Repo = {
   probe() {
     return probePostgres();
   },
+  async schemaReady() {
+    try {
+      const db = await getDb();
+      const result = await db.execute(sql`
+        select
+          exists(
+            select 1 from information_schema.columns
+            where table_schema = 'public' and table_name = 'paper_orders'
+              and column_name = 'client_order_id'
+          ) as has_client_order_id,
+          exists(
+            select 1 from information_schema.tables
+            where table_schema = 'public' and table_name = 'paper_fills'
+          ) as has_paper_fills
+      `);
+      const rows = Array.isArray(result)
+        ? (result as Record<string, unknown>[])
+        : ((result as unknown as { rows?: Record<string, unknown>[] }).rows ?? []);
+      const row = rows[0] ?? {};
+      const missing: string[] = [];
+      if (!row.has_client_order_id) missing.push("paper_orders.client_order_id");
+      if (!row.has_paper_fills) missing.push("paper_fills");
+      return { ok: missing.length === 0, missing };
+    } catch {
+      return { ok: false, missing: ["schema probe failed"] };
+    }
+  },
 
   // ---- settings ----
   async getSetting(key) {
