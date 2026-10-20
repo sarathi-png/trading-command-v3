@@ -138,11 +138,11 @@ export interface PaperOrder {
 
 export interface PaperFill {
   id: string;
-  orderId: string;
-  positionId: string;
+  orderId: string | null;
+  positionId: string | null;
   symbol: string;
   side: "long" | "short";
-  kind: "open" | "add" | "close";
+  kind: "open" | "add" | "reduce" | "close";
   qty: number;
   price: number;
   fee: number;

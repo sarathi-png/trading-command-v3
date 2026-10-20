@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createApiClient } from "@/src/api/client";
 import { API_BASE_URL, API_TIMEOUT_MS } from "@/src/api/config";
 import type { LoginResponse } from "@/src/api/types";
@@ -31,11 +31,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<SessionStatus>("loading");
   const [token, setToken] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
+  // A slow keychain read must not sign out a login that already succeeded.
+  const settled = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     void readSession().then((session) => {
-      if (cancelled) return;
+      if (cancelled || settled.current) return;
+      settled.current = true;
       if (session) {
         setToken(session.token);
         setExpiresAt(session.expiresAt);
@@ -50,6 +53,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    settled.current = true;
     setStatus("signedOut");
     setToken(null);
     setExpiresAt(null);
@@ -57,6 +61,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (password: string) => {
+    settled.current = true;
     const result = await anonymousClient.post<LoginResponse>("/api/auth/mobile", { password });
     if (
       !result ||

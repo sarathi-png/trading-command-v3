@@ -30,6 +30,8 @@ export function usePoll(fn: () => Promise<void>, intervalMs: number, enabled: bo
       if (cancelled || state !== "active") return;
       try {
         await latest.current();
+      } catch {
+        // Screens own their error state; a failed poll must not stop the loop.
       } finally {
         schedule();
       }
