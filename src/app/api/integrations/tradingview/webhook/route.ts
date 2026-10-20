@@ -11,11 +11,11 @@ import { flags } from "@/lib/flags";
 import { getSettings, logAudit } from "@/lib/settings";
 import { timingSafeEqual } from "@/lib/auth";
 import { parseTradingViewAlert } from "@/lib/integrations/tradingview/payload";
+import { tradingViewSignalId } from "@/lib/signalId";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const seen = new Map<string, number>(); // payload hash → ts, dedupe window
 const rate = { windowStart: 0, count: 0 };
 
 export async function POST(req: Request) {
@@ -72,17 +72,20 @@ export async function POST(req: Request) {
   }
   const alert = parsed.alert;
 
-  const hash = `${alert.symbol}:${alert.action}:${alert.timestamp}`;
-  if (seen.has(hash)) {
-    return Response.json({ ok: true, deduplicated: true });
-  }
-  seen.set(hash, now);
-  for (const [k, v] of seen) if (now - v > 10 * 60000) seen.delete(k);
-
   const status =
     alert.action === "LONG" ? "LONG_SETUP" : alert.action === "SHORT" ? "SHORT_SETUP" : alert.action === "WATCH" ? "WATCH" : "INVALIDATED";
 
-  const row = await (await getRepo()).insertSignal({
+  // The id is derived from the alert, so a redelivery lands on the same primary
+  // key and is deduplicated by the database rather than by per-instance memory.
+  const id = await tradingViewSignalId({
+    strategy: alert.strategy,
+    symbol: alert.symbol,
+    action: alert.action,
+    timestamp: alert.timestamp,
+  });
+
+  const { row, created } = await (await getRepo()).insertSignalOnce({
+    id,
     symbol: alert.symbol,
     timeframe: alert.timeframe,
     strategy: `tradingview:${alert.strategy}`,
@@ -95,6 +98,11 @@ export async function POST(req: Request) {
     reasons: [alert.message],
     outcome: "ACTIVE",
   });
+
+  if (!created) {
+    await logAudit("webhook_signal_duplicate", { symbol: alert.symbol, action: alert.action, signalId: row.id });
+    return Response.json({ ok: true, deduplicated: true, signalId: row.id });
+  }
 
   await logAudit("webhook_signal_accepted", { symbol: alert.symbol, action: alert.action });
   return Response.json({ ok: true, signalId: row.id });

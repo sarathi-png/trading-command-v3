@@ -20,6 +20,7 @@ import type {
   PaperPositionRow,
   Repo,
   SettingRow,
+  SignalInsert,
   SignalRow,
   Timestamp,
 } from "./types";
@@ -110,6 +111,26 @@ function listSignalsFile(opts?: { symbol?: string; limit?: number }): SignalRow[
   return [...filtered].sort(byTimeDesc).slice(0, opts?.limit ?? 200);
 }
 
+function buildSignalRow(value: SignalInsert): SignalRow {
+  const createdAt = ts(value.createdAt, now());
+  return {
+    id: value.id ?? randomUUID(),
+    symbol: value.symbol,
+    timeframe: value.timeframe,
+    strategy: value.strategy,
+    status: value.status,
+    outcome: value.outcome ?? "ACTIVE",
+    price: value.price,
+    entry: value.entry ?? null,
+    stop: value.stop ?? null,
+    target: value.target ?? null,
+    rr: value.rr ?? null,
+    reasons: value.reasons ?? [],
+    createdAt,
+    updatedAt: ts(value.updatedAt, createdAt),
+  };
+}
+
 function normaliseJournal(v: JournalInsert): JournalRow {
   return {
     id: v.id ?? randomUUID(),
@@ -196,25 +217,27 @@ export const fileRepo: Repo = {
     return listSignalsFile(opts);
   },
   async insertSignal(value) {
-    const createdAt = ts(value.createdAt, now());
-    const row: SignalRow = {
-      id: value.id ?? randomUUID(),
-      symbol: value.symbol,
-      timeframe: value.timeframe,
-      strategy: value.strategy,
-      status: value.status,
-      outcome: value.outcome ?? "ACTIVE",
-      price: value.price,
-      entry: value.entry ?? null,
-      stop: value.stop ?? null,
-      target: value.target ?? null,
-      rr: value.rr ?? null,
-      reasons: value.reasons ?? [],
-      createdAt,
-      updatedAt: ts(value.updatedAt, createdAt),
-    };
+    const row = buildSignalRow(value);
     await mutate<SignalRow[]>(DOC_SIGNALS, [], (rows) => [row, ...rows]);
     return row;
+  },
+  async insertSignalOnce(value) {
+    const row = buildSignalRow(value);
+    let created = true;
+    let result = row;
+    // Check-and-insert under the per-document lock. This backend is
+    // single-process (Vercel refuses it), so the lock is sufficient here; in
+    // Postgres the primary key is the cross-instance guarantee.
+    await mutate<SignalRow[]>(DOC_SIGNALS, [], (rows) => {
+      const existing = rows.find((r) => r.id === value.id);
+      if (existing) {
+        created = false;
+        result = existing;
+        return null;
+      }
+      return [row, ...rows];
+    });
+    return { row: result, created };
   },
   async updateSignal(id, patch) {
     let updated: SignalRow | null = null;

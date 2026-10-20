@@ -36,6 +36,8 @@
     "src/lib/exchange/coindcx/timeframes.ts",
     "src/lib/exchange/coindcx/timeframes.test.ts",
     "src/lib/integrations/tradingview/payload.ts",
-    "src/lib/integrations/tradingview/payload.test.ts"
+    "src/lib/integrations/tradingview/payload.test.ts",
+    "src/lib/signalId.ts",
+    "src/lib/signalId.test.ts"
   ]
 }

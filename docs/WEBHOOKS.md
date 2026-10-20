@@ -72,8 +72,9 @@ TradingView does not retry a rejected webhook, so a `400` means that alert is
 lost. Fix the template rather than assuming a later delivery.
 
 Repeated delivery of the same alert (same strategy, symbol, action and
-timestamp) is deduplicated and returns `{ "ok": true, "deduplicated": true }`
-instead of creating a second row.
+timestamp) is deduplicated across every server instance: the signal id is
+derived from those fields, so the retry hits the same primary key. The second
+call returns `{ "ok": true, "deduplicated": true }` and creates no new row.
 
 ## Important
 

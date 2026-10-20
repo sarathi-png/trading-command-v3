@@ -38,6 +38,7 @@ import type {
   PaperPositionRow,
   Repo,
   SignalRow,
+  SignalInsert,
 } from "./types";
 
 type Db = import("drizzle-orm/node-postgres").NodePgDatabase<typeof import("@/db/schema")>;
@@ -81,6 +82,23 @@ function toSignal(r: typeof signalsTable.$inferSelect): SignalRow {
     reasons: arr<string>(r.reasons),
     createdAt: iso(r.createdAt, EPOCH),
     updatedAt: iso(r.updatedAt, EPOCH),
+  };
+}
+
+/** Column mapping shared by the plain and idempotent signal inserts. */
+function signalValues(value: SignalInsert) {
+  return {
+    symbol: value.symbol,
+    timeframe: value.timeframe,
+    strategy: value.strategy,
+    status: value.status,
+    outcome: value.outcome ?? "ACTIVE",
+    price: value.price,
+    entry: value.entry ?? null,
+    stop: value.stop ?? null,
+    target: value.target ?? null,
+    rr: value.rr ?? null,
+    reasons: value.reasons ?? [],
   };
 }
 
@@ -351,21 +369,29 @@ export const postgresRepo: Repo = {
     const db = await getDb();
     const [row] = await db
       .insert(signalsTable)
-      .values({
-        symbol: value.symbol,
-        timeframe: value.timeframe,
-        strategy: value.strategy,
-        status: value.status,
-        outcome: value.outcome ?? "ACTIVE",
-        price: value.price,
-        entry: value.entry ?? null,
-        stop: value.stop ?? null,
-        target: value.target ?? null,
-        rr: value.rr ?? null,
-        reasons: value.reasons ?? [],
-      })
+      .values(signalValues(value))
       .returning();
     return toSignal(row);
+  },
+  async insertSignalOnce(value) {
+    const db = await getDb();
+    // The id is derived from the payload by the caller, so a retry conflicts
+    // instead of inserting a duplicate. No extra index or column is needed.
+    const [row] = await db
+      .insert(signalsTable)
+      .values({ id: value.id, ...signalValues(value) })
+      .onConflictDoNothing({ target: signalsTable.id })
+      .returning();
+    if (row) return { row: toSignal(row), created: true };
+    const [existing] = await db
+      .select()
+      .from(signalsTable)
+      .where(eq(signalsTable.id, value.id))
+      .limit(1);
+    if (!existing) {
+      throw new Error(`Signal ${value.id} conflicted but could not be read back`);
+    }
+    return { row: toSignal(existing), created: false };
   },
   async updateSignal(id, patch) {
     const db = await getDb();

@@ -84,6 +84,8 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
         EXCHANGE_MARKET_ENABLED: "false",
         LIVE_EXECUTION_ENABLED: "false",
         PAPER_TRADING_ENABLED: "true",
+        TRADINGVIEW_WEBHOOK_ENABLED: "true",
+        TRADINGVIEW_WEBHOOK_SECRET: "webhook-test-secret",
         HF_TOKEN: "",
         HF_DATASET_ID: "",
         NEXT_TELEMETRY_DISABLED: "1",
@@ -147,6 +149,48 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.equal((await fetch(`${url}/api/account`, { headers: { authorization: `Bearer ${mobileSession.token}x` } })).status, 401);
     // Password bearers keep their historical script behaviour.
     assert.equal((await fetch(`${url}/api/account`, { headers: { authorization: "Bearer paper-test-password" } })).status, 200);
+
+    // TradingView webhook: validated, deduplicated across retries, never an order.
+    const alertBody = {
+      secret: "webhook-test-secret",
+      symbol: "BINANCE:btcusd",
+      action: "long",
+      interval: "60",
+      price: "108000.5",
+      stop: "106500",
+      timestamp: Date.now(),
+      strategy: "mobile-e2e",
+      message: "e2e alert",
+    };
+    const postAlert = (body) => fetch(`${url}/api/integrations/tradingview/webhook`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    assert.equal((await postAlert({ ...alertBody, secret: "wrong-secret" })).status, 401);
+    assert.equal((await postAlert({ ...alertBody, price: undefined })).status, 400);
+    const firstAlert = await postAlert(alertBody);
+    assert.equal(firstAlert.status, 200);
+    const firstAlertJson = await firstAlert.json();
+    assert.equal(typeof firstAlertJson.signalId, "string");
+    assert.equal(firstAlertJson.deduplicated, undefined);
+    const secondAlert = await postAlert(alertBody);
+    assert.equal(secondAlert.status, 200);
+    const secondAlertJson = await secondAlert.json();
+    assert.equal(secondAlertJson.deduplicated, true);
+    assert.equal(secondAlertJson.signalId, firstAlertJson.signalId);
+
+    const inbox = await fetch(`${url}/api/signals`, { headers: { ...bearer, "x-tc-workspace": "paper" } }).then(r => r.json());
+    const delivered = inbox.signals.filter(s => s.id === firstAlertJson.signalId);
+    assert.equal(delivered.length, 1, "a retried alert must create one row");
+    assert.equal(delivered[0].symbol, "BTCUSD");
+    assert.equal(delivered[0].timeframe, "1H");
+    assert.equal(delivered[0].price, 108000.5);
+    assert.equal(delivered[0].stop, 106500);
+    assert.equal(delivered[0].strategy, "tradingview:mobile-e2e");
+    assert.equal(delivered[0].status, "LONG_SETUP");
+    const paperAfterAlert = await fetch(`${url}/api/paper`, { headers: { ...bearer, "x-tc-workspace": "paper" } }).then(r => r.json());
+    assert.deepEqual(paperAfterAlert.orders, [], "the webhook must never place an order");
 
     const request = (route, options = {}) =>
       fetch(`${url}${route}`, {

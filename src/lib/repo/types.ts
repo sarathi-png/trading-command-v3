@@ -95,6 +95,14 @@ export interface Repo {
   // ---- signals ----
   listSignals(opts?: { symbol?: string; limit?: number }): Promise<SignalRow[]>;
   insertSignal(value: SignalInsert): Promise<SignalRow>;
+  /**
+   * Idempotent create for externally delivered signals.
+   *
+   * The caller supplies a deterministic id derived from the payload, so the
+   * primary key dedupes retries across every server instance. Returns the
+   * existing row (with `created: false`) when the id is already stored.
+   */
+  insertSignalOnce(value: SignalInsert & { id: string }): Promise<{ row: SignalRow; created: boolean }>;
   updateSignal(id: string, patch: Partial<SignalRow>): Promise<SignalRow | null>;
   listActiveSignals(symbol: string): Promise<SignalRow[]>;
   findActiveSignal(symbol: string, timeframe: string, strategy: string): Promise<SignalRow | null>;
