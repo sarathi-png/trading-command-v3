@@ -1,7 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { donchianRibbon } from "./donchian";
-import { chandelierExit } from "./chandelier";
+import { chandelierExit, wilderAtr } from "./chandelier";
+import { atr as sharedAtr } from "../../indicators";
 import { calculatePositionSize, evaluateChandelierDonchian } from "./chandelier-donchian";
 import { DEFAULT_CHANDELIER_DONCHIAN_CONFIG as defaults, validateStrategyConfig } from "./types";
 import { runBacktest, runWalkForward } from "./backtest";
@@ -26,6 +27,16 @@ describe("strategy correctness regressions", () => {
   it("Chandelier handles empty data and waits for ATR warmup", () => {
     assert.deepEqual(chandelierExit([]).trend, []);
     assert.ok(Number.isNaN(chandelierExit(candles.slice(0, 10), 20, 3).longStop[9]));
+  });
+  it("chandelier ATR is the shared Wilder ATR series", () => {
+    const canonical = sharedAtr(candles, 14);
+    const adapted = wilderAtr(candles, 14);
+    assert.equal(adapted.length, canonical.length);
+    for (let i = 0; i < canonical.length; i++) {
+      const a = canonical[i];
+      if (a === null) assert.ok(Number.isNaN(adapted[i]), `bar ${i} should be unavailable`);
+      else assert.ok(Math.abs(a - adapted[i]) < 1e-12, `bar ${i} differs`);
+    }
   });
   it("defaults to ATR length 1 and multiplier 2 while respecting explicit overrides", () => {
     assert.deepEqual(chandelierExit(candles), chandelierExit(candles, 1, 2));

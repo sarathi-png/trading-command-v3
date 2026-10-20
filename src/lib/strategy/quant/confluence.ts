@@ -11,7 +11,7 @@
  *  - volume  = clip(max(0, ratio-1)) * sign(momentum)
  */
 import type { Candle } from "@/lib/types";
-import { atr, closes, emaSeries, rsi } from "./indicators";
+import { atr, closes, ema, rsi } from "../../indicators";
 import { supportResZones, trendDirection } from "./zones";
 
 export interface ConfluenceConfig {
@@ -53,15 +53,20 @@ function neutral(reason: string): ConfluenceResult {
 
 function trendComponent(htf: Candle[], cfg: ConfluenceConfig): { comp: number; reason: string } {
   const hc = closes(htf);
-  const fast = emaSeries(hc, cfg.htfEmaFast);
-  const slow = emaSeries(hc, cfg.htfEmaSlow);
+  const fast = ema(hc, cfg.htfEmaFast);
+  const slow = ema(hc, cfg.htfEmaSlow);
   const hatr = atr(htf);
   const i = htf.length - 1;
   const atrLast = hatr[i];
   if (atrLast === null || atrLast <= 0) {
     return { comp: 0, reason: "trend=+0.00 (htf ATR unavailable)" };
   }
-  const sep = (fast[i] as number) - (slow[i] as number);
+  const fastLast = fast[i];
+  const slowLast = slow[i];
+  if (fastLast === null || slowLast === null) {
+    return { comp: 0, reason: "trend=+0.00 (htf EMA warmup)" };
+  }
+  const sep = fastLast - slowLast;
   const amp = clip(Math.abs(sep) / (0.5 * atrLast), 0, 1);
   const emaComp = sgn(sep) * amp;
   const structure = trendDirection(htf, cfg.swingN);
@@ -152,9 +157,11 @@ function momentumComponent(ltf: Candle[], cfg: ConfluenceConfig, atrLast: number
   const rv = r[r.length - 1];
   if (rv === null || !isFinite(rv)) return { comp: 0, reason: "momentum=+0.00 (rsi unavailable)" };
   const rsiComp = clip((rv - 50) / 20);
-  const ema = emaSeries(closes(ltf), cfg.momEma);
-  const slope = ema.length >= 4
-    ? ((ema[ema.length - 1] as number) - (ema[ema.length - 4] as number)) / atrLast
+  const emaSeries = ema(closes(ltf), cfg.momEma);
+  const emaLast = emaSeries[emaSeries.length - 1];
+  const emaPrev = emaSeries[emaSeries.length - 4];
+  const slope = emaLast !== null && emaLast !== undefined && emaPrev !== null && emaPrev !== undefined
+    ? (emaLast - emaPrev) / atrLast
     : 0;
   const slopeComp = clip(slope);
   const comp = clip(0.6 * rsiComp + 0.4 * slopeComp);

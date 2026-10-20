@@ -3,7 +3,7 @@
  * Every row i uses only candles[0..i]. buildFeatures() returns the tail vector.
  */
 import type { Candle } from "@/lib/types";
-import { atr, closes, emaSeries, maCrossSignal, rsi, sma } from "./indicators";
+import { atr, closes, ema, maCrossSignal, rsi, sma } from "../../indicators";
 import { swingLevelFfill } from "./zones";
 
 export const FEATURE_COLUMNS = [
@@ -40,8 +40,8 @@ export function buildFeatures(candles: Candle[]): FeatureVector | null {
   const R = rsi(candles);
   const rv = R[n - 1] !== null && isFinite(R[n - 1] as number) ? (R[n - 1] as number) : 50;
 
-  const ef = emaSeries(cl, 20);
-  const es = emaSeries(cl, 50);
+  const ef = ema(cl, 20);
+  const es = ema(cl, 50);
   const mf = sma(cl, 9);
   const ms = sma(cl, 21);
   const mc = maCrossSignal(candles);

@@ -4,7 +4,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { atr, rsi, sma, maCross, closes } from "./indicators";
+import { atr, rsi, sma, maCross, closes, ema } from "../../indicators";
 import { analyzeConfluence, gateSignal } from "./confluence";
 import { buildFeatures, FEATURE_COLUMNS, toArray } from "./features";
 import { findSwings, clusterZones, nearestZones, supportResZones } from "./zones";
@@ -83,6 +83,16 @@ describe("indicators", () => {
       cs.push({ time: i, open: close, high: close + 0.1, low: close - 0.1, close, volume: 1 });
     }
     assert.equal(maCross(cs).filter((v) => v === 1).length, 1);
+  });
+  it("EMA matches the recursive reference, is null during warmup, and causal", () => {
+    assert.deepEqual(ema([1, 2, 3, 4, 5], 3), [null, null, 2.25, 3.125, 4.0625]);
+    const cs = fixture(200);
+    const cl = closes(cs);
+    for (const k of [40, 90, 150, 199]) {
+      const full = ema(cl, 21)[k];
+      const pre = ema(cl.slice(0, k + 1), 21)[k];
+      assert.ok(Math.abs((full as number) - (pre as number)) < 1e-12, `EMA prefix k=${k}`);
+    }
   });
 });
 
