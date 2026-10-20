@@ -3,6 +3,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { useApp, useMarket } from "@/stores";
+import { NAV_ITEMS } from "@/lib/navConfig";
+import { useFocusTrap } from "@/lib/hooks";
 import { logout } from "@/lib/api";
 import { TIMEFRAMES } from "@/lib/types";
 import { cx } from "@/lib/format";
@@ -22,22 +24,17 @@ export default function CommandPalette() {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const trapRef = useFocusTrap<HTMLDivElement>(paletteOpen);
 
   const commands = useMemo<Command[]>(() => {
     const go = (path: string) => () => { router.push(path); setPalette(false); };
-    const nav: Command[] = [
-      { id: "go-overview", label: "Open Overview", group: "Navigate", hint: "O", perform: go("/") },
-      { id: "go-heikin-ashi", label: "Open Heikin-Ashi", group: "Navigate", perform: go("/heikin-ashi") },
-      { id: "go-chart", label: "Open Candlestick", group: "Navigate", hint: "C", perform: go("/chart") },
-      { id: "go-markets", label: "Open Markets", group: "Navigate", perform: go("/markets") },
-      { id: "go-positions", label: "Show Positions", group: "Navigate", hint: "P", perform: go("/positions") },
-      { id: "go-orders", label: "Show Orders", group: "Navigate", perform: go("/orders") },
-      { id: "go-strategy", label: "Open Strategy", group: "Navigate", perform: go("/strategy") },
-      { id: "go-journal", label: "Open Trade Journal", group: "Navigate", hint: "J", perform: go("/journal") },
-      { id: "go-analytics", label: "Open Analytics", group: "Navigate", perform: go("/analytics") },
-      { id: "go-alerts", label: "Open Alerts", group: "Navigate", hint: "A", perform: go("/alerts") },
-      { id: "go-settings", label: "Open Settings", group: "Navigate", perform: go("/settings") },
-    ];
+    const nav: Command[] = NAV_ITEMS.map((item) => ({
+      id: `go-${item.href === "/" ? "overview" : item.href.slice(1)}`,
+      label: item.paletteLabel ?? `Open ${item.label}`,
+      group: "Navigate",
+      hint: item.hint,
+      perform: go(item.href),
+    }));
     const symbols: Command[] = Object.keys(tickers).length
       ? Object.keys(tickers).map((s) => ({
           id: `sym-${s}`, label: `Open ${s}`, hint: `$${tickers[s].price.toLocaleString("en-US", { maximumFractionDigits: 1 })}`,
@@ -94,7 +91,7 @@ export default function CommandPalette() {
   return (
     <div className="fixed inset-0 z-110 flex items-start justify-center pt-[14vh] p-4" role="dialog" aria-modal="true" aria-label="Command palette">
       <div className="absolute inset-0 bg-black/70" onClick={() => setPalette(false)} />
-      <div className="relative panel w-full max-w-xl slide-in overflow-hidden">
+      <div ref={trapRef} className="relative panel w-full max-w-xl slide-in overflow-hidden">
         <div className="flex items-center gap-2 border-b border-edge px-3">
           <Search size={13} className="text-dim" />
           <input

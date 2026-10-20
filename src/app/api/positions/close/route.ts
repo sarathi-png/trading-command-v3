@@ -17,12 +17,15 @@ import { exchangeAccountConfigured } from "@/lib/credentials";
 import { flags } from "@/lib/flags";
 import { closeLivePosition, livePositionFor, ExchangeError } from "@/lib/exchange/service";
 import { isSupportedSymbol } from "@/lib/exchange/symbols";
-import { getSettings, logAudit } from "@/lib/settings";
+import { getSettings, invalidateSettingsCache, logAudit } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 10;
 
 export async function POST(req: Request) {
+  // A money path must not act on a cached arm/disarm decision.
+  invalidateSettingsCache();
   const settings = await getSettings();
 
   if (!flags.liveExecution()) {

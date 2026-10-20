@@ -470,7 +470,10 @@ test("Vercel ↔ CoinDCX boundary, paper isolation and live-order safety", { tim
     // ---- 5. paper trading never touches the venue ------------------------
     await json("/api/settings", { mode: "paper", dataSource: "demo" });
     const before = venue.calls.length;
-    const paper = await json("/api/paper", { action: "place", symbol: "BTCUSD", side: "buy", type: "market", qty: 0.001 });
+    const paper = await json("/api/paper", {
+      action: "place", symbol: "BTCUSD", side: "buy", type: "market", qty: 0.001,
+      client_order_id: "tc-boundary-paper-0001",
+    });
     assert.equal(paper.ok, true);
     assert.equal(paper.status, "filled");
     assert.equal(venue.calls.length, before, "paper orders must never reach CoinDCX");

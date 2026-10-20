@@ -3,6 +3,7 @@ import { flags } from "@/lib/flags";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 10;
 
 export async function GET(req: Request) {
   if (!flags.orderbook()) {

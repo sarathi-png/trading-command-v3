@@ -4,7 +4,7 @@ import { previewSession, setPreviewSession } from "./previewSession";
 /** Client-side fetch helpers with uniform error handling. */
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number) {
+  constructor(message: string, public status: number, public code?: string) {
     super(message);
   }
 }
@@ -35,7 +35,8 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
         window.dispatchEvent(new Event("auth:unauthorized"));
       }
     }
-    throw new ApiError(String((data as { error?: string }).error ?? `Request failed (${res.status})`), res.status);
+    const payload = data as { error?: string; code?: string };
+    throw new ApiError(String(payload.error ?? `Request failed (${res.status})`), res.status, payload.code);
   }
   return data as T;
 }

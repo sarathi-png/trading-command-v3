@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "output/safety-js",
+    "rootDir": "src",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "strict": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": [
+    "src/lib/types.ts",
+    "src/lib/risk.ts",
+    "src/lib/risk.test.ts",
+    "src/lib/market/validate.ts",
+    "src/lib/market/validate.test.ts",
+    "src/lib/cache.ts",
+    "src/lib/cache.test.ts",
+    "src/lib/orderId.ts",
+    "src/lib/data/provider.ts",
+    "src/lib/data/provider.test.ts",
+    "src/lib/chart/overlays.ts",
+    "src/lib/chart/overlays.test.ts",
+    "src/lib/analytics/metrics.ts",
+    "src/lib/analytics/metrics.test.ts",
+    "src/lib/exchange/coindcx/timeframes.ts",
+    "src/lib/exchange/coindcx/timeframes.test.ts"
+  ]
+}

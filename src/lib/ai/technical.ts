@@ -1,5 +1,6 @@
 /** Versioned, causal OHLCV rules. Shapes are hypotheses, never forecasts. */
 import type { Candle } from "../types";
+import { ema, rsi } from "../indicators";
 
 export const TECHNICAL_VERSION = "technical-v1";
 export interface PatternMatch {
@@ -370,38 +371,6 @@ export function detectPatterns(candles: Candle[]): PatternMatch[] {
   return out;
 }
 
-/** SMA-seeded exponential moving average; missing warmup stays null. */
-export function ema(values: number[], period: number): (number | null)[] {
-  const out: (number | null)[] = values.map(() => null);
-  if (values.length < period) return out;
-  let value = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  out[period - 1] = value;
-  for (let i = period; i < values.length; i++) {
-    value += (2 / (period + 1)) * (values[i] - value);
-    out[i] = value;
-  }
-  return out;
-}
-function rsi(values: number[], n = 14): number | null {
-  if (values.length <= n) return null;
-  let gain = 0,
-    loss = 0;
-  for (let i = 1; i <= n; i++) {
-    const d = values[i] - values[i - 1];
-    gain += Math.max(d, 0) / n;
-    loss += Math.max(-d, 0) / n;
-  }
-  for (let i = n + 1; i < values.length; i++) {
-    const d = values[i] - values[i - 1];
-    gain = (gain * (n - 1) + Math.max(d, 0)) / n;
-    loss = (loss * (n - 1) + Math.max(-d, 0)) / n;
-  }
-  return gain === 0 && loss === 0
-    ? 50
-    : loss === 0
-      ? 100
-      : 100 - 100 / (1 + gain / loss);
-}
 function adx(c: Candle[], n = 14): (number | null)[] {
   const out: (number | null)[] = c.map(() => null);
   let tr = 0,
@@ -505,7 +474,7 @@ export function analyseTechnical(candles: Candle[]): TechnicalEvidence {
   const sd = Math.sqrt(
     tail.reduce((s, v) => s + (v - middle) ** 2, 0) / tail.length,
   );
-  const rsi14 = rsi(closes),
+  const rsi14 = rsi(candles).at(-1) ?? null,
     adx14 = a.at(-1) ?? null;
   const missing = (...x: (number | null)[]) => x.some((v) => v === null);
   const check = (rule: string, available: boolean, passed: boolean) => ({

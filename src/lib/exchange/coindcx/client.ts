@@ -49,7 +49,9 @@ interface RawResult {
   durationMs: number;
 }
 
-const DEFAULT_TIMEOUT_MS = 12_000;
+// Serverless functions are capped at ~10 s; a request that outlives the
+// function produces an UNKNOWN outcome and must be reconciled. Leave headroom.
+const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_READ_RETRIES = 2;
 
 function sleep(ms: number): Promise<void> {

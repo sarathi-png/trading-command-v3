@@ -4,7 +4,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { atr, rsi, sma, maCross, closes } from "./indicators";
+import { atr, rsi, sma, maCross, closes, ema } from "../../indicators";
 import { analyzeConfluence, gateSignal } from "./confluence";
 import { buildFeatures, FEATURE_COLUMNS, toArray } from "./features";
 import { findSwings, clusterZones, nearestZones, supportResZones } from "./zones";
@@ -56,6 +56,7 @@ describe("indicators", () => {
   it("RSI of strictly decreasing closes is 0", () => {
     const cs = uptrend(40).map((c, i) => ({ ...c, close: 200 - i * 0.6 }));
     assert.equal(rsi(cs)[39], 0);
+    assert.equal(rsi(cs.map(() => ({ time: 0, open: 1, high: 1, low: 1, close: 1, volume: 0 })))[39], 50, "flat RSI is neutral");
   });
   it("SMA closed form", () => {
     const s = sma([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 9);
@@ -82,6 +83,16 @@ describe("indicators", () => {
       cs.push({ time: i, open: close, high: close + 0.1, low: close - 0.1, close, volume: 1 });
     }
     assert.equal(maCross(cs).filter((v) => v === 1).length, 1);
+  });
+  it("EMA matches the recursive reference, is null during warmup, and causal", () => {
+    assert.deepEqual(ema([1, 2, 3, 4, 5], 3), [null, null, 2.25, 3.125, 4.0625]);
+    const cs = fixture(200);
+    const cl = closes(cs);
+    for (const k of [40, 90, 150, 199]) {
+      const full = ema(cl, 21)[k];
+      const pre = ema(cl.slice(0, k + 1), 21)[k];
+      assert.ok(Math.abs((full as number) - (pre as number)) < 1e-12, `EMA prefix k=${k}`);
+    }
   });
 });
 

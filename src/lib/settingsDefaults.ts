@@ -19,7 +19,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   colorblindPalette: false,
   chartLabelMode: "compact",
   timezone: "IST",
-  watchlist: ["BTCUSD", "ETHUSD", "SOLUSD"],
+  watchlist: ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "BNBUSD", "DOGEUSD"],
   modules: {
     balance: true, margin: true, pnl: true, positions: true, orderbook: false,
     funding: false, volume: true, tradeHistory: true, strategyScore: true,

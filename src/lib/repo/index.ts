@@ -44,6 +44,8 @@ async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T | null> {
   }
 }
 
+let probeWarned = false;
+
 async function postgresWorks(): Promise<boolean> {
   if (!process.env.DATABASE_URL) return false;
   try {
@@ -55,6 +57,22 @@ async function postgresWorks(): Promise<boolean> {
   }
 }
 
+/**
+ * A serverless deployment cannot use the JSON file backend: each instance has
+ * an ephemeral disk, so orders/settings silently vanish and uniqueness checks
+ * are meaningless. Fail loudly instead of pretending writes are durable.
+ */
+function assertBackendAllowed(repo: Repo): void {
+  const onVercel = process.env.VERCEL === "1" || Boolean(process.env.VERCEL_ENV);
+  const override = process.env.ALLOW_FILE_BACKEND_ON_VERCEL === "1";
+  if (onVercel && repo.backend === "file" && !override) {
+    throw new Error(
+      "Refusing to run on Vercel with the file data backend: writes are not durable and idempotency is unsafe. " +
+        "Set DATABASE_URL to a Neon PostgreSQL connection string (DATA_BACKEND=postgres), then redeploy."
+    );
+  }
+}
+
 async function resolve(): Promise<Repo> {
   const forced = (process.env.DATA_BACKEND ?? "").trim().toLowerCase();
   let repo: Repo;
@@ -63,8 +81,16 @@ async function resolve(): Promise<Repo> {
   } else if (forced === "postgres") {
     repo = (await import("./postgres")).postgresRepo;
   } else {
-    repo = (await postgresWorks()) ? (await import("./postgres")).postgresRepo : fileRepo;
+    const ok = await postgresWorks();
+    if (!ok && process.env.DATABASE_URL && !probeWarned) {
+      probeWarned = true;
+      console.warn(
+        `[repo] DATABASE_URL is set but PostgreSQL did not answer within ${PROBE_TIMEOUT_MS}ms; falling back to the file backend.`
+      );
+    }
+    repo = ok ? (await import("./postgres")).postgresRepo : fileRepo;
   }
+  assertBackendAllowed(repo);
   resolved = repo;
   if (repo.backend === "file") {
     // Mirror to Hugging Face after a durable write (no-op unless configured).

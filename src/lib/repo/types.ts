@@ -80,6 +80,8 @@ export interface Repo {
   readonly backend: "postgres" | "file";
   /** Cheap liveness probe used by /api/health and /api/system. */
   probe(): Promise<boolean>;
+  /** Readiness check for the migrations this build depends on. */
+  schemaReady(): Promise<{ ok: boolean; missing: string[] }>;
 
   // ---- settings (key/value) ----
   getSetting(key: string): Promise<unknown | null>;
@@ -110,7 +112,9 @@ export interface Repo {
   // ---- paper orders ----
   listPaperOrders(opts?: { status?: string; limit?: number }): Promise<PaperOrderRow[]>;
   getPaperOrder(id: string): Promise<PaperOrderRow | null>;
-  insertPaperOrder(value: PaperOrderInsert): Promise<PaperOrderRow>;
+  findPaperOrderByClientId(clientOrderId: string): Promise<PaperOrderRow | null>;
+  /** Idempotent create: returns the existing row when clientOrderId was seen. */
+  insertPaperOrder(value: PaperOrderInsert): Promise<{ order: PaperOrderRow; created: boolean }>;
   updatePaperOrder(id: string, patch: Partial<PaperOrderRow>): Promise<PaperOrderRow | null>;
 
   // ---- paper positions ----
@@ -120,6 +124,12 @@ export interface Repo {
   updatePaperPosition(id: string, patch: Partial<PaperPositionRow>): Promise<PaperPositionRow | null>;
   updatePaperPositionBySymbol(symbol: string, patch: Partial<PaperPositionRow>): Promise<PaperPositionRow[]>;
   deletePaperPosition(id: string): Promise<void>;
+
+  // ---- paper fills (immutable ledger) ----
+  listPaperFills(opts?: { symbol?: string; limit?: number }): Promise<PaperFillRow[]>;
+  insertPaperFill(value: PaperFillInsert): Promise<PaperFillRow>;
+  /** Serialises fill application per symbol (Postgres advisory lock / file mutex). */
+  withPaperLock<T>(key: string, fn: () => Promise<T>): Promise<T>;
 
   // ---- alert rules ----
   listAlertRules(): Promise<AlertRuleRow[]>;
@@ -147,16 +157,38 @@ export interface PaperOrderRow {
   price: number | null;
   stopPrice: number | null;
   status: "open" | "filled" | "cancelled" | "rejected";
+  /** Client-supplied idempotency key (null for legacy rows). */
+  clientOrderId: string | null;
   filledPrice: number | null;
   reduceOnly: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
 
+export interface PaperFillRow {
+  id: string;
+  orderId: string | null;
+  positionId: string | null;
+  symbol: string;
+  side: "long" | "short";
+  kind: "open" | "add" | "reduce" | "close";
+  qty: number;
+  price: number;
+  fee: number;
+  realizedPnl: number;
+  createdAt: Timestamp;
+}
+
+export type PaperFillInsert = Omit<PaperFillRow, "id" | "createdAt"> & {
+  id?: string;
+  createdAt?: Timestamp | Date;
+};
+
 export type PaperOrderInsert = Omit<
   PaperOrderRow,
-  "id" | "createdAt" | "updatedAt" | "filledPrice"
+  "id" | "createdAt" | "updatedAt" | "filledPrice" | "clientOrderId"
 > & {
+  clientOrderId: string;
   id?: string;
   createdAt?: Timestamp | Date;
   updatedAt?: Timestamp | Date;

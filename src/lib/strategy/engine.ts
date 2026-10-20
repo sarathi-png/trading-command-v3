@@ -10,6 +10,7 @@ import type {
   Analysis, Candle, SRLevel, StrategySignal, StructurePoint,
   Timeframe, TrendState,
 } from "../types";
+import { ema } from "../indicators";
 
 export interface StrategyContext {
   symbol: string;
@@ -60,17 +61,6 @@ function sig(
 }
 
 /* ---------------- indicators ---------------- */
-
-export function ema(values: number[], period: number): number[] {
-  const out: number[] = [];
-  const k = 2 / (period + 1);
-  let prev = values[0] ?? 0;
-  for (let i = 0; i < values.length; i++) {
-    prev = i === 0 ? values[0] : values[i] * k + prev * (1 - k);
-    out.push(prev);
-  }
-  return out;
-}
 
 interface Swing { index: number; time: number; price: number; side: "high" | "low" }
 

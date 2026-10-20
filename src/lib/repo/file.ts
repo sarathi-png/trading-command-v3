@@ -15,6 +15,7 @@ import type {
   JournalPnlFilter,
   JournalRow,
   LiveOrderRow,
+  PaperFillRow,
   PaperOrderRow,
   PaperPositionRow,
   Repo,
@@ -29,6 +30,7 @@ export const DOC_SIGNALS = "signals.json";
 export const DOC_JOURNAL = "journal.json";
 export const DOC_PAPER_ORDERS = "paper_orders.json";
 export const DOC_PAPER_POSITIONS = "paper_positions.json";
+export const DOC_PAPER_FILLS = "paper_fills.json";
 export const DOC_ALERTS = "alerts.json";
 export const DOC_DRAWINGS = "drawings.json";
 export const DOC_LIVE_ORDERS = "live_orders.json";
@@ -41,6 +43,7 @@ export const ALL_DOCS = [
   DOC_JOURNAL,
   DOC_PAPER_ORDERS,
   DOC_PAPER_POSITIONS,
+  DOC_PAPER_FILLS,
   DOC_ALERTS,
   DOC_DRAWINGS,
   DOC_LIVE_ORDERS,
@@ -148,6 +151,10 @@ export const fileRepo: Repo = {
     } catch {
       return false;
     }
+  },
+  async schemaReady() {
+    // The JSON store has no migrations; its shape is owned by this code.
+    return { ok: true, missing: [] };
   },
 
   // ---- settings ----
@@ -293,8 +300,11 @@ export const fileRepo: Repo = {
   async getPaperOrder(id) {
     return readDoc<PaperOrderRow[]>(DOC_PAPER_ORDERS, []).find((r) => r.id === id) ?? null;
   },
+  async findPaperOrderByClientId(clientOrderId) {
+    return readDoc<PaperOrderRow[]>(DOC_PAPER_ORDERS, []).find((r) => r.clientOrderId === clientOrderId) ?? null;
+  },
   async insertPaperOrder(value) {
-    const created = ts(value.createdAt, now());
+    const createdAt = ts(value.createdAt, now());
     const row: PaperOrderRow = {
       id: value.id ?? randomUUID(),
       symbol: value.symbol,
@@ -306,11 +316,25 @@ export const fileRepo: Repo = {
       status: value.status ?? "open",
       filledPrice: value.filledPrice ?? null,
       reduceOnly: value.reduceOnly ?? false,
-      createdAt: created,
-      updatedAt: ts(value.updatedAt, created),
+      clientOrderId: value.clientOrderId,
+      createdAt,
+      updatedAt: ts(value.updatedAt, createdAt),
     };
-    await mutate<PaperOrderRow[]>(DOC_PAPER_ORDERS, [], (rows) => [row, ...rows]);
-    return row;
+    // The per-document lock makes check-and-insert atomic within a process.
+    // That is sufficient for the single-process dev backend; Vercel refuses
+    // this backend outright (see repo/index.ts).
+    let created = true;
+    let result = row;
+    await mutate<PaperOrderRow[]>(DOC_PAPER_ORDERS, [], (rows) => {
+      const existing = rows.find((r) => r.clientOrderId === value.clientOrderId);
+      if (existing) {
+        created = false;
+        result = existing;
+        return null;
+      }
+      return [row, ...rows];
+    });
+    return { order: result, created };
   },
   async updatePaperOrder(id, patch) {
     let updated: PaperOrderRow | null = null;
@@ -375,6 +399,37 @@ export const fileRepo: Repo = {
       const next = rows.filter((p) => p.id !== id);
       return next.length === rows.length ? null : next;
     });
+  },
+
+  // ---- paper fills ----
+  async listPaperFills(opts) {
+    const rows = readDoc<PaperFillRow[]>(DOC_PAPER_FILLS, []);
+    const filtered = opts?.symbol ? rows.filter((r) => r.symbol === opts.symbol) : rows;
+    return [...filtered].sort(byTimeDesc).slice(0, opts?.limit ?? 1_000_000);
+  },
+  async insertPaperFill(value) {
+    const createdAt = ts(value.createdAt, now());
+    const row: PaperFillRow = {
+      id: value.id ?? randomUUID(),
+      orderId: value.orderId ?? null,
+      positionId: value.positionId ?? null,
+      symbol: value.symbol,
+      side: value.side,
+      kind: value.kind,
+      qty: value.qty,
+      price: value.price,
+      fee: value.fee,
+      realizedPnl: value.realizedPnl,
+      createdAt,
+    };
+    await mutate<PaperFillRow[]>(DOC_PAPER_FILLS, [], (rows) => [row, ...rows]);
+    return row;
+  },
+  withPaperLock(key, fn) {
+    // Fill application touches several documents; this per-symbol lock is held
+    // for the whole sequence, not just one write. Single process only — Vercel
+    // refuses this backend, so cross-instance locking is a Postgres concern.
+    return lock(`paper:${key}`, fn);
   },
 
   // ---- alert rules ----

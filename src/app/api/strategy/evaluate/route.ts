@@ -13,6 +13,7 @@ import { regime } from "@/lib/strategy/quant/diagnostics";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 10;
 
 const HOUR = 3600 * 1000;
 

@@ -15,6 +15,7 @@ import {
   drawingsTable,
   journalTable,
   liveOrdersTable,
+  paperFillsTable,
   paperOrdersTable,
   paperPositionsTable,
   settingsTable,
@@ -31,6 +32,7 @@ import type {
   JournalRow,
   LiveOrderInsert,
   LiveOrderRow,
+  PaperFillRow,
   PaperOrderRow,
   PaperPositionInsert,
   PaperPositionRow,
@@ -163,6 +165,7 @@ function toPaperOrder(r: typeof paperOrdersTable.$inferSelect): PaperOrderRow {
     status: r.status as PaperOrderRow["status"],
     filledPrice: r.filledPrice ?? null,
     reduceOnly: r.reduceOnly ?? false,
+    clientOrderId: r.clientOrderId ?? null,
     createdAt: iso(r.createdAt, EPOCH),
     updatedAt: iso(r.updatedAt, EPOCH),
   };
@@ -180,6 +183,22 @@ function toPaperPosition(r: typeof paperPositionsTable.$inferSelect): PaperPosit
     realizedPnl: r.realizedPnl ?? 0,
     openedAt: iso(r.openedAt, EPOCH),
     updatedAt: iso(r.updatedAt, EPOCH),
+  };
+}
+
+function toPaperFill(r: typeof paperFillsTable.$inferSelect): PaperFillRow {
+  return {
+    id: r.id,
+    orderId: r.orderId ?? null,
+    positionId: r.positionId ?? null,
+    symbol: r.symbol,
+    side: r.side as PaperFillRow["side"],
+    kind: r.kind as PaperFillRow["kind"],
+    qty: r.qty,
+    price: r.price,
+    fee: r.fee ?? 0,
+    realizedPnl: r.realizedPnl ?? 0,
+    createdAt: iso(r.createdAt, EPOCH),
   };
 }
 
@@ -244,6 +263,33 @@ export const postgresRepo: Repo = {
 
   probe() {
     return probePostgres();
+  },
+  async schemaReady() {
+    try {
+      const db = await getDb();
+      const result = await db.execute(sql`
+        select
+          exists(
+            select 1 from information_schema.columns
+            where table_schema = 'public' and table_name = 'paper_orders'
+              and column_name = 'client_order_id'
+          ) as has_client_order_id,
+          exists(
+            select 1 from information_schema.tables
+            where table_schema = 'public' and table_name = 'paper_fills'
+          ) as has_paper_fills
+      `);
+      const rows = Array.isArray(result)
+        ? (result as Record<string, unknown>[])
+        : ((result as unknown as { rows?: Record<string, unknown>[] }).rows ?? []);
+      const row = rows[0] ?? {};
+      const missing: string[] = [];
+      if (!row.has_client_order_id) missing.push("paper_orders.client_order_id");
+      if (!row.has_paper_fills) missing.push("paper_fills");
+      return { ok: missing.length === 0, missing };
+    } catch {
+      return { ok: false, missing: ["schema probe failed"] };
+    }
   },
 
   // ---- settings ----
@@ -460,6 +506,14 @@ export const postgresRepo: Repo = {
     const [row] = await db.select().from(paperOrdersTable).where(eq(paperOrdersTable.id, id));
     return row ? toPaperOrder(row) : null;
   },
+  async findPaperOrderByClientId(clientOrderId) {
+    const db = await getDb();
+    const [row] = await db
+      .select()
+      .from(paperOrdersTable)
+      .where(eq(paperOrdersTable.clientOrderId, clientOrderId));
+    return row ? toPaperOrder(row) : null;
+  },
   async insertPaperOrder(value) {
     const db = await getDb();
     const [row] = await db
@@ -474,9 +528,20 @@ export const postgresRepo: Repo = {
         status: value.status ?? "open",
         filledPrice: value.filledPrice ?? null,
         reduceOnly: value.reduceOnly ?? false,
+        clientOrderId: value.clientOrderId,
       })
+      // A retried submission (double-click or network retry) must resolve to
+      // the SAME order, not a second fill. The unique index decides the winner
+      // atomically, so this holds under concurrency.
+      .onConflictDoNothing({ target: paperOrdersTable.clientOrderId })
       .returning();
-    return toPaperOrder(row);
+    if (row) return { order: toPaperOrder(row), created: true };
+    const [existing] = await db
+      .select()
+      .from(paperOrdersTable)
+      .where(eq(paperOrdersTable.clientOrderId, value.clientOrderId));
+    if (!existing) throw new Error("Paper order insert conflicted but no row was found");
+    return { order: toPaperOrder(existing), created: false };
   },
   async updatePaperOrder(id, patch) {
     const db = await getDb();
@@ -568,6 +633,61 @@ export const postgresRepo: Repo = {
   async deletePaperPosition(id) {
     const db = await getDb();
     await db.delete(paperPositionsTable).where(eq(paperPositionsTable.id, id));
+  },
+
+  // ---- paper fills ----
+  async listPaperFills(opts) {
+    const db = await getDb();
+    const rows = opts?.symbol
+      ? await db
+          .select()
+          .from(paperFillsTable)
+          .where(eq(paperFillsTable.symbol, opts.symbol))
+          .orderBy(desc(paperFillsTable.createdAt))
+      : await db.select().from(paperFillsTable).orderBy(desc(paperFillsTable.createdAt));
+    return rows.slice(0, opts?.limit ?? 1_000_000).map(toPaperFill);
+  },
+  async insertPaperFill(value) {
+    const db = await getDb();
+    const [row] = await db
+      .insert(paperFillsTable)
+      .values({
+        orderId: value.orderId ?? null,
+        positionId: value.positionId ?? null,
+        symbol: value.symbol,
+        side: value.side,
+        kind: value.kind,
+        qty: value.qty,
+        price: value.price,
+        fee: value.fee ?? 0,
+        realizedPnl: value.realizedPnl ?? 0,
+      })
+      .returning();
+    return toPaperFill(row);
+  },
+  async withPaperLock(key, fn) {
+    // A session-level advisory lock on a dedicated pooled client serialises fills
+    // for the same symbol across serverless instances. Held for the whole
+    // read-modify-write sequence, unlike a per-statement transaction.
+    const { pool } = await import("@/db");
+    const client = await pool.connect();
+    let locked = false;
+    try {
+      await client.query("select pg_advisory_lock(hashtext($1))", [key]);
+      locked = true;
+      return await fn();
+    } finally {
+      if (locked) {
+        try {
+          await client.query("select pg_advisory_unlock(hashtext($1))", [key]);
+        } catch {
+          // Never return a client that may still hold the lock to the pool.
+          client.release(true);
+          throw new Error("Paper fill lock could not be released");
+        }
+      }
+      client.release();
+    }
   },
 
 

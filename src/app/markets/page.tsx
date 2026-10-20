@@ -1,11 +1,12 @@
 "use client";
 import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
 import MarketMovers from "@/components/MarketMovers";
+import ResearchPanel from "@/components/ResearchPanel";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { OrderBookPanel } from "@/components/panels";
-import { Btn, Chip, EmptyState, PageHeader, Panel, Skeleton } from "@/components/ui";
+import { Btn, Chip, EmptyState, Input, PageHeader, Panel, Select, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cx, fmtCompactUsd, fmtPct, fmtPrice, fmtTime } from "@/lib/format";
 import { usePoll } from "@/lib/hooks";
@@ -14,9 +15,17 @@ import type { RecentTrade, Ticker } from "@/lib/types";
 
 export default function MarketsPage() {
   useDisplayCurrency();
-  const { settings, setSymbol } = useApp();
+  const { settings, setSymbol, patchSettings } = useApp();
   const router = useRouter();
   const [selected, setSelected] = useState<string | null>(null);
+  const [scope, setScope] = useState<"watchlist" | "all">("watchlist");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<{ key: "symbol" | "price" | "change" | "volume"; dir: 1 | -1 }>({
+    key: "symbol",
+    dir: 1,
+  });
+  const [editing, setEditing] = useState(false);
+  const [toAdd, setToAdd] = useState("");
   const { data, error, loading } = usePoll(
     () => api.get<{ tickers: Ticker[]; known: string[] }>("/api/market/tickers"),
     3000
@@ -28,7 +37,40 @@ export default function MarketsPage() {
 
   const tickers = data?.tickers ?? [];
   const known = data?.known ?? [];
-  const rows = (known.length ? known : settings.watchlist).map(symbol => ({ symbol, ticker: tickers.find(t => t.symbol === symbol) }));
+  const universe = scope === "all" && known.length ? known : settings.watchlist;
+  const rows = universe
+    .filter((symbol) => symbol.toLowerCase().includes(query.trim().toLowerCase()))
+    .map((symbol) => ({ symbol, ticker: tickers.find((t) => t.symbol === symbol) }))
+    .sort((a, b) => {
+      const dir = sort.dir;
+      if (sort.key === "symbol") return a.symbol.localeCompare(b.symbol) * dir;
+      const av = sort.key === "price" ? a.ticker?.price
+        : sort.key === "change" ? a.ticker?.change24hPct
+        : a.ticker?.volume24hUsd;
+      const bv = sort.key === "price" ? b.ticker?.price
+        : sort.key === "change" ? b.ticker?.change24hPct
+        : b.ticker?.volume24hUsd;
+      // Unavailable values always sort last, whichever direction is active.
+      if (av === undefined || av === null) return bv === undefined || bv === null ? 0 : 1;
+      if (bv === undefined || bv === null) return -1;
+      return (av - bv) * dir;
+    });
+
+  const toggleSort = (key: typeof sort.key) =>
+    setSort((s) => ({ key, dir: s.key === key && s.dir === 1 ? -1 : 1 }));
+
+  const removeSymbol = (symbol: string) => {
+    if (settings.watchlist.length <= 1) return;
+    void patchSettings({ watchlist: settings.watchlist.filter((s) => s !== symbol) });
+  };
+
+  const addSymbol = () => {
+    if (!toAdd || settings.watchlist.includes(toAdd)) return;
+    void patchSettings({ watchlist: [...settings.watchlist, toAdd] });
+    setToAdd("");
+  };
+
+  const addable = known.filter((s) => !settings.watchlist.includes(s));
 
   const openSymbol = (sym: string) => {
     setSelected(sym);
@@ -38,10 +80,30 @@ export default function MarketsPage() {
   return (
     <div className="p-4 lg:p-6 space-y-4 page-shell">
       <PageHeader crumb="MARKETS / WATCHLIST" title="Markets"
-        description="All symbols in the market selector are included automatically. Missing quotes stay unavailable; demo quotes are labelled." />
+        description="Your saved watchlist, or the full venue universe. Filter and sort locally; missing quotes stay unavailable and demo quotes are labelled." />
       <MarketMovers />
+      <ResearchPanel />
       <div className="auto-split with-aside">
-      <Panel title="WATCHLIST · ALL AVAILABLE SYMBOLS">
+      <Panel
+        title={scope === "all" ? "SCREENER · ALL AVAILABLE SYMBOLS" : "WATCHLIST"}
+        badge={<Chip>{rows.length}</Chip>}
+      >
+        <div className="flex flex-wrap items-center gap-2 p-2 border-b border-edge">
+          <div className="flex rounded border border-edge overflow-hidden">
+            <button onClick={() => setScope("watchlist")}
+              className={cx("px-2 h-7 text-[10px] font-semibold", scope === "watchlist" ? "bg-accent-dim text-ink" : "text-dim hover:text-mut")}>
+              WATCHLIST
+            </button>
+            <button onClick={() => setScope("all")}
+              className={cx("px-2 h-7 text-[10px] font-semibold border-l border-edge", scope === "all" ? "bg-accent-dim text-ink" : "text-dim hover:text-mut")}>
+              ALL
+            </button>
+          </div>
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter symbol…" className="h-7 w-32 text-[11px]" />
+          <Btn size="sm" variant={editing ? "primary" : "ghost"} onClick={() => setEditing((v) => !v)}>
+            {editing ? "DONE" : "EDIT"}
+          </Btn>
+        </div>
         {error && <p role="status" className="p-3 text-[11px] text-warn">Quotes unavailable: {error}. No demo fallback.</p>}
         {loading && !data ? (
           <div className="p-3 space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-8" />)}</div>
@@ -50,10 +112,18 @@ export default function MarketsPage() {
             <table className="w-full text-[11px]">
               <thead>
                 <tr className="text-left microlabel border-b border-edge">
-                  <th className="px-3 py-2 font-medium">SYMBOL</th>
-                  <th className="px-2 py-2 font-medium text-right">PRICE</th>
-                  <th className="px-2 py-2 font-medium text-right">24H %</th>
-                  <th className="px-2 py-2 font-medium text-right hidden sm:table-cell">24H VOLUME</th>
+                  <th className="px-3 py-2 font-medium">
+                    <button onClick={() => toggleSort("symbol")} className="hover:text-ink">SYMBOL {sort.key === "symbol" ? (sort.dir === 1 ? "↑" : "↓") : ""}</button>
+                  </th>
+                  <th className="px-2 py-2 font-medium text-right">
+                    <button onClick={() => toggleSort("price")} className="hover:text-ink">PRICE {sort.key === "price" ? (sort.dir === 1 ? "↑" : "↓") : ""}</button>
+                  </th>
+                  <th className="px-2 py-2 font-medium text-right">
+                    <button onClick={() => toggleSort("change")} className="hover:text-ink">24H % {sort.key === "change" ? (sort.dir === 1 ? "↑" : "↓") : ""}</button>
+                  </th>
+                  <th className="px-2 py-2 font-medium text-right hidden sm:table-cell">
+                    <button onClick={() => toggleSort("volume")} className="hover:text-ink">24H VOLUME {sort.key === "volume" ? (sort.dir === 1 ? "↑" : "↓") : ""}</button>
+                  </th>
                   <th className="px-2 py-2 font-medium text-right hidden md:table-cell">FUNDING</th>
                   <th className="px-2 py-2 font-medium text-right hidden md:table-cell">OPEN INT</th>
                   <th className="px-2 py-2 font-medium text-right">SRC</th>
@@ -69,7 +139,16 @@ export default function MarketsPage() {
                       selected === symbol && "bg-accent-dim/40"
                     )}
                   >
-                    <td className="px-3 py-2 num font-semibold">{symbol}</td>
+                    <td className="px-3 py-2 num font-semibold">
+                      {editing && scope === "watchlist" ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); removeSymbol(symbol); }}
+                          className="text-dn hover:underline mr-1"
+                          aria-label={`Remove ${symbol} from watchlist`}
+                        >×</button>
+                      ) : null}
+                      {symbol}
+                    </td>
                     <td className="px-2 py-2 num text-right">{fmtPrice(t?.price)}</td>
                     <td className={cx("px-2 py-2 num text-right", (t?.change24hPct ?? 0) >= 0 ? "text-up" : "text-dn")}>
                       {fmtPct(t?.change24hPct)}
@@ -89,6 +168,16 @@ export default function MarketsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {editing && scope === "watchlist" && (
+          <div className="flex items-center gap-2 p-2 border-t border-edge">
+            <Select value={toAdd} onChange={(e) => setToAdd(e.target.value)} className="h-7 text-[11px] w-40">
+              <option value="">Add symbol…</option>
+              {addable.map((s) => <option key={s} value={s}>{s}</option>)}
+            </Select>
+            <Btn size="sm" disabled={!toAdd} onClick={addSymbol}>ADD</Btn>
+            <span className="text-[10px] text-dim">Saved to your settings; used by the rail and scans.</span>
           </div>
         )}
       </Panel>

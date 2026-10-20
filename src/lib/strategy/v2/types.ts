@@ -108,6 +108,10 @@ export interface BacktestResult {
   avgLoss: number;
   avgHoldBars: number;
   trades: BacktestTrade[];
+  /** Mark-to-market equity at each simulated bar (starting-capital baseline). */
+  equityCurve: { time: number; equity: number }[];
+  /** Methodology/sample warnings. Never a substitute for the numbers. */
+  warnings: string[];
 }
 
 export interface BacktestTrade {
@@ -119,7 +123,7 @@ export interface BacktestTrade {
   qty: number;
   pnl: number;
   pnlPct: number;
-  exitReason: "chandelier" | "opposite" | "time_stop" | "end_of_data";
+  exitReason: "chandelier" | "target" | "opposite" | "time_stop" | "end_of_data";
   barsHeld: number;
 }
 

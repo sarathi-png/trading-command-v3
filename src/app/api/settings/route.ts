@@ -2,6 +2,8 @@ import { validateStrategyConfig } from "@/lib/strategy/v2/types";
 import { exchangeAccountConfigured } from "@/lib/credentials";
 import { flags } from "@/lib/flags";
 import { getSettings, logAudit, updateSettings } from "@/lib/settings";
+import { isSupportedSymbol } from "@/lib/exchange/symbols";
+import { normalizeRiskLimits } from "@/lib/risk";
 import type { AppSettings } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -10,8 +12,15 @@ export const runtime = "nodejs";
 export async function GET() {
   try {
     const settings = await getSettings();
+    // Never round-trip the webhook secret to the browser. The UI only needs to
+    // know whether one is configured (env takes precedence over stored).
+    const { tradingviewSecret, ...safe } = settings;
     return Response.json({
-      settings,
+      settings: {
+        ...safe,
+        tradingviewSecret: "",
+        webhookSecretConfigured: Boolean(tradingviewSecret || process.env.TRADINGVIEW_WEBHOOK_SECRET),
+      },
       capabilities: {
         exchangeAccountConfigured: await exchangeAccountConfigured(),
         exchangeMarket: flags.exchangeMarket(),
@@ -42,6 +51,20 @@ export async function POST(req: Request) {
   }
   if (patch.dataSource && !["demo", "live"].includes(patch.dataSource)) {
     return Response.json({ error: "Invalid data source" }, { status: 400 });
+  }
+  // Arming is a boolean, never a truthy string. Accepting `"yes"`/`1` here is
+  // how a confirmation token gets bypassed, so reject the type outright.
+  if (patch.liveArmed !== undefined && typeof patch.liveArmed !== "boolean") {
+    return Response.json({ error: "liveArmed must be a boolean" }, { status: 400 });
+  }
+  if (patch.watchlist !== undefined) {
+    if (!Array.isArray(patch.watchlist) || patch.watchlist.length === 0 || patch.watchlist.length > 40) {
+      return Response.json({ error: "watchlist must be a non-empty array of at most 40 symbols" }, { status: 400 });
+    }
+    const bad = patch.watchlist.find((s) => typeof s !== "string" || !isSupportedSymbol(s.toUpperCase()));
+    if (bad !== undefined) {
+      return Response.json({ error: `Unsupported watchlist symbol: ${String(bad)}` }, { status: 400 });
+    }
   }
   if (patch.displayCurrency !== undefined && !["usd", "inr"].includes(patch.displayCurrency))
     return Response.json({ error: "Invalid display currency" }, { status: 400 });
@@ -79,6 +102,18 @@ export async function POST(req: Request) {
       return Response.json({ error: "Live arming requires explicit confirmation token." }, { status: 400 });
     }
     await logAudit("live_mode_armed", {});
+  }
+  if (patch.riskLimits) {
+    // Never persist an unbounded cap; normalize once, at the boundary.
+    patch.riskLimits = normalizeRiskLimits({ ...current.riskLimits, ...patch.riskLimits });
+  }
+  if (patch.riskLimits && JSON.stringify(patch.riskLimits) !== JSON.stringify(current.riskLimits)) {
+    // Risk limits are a safety control; changing them is an auditable event.
+    await logAudit("settings_changed", {
+      field: "riskLimits",
+      from: current.riskLimits,
+      to: patch.riskLimits,
+    });
   }
   if (patch.liveArmed === false && current.liveArmed) {
     await logAudit("live_mode_disarmed", {});

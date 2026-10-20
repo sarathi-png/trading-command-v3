@@ -60,3 +60,51 @@ export function useIsMobile(): boolean {
   }, []);
   return mobile;
 }
+
+/**
+ * Trap Tab/Shift+Tab inside a dialog and restore focus on close.
+ * Attach the returned ref to the dialog panel (not the backdrop).
+ */
+export function useFocusTrap<T extends HTMLElement = HTMLDivElement>(active: boolean) {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    if (!active) return;
+    const container = ref.current;
+    if (!container) return;
+
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusable = () =>
+      Array.from(
+        container.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((el) => el.getAttribute("aria-hidden") !== "true" && (el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement));
+
+    focusable()[0]?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) {
+        event.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previous?.focus();
+    };
+  }, [active]);
+  return ref;
+}
