@@ -140,6 +140,9 @@ describe("backtest", () => {
     assert.ok(Number.isFinite(result.maxDrawdown));
     assert.ok(Number.isFinite(result.sharpeRatio));
     assert.equal(result.dsr, null);
+    assert.ok(result.equityCurve.length > 0, "equity curve is recorded per simulated bar");
+    assert.ok(result.equityCurve.every((p) => Number.isFinite(p.equity)));
+    assert.ok(result.warnings.some((w) => w.includes("stop is assumed first")));
   });
 
   it("aggregates walk-forward results", () => {
