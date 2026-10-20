@@ -190,7 +190,10 @@ export default function HomeScreen() {
 }
 
 function TickerRow({ ticker }: { ticker: Ticker }) {
-  const change = ticker.change24hAvailable === false ? null : ticker.change24hPct;
+  const change =
+    ticker.change24hAvailable === false || !Number.isFinite(ticker.change24hPct)
+      ? null
+      : ticker.change24hPct;
   return (
     <View style={styles.tickerRow}>
       <View style={styles.tickerLeft}>
