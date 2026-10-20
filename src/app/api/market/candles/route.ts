@@ -1,5 +1,5 @@
 import { getCandles } from "@/lib/market/service";
-import { TIMEFRAMES, TF_MINUTES, type Timeframe } from "@/lib/types";
+import { TIMEFRAMES, type Timeframe } from "@/lib/types";
 import { isTimeframeSupported } from "@/lib/exchange/coindcx/timeframes";
 
 export const dynamic = "force-dynamic";
@@ -20,18 +20,14 @@ export async function GET(req: Request) {
     );
   }
   try {
-    const { candles, source } = await getCandles(symbol, tf as Timeframe, limit);
-    const last = candles[candles.length - 1];
-    const interval = TF_MINUTES[tf as Timeframe] * 60;
-    const asOf = last ? new Date(last.time * 1000).toISOString() : null;
-    const stale = last ? Date.now() / 1000 - last.time > interval * 3 : true;
+    const { candles, provider, source, asOf, stale } = await getCandles(symbol, tf as Timeframe, limit);
     return Response.json({
       symbol,
       timeframe: tf,
       candles,
       source,
-      provider: source === "live" ? "coindcx" : "demo",
-      asOf,
+      provider,
+      asOf: asOf ? new Date(asOf).toISOString() : null,
       stale,
     });
   } catch (e) {

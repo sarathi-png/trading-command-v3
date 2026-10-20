@@ -270,6 +270,17 @@ export interface SystemStatus {
     orderReconciliation: boolean;
     error?: string;
   };
+  /** Market-data provider selected by the current data source. */
+  market?: {
+    provider: string;
+    label: string;
+    dataSource: "live" | "demo";
+    timeframes: Timeframe[];
+    maxCandles: number;
+    orderbook: boolean;
+    recentTrades: boolean;
+    fanoutLimit: number;
+  };
   flags: Record<string, boolean>;
 }
 

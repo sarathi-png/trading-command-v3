@@ -21,6 +21,8 @@
     "src/lib/cache.ts",
     "src/lib/cache.test.ts",
     "src/lib/orderId.ts",
+    "src/lib/data/provider.ts",
+    "src/lib/data/provider.test.ts",
     "src/lib/exchange/coindcx/timeframes.ts",
     "src/lib/exchange/coindcx/timeframes.test.ts"
   ]
