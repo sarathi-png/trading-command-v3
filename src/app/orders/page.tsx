@@ -102,9 +102,13 @@ export default function OrdersPage() {
       notify({ title: "Live order placed", body: `${activeSymbol} ${side}`, tone: "success" });
       void res;
     } catch (e) {
-      // A definitive refusal means nothing exists: allow a fresh id next click.
-      // An UNKNOWN outcome must keep the id so a retry can never resubmit.
-      if (!(e instanceof ApiError && e.message.includes("UNKNOWN"))) pendingOrderId.current = null;
+      // Keep the key whenever the outcome may exist (UNKNOWN / IN_PROGRESS) so a
+      // retry can never resubmit. Clear it only for a definitive early refusal
+      // (nothing was claimed) or a terminal venue failure.
+      const definitive =
+        e instanceof ApiError &&
+        (e.code === "ORDER_FAILED_TERMINAL" || [400, 403, 422].includes(e.status));
+      if (definitive) pendingOrderId.current = null;
       notify({ title: "Live order blocked", body: e instanceof Error ? e.message : "Unknown error", tone: "danger" });
     }
   };

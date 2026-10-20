@@ -213,6 +213,19 @@ export async function POST(req: Request) {
         { status: 409 }
       );
     }
+    if (existing.status === "pending") {
+      // A claimed row with no venue response is ambiguous: the first request
+      // may still be in flight, or it died before submitting. Never claim success.
+      return Response.json(
+        {
+          error: "A submission with this client_order_id is still pending or was interrupted. Check its status before retrying.",
+          code: "ORDER_IN_PROGRESS",
+          clientOrderId,
+          reconcile: `/api/orders/status?clientOrderId=${encodeURIComponent(clientOrderId)}`,
+        },
+        { status: 409 }
+      );
+    }
     if (existing.status === "failed") {
       // The venue provably refused this key. Returning ok:true here would tell
       // the operator an order exists when nothing does; a retry needs a NEW key.
