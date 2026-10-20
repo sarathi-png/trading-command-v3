@@ -163,6 +163,7 @@ function toPaperOrder(r: typeof paperOrdersTable.$inferSelect): PaperOrderRow {
     status: r.status as PaperOrderRow["status"],
     filledPrice: r.filledPrice ?? null,
     reduceOnly: r.reduceOnly ?? false,
+    clientOrderId: r.clientOrderId ?? null,
     createdAt: iso(r.createdAt, EPOCH),
     updatedAt: iso(r.updatedAt, EPOCH),
   };
@@ -460,6 +461,14 @@ export const postgresRepo: Repo = {
     const [row] = await db.select().from(paperOrdersTable).where(eq(paperOrdersTable.id, id));
     return row ? toPaperOrder(row) : null;
   },
+  async findPaperOrderByClientId(clientOrderId) {
+    const db = await getDb();
+    const [row] = await db
+      .select()
+      .from(paperOrdersTable)
+      .where(eq(paperOrdersTable.clientOrderId, clientOrderId));
+    return row ? toPaperOrder(row) : null;
+  },
   async insertPaperOrder(value) {
     const db = await getDb();
     const [row] = await db
@@ -474,9 +483,21 @@ export const postgresRepo: Repo = {
         status: value.status ?? "open",
         filledPrice: value.filledPrice ?? null,
         reduceOnly: value.reduceOnly ?? false,
+        clientOrderId: value.clientOrderId ?? null,
       })
+      // A retried submission (double-click or network retry) must resolve to
+      // the SAME order, not a second fill. The unique index decides the winner
+      // atomically, so this holds under concurrency.
+      .onConflictDoNothing({ target: paperOrdersTable.clientOrderId })
       .returning();
-    return toPaperOrder(row);
+    if (row) return { order: toPaperOrder(row), created: true };
+    if (!value.clientOrderId) throw new Error("Paper order insert failed");
+    const [existing] = await db
+      .select()
+      .from(paperOrdersTable)
+      .where(eq(paperOrdersTable.clientOrderId, value.clientOrderId));
+    if (!existing) throw new Error("Paper order insert conflicted but no row was found");
+    return { order: toPaperOrder(existing), created: false };
   },
   async updatePaperOrder(id, patch) {
     const db = await getDb();

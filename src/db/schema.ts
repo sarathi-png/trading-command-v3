@@ -87,6 +87,8 @@ export const paperOrdersTable = pgTable("paper_orders", {
   status: text("status").notNull().default("open"), // open | filled | cancelled | rejected
   filledPrice: real("filled_price"),
   reduceOnly: boolean("reduce_only").notNull().default(false),
+  // Idempotency key supplied by the client. Nullable only for pre-0002 rows.
+  clientOrderId: text("client_order_id").unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });

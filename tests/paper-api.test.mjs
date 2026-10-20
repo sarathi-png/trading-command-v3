@@ -179,17 +179,32 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.ok(ticker?.price > 0);
     const qty = Math.min(0.001, 1000 / ticker.price);
 
+    const firstClientOrderId = `test-${Date.now()}-a`;
     const placed = await json("/api/paper", {
       action: "place",
       symbol: "BTCUSD",
       side: "buy",
       type: "market",
       qty,
+      client_order_id: firstClientOrderId,
     }).then((response) => response.json());
     assert.equal(placed.ok, true);
     assert.equal(placed.status, "filled");
     assert.equal(placed.positions.length, 1);
     const position = placed.positions[0];
+
+    // A retried submission with the same key must not open a second position.
+    const duplicate = await json("/api/paper", {
+      action: "place",
+      symbol: "BTCUSD",
+      side: "buy",
+      type: "market",
+      qty,
+      client_order_id: firstClientOrderId,
+    }).then((response) => response.json());
+    assert.equal(duplicate.deduplicated, true);
+    assert.equal(duplicate.orderId, placed.orderId);
+    assert.equal(duplicate.positions.length, 1);
 
     const closed = await json("/api/paper", {
       action: "close",
@@ -213,8 +228,14 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.deepEqual(journal.entries[0].predictionContext, [], "no invented AI association");
     assert.equal(journal.sync.configured, false);
     assert.equal(journal.fills.length, 0, "no invented CoinDCX activity");
+    // The watchlist is user data: saving it must round-trip, not be replaced by
+    // the full venue symbol list (the previous behaviour made saving a no-op).
+    const watchlist = ["BTCUSD", "DOGEUSD"];
+    assert.equal((await json("/api/settings", { watchlist })).status, 200);
+    assert.deepEqual((await request("/api/settings").then(r=>r.json())).settings.watchlist, watchlist);
+    assert.equal((await json("/api/settings", { watchlist: ["NOTREALUSD"] })).status, 400);
     const known = (await request("/api/market/tickers").then(r=>r.json())).known;
-    assert.deepEqual((await request("/api/settings").then(r=>r.json())).settings.watchlist, known);
+    assert.ok(known.includes("BTCUSD"));
     assert.equal((await json("/api/journal", { action: "seed" })).status, 405);
     assert.equal((await json("/api/journal", { symbol: "BTCUSD", entry: 1, pnl: 10000 })).status, 405);
     assert.equal((await request(`/api/journal?id=${journal.entries[0].id}`, { method: "DELETE" })).status, 405);
@@ -233,8 +254,8 @@ test("authenticated read-only to paper order and journal flow", { timeout: 12000
     assert.equal(unchanged.entries[0].entry, journal.entries[0].entry, "INR does not change execution units");
 
     // Partial closes and the remainder must charge each commission/profit once.
-    await json("/api/paper", {action:"place",symbol:"BTCUSD",side:"buy",type:"market",qty:qty*2});
-    await json("/api/paper", {action:"place",symbol:"BTCUSD",side:"sell",type:"market",qty,reduceOnly:true});
+    await json("/api/paper", {action:"place",symbol:"BTCUSD",side:"buy",type:"market",qty:qty*2,client_order_id:`test-${Date.now()}-b`});
+    await json("/api/paper", {action:"place",symbol:"BTCUSD",side:"sell",type:"market",qty,reduceOnly:true,client_order_id:`test-${Date.now()}-c`});
     const remainder = await request("/api/paper").then(r=>r.json());
     assert.equal(remainder.positions.length, 1);
     await json("/api/paper", {action:"close",symbol:"BTCUSD",positionId:remainder.positions[0].id});

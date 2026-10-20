@@ -55,6 +55,9 @@ import crypto from "node:crypto";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+// Keep the function inside the free-tier ceiling. A submission that outlives
+// this window is recorded as UNKNOWN and reconciled, never retried blindly.
+export const maxDuration = 10;
 
 /**
  * Realised P&L since UTC midnight for the live account.
@@ -136,15 +139,28 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const symbol = String(body.symbol ?? "").toUpperCase();
-  const side = body.side === "sell" ? "sell" : "buy";
-  const type = body.type === "limit_order" ? "limit_order" : "market_order";
-  const size = Math.abs(Number(body.size) || 0);
-  const reduceOnly = Boolean(body.reduce_only);
-  const limitPrice = typeof body.limit_price === "number" ? body.limit_price : null;
+  // Strict enums: an unknown side/type must not be coerced into a trade the
+  // operator did not request.
+  if (body.side !== "buy" && body.side !== "sell") {
+    return Response.json({ error: "side must be 'buy' or 'sell'" }, { status: 400 });
+  }
+  if (body.type !== "market_order" && body.type !== "limit_order") {
+    return Response.json({ error: "type must be 'market_order' or 'limit_order'" }, { status: 400 });
+  }
 
-  if (!symbol || size <= 0) {
-    return Response.json({ error: "symbol and positive size are required" }, { status: 400 });
+  const symbol = String(body.symbol ?? "").toUpperCase();
+  const side = body.side;
+  const type = body.type;
+  const size = Number(body.size);
+  const reduceOnly = Boolean(body.reduce_only);
+  const limitPrice =
+    body.limit_price === undefined || body.limit_price === null ? null : Number(body.limit_price);
+
+  if (!symbol || !Number.isFinite(size) || size <= 0) {
+    return Response.json({ error: "symbol and positive finite size are required" }, { status: 400 });
+  }
+  if (type === "limit_order" && (!Number.isFinite(limitPrice) || (limitPrice as number) <= 0)) {
+    return Response.json({ error: "limit orders require a positive limit_price" }, { status: 400 });
   }
   if (!isSupportedSymbol(symbol)) {
     // Fail before any network call: an unsupported pair must never be mapped
@@ -170,10 +186,16 @@ export async function POST(req: Request) {
   }
 
   // ---- idempotency (Postgres) -------------------------------------------
-  const clientOrderId =
-    typeof body.client_order_id === "string" && body.client_order_id.trim()
-      ? body.client_order_id.trim().slice(0, 64)
-      : newClientOrderId();
+  let clientOrderId = newClientOrderId();
+  if (body.client_order_id !== undefined) {
+    if (typeof body.client_order_id !== "string" || !/^[A-Za-z0-9._:-]{1,64}$/.test(body.client_order_id)) {
+      return Response.json(
+        { error: "client_order_id must be 1-64 characters of [A-Za-z0-9._:-]" },
+        { status: 400 }
+      );
+    }
+    clientOrderId = body.client_order_id;
+  }
 
   const repo = await getRepo();
   const existing = await repo.findLiveOrderByClientId(clientOrderId);

@@ -2,7 +2,7 @@
 import { useDisplayCurrency } from "@/lib/useDisplayCurrency";
 import { useMoneyInput } from "@/lib/useMoneyInput";
 import { currencySymbol, displayRate } from "@/lib/displayCurrency";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { Btn, Chip, EmptyState, Input, KV, Modal, PremiumPanel, PageHeader, Select, Skeleton, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -12,6 +12,15 @@ import { useMarket, useApp } from "@/stores";
 import type { PaperOrder, PaperPosition } from "@/lib/types";
 
 type OrderType = "market" | "limit" | "stop_market" | "stop_limit";
+
+/** Idempotency key for one logical submission (retries reuse it). */
+function newClientOrderId(): string {
+  const rand =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID().slice(0, 12)
+      : Math.random().toString(36).slice(2, 14);
+  return `tc-${Date.now().toString(36)}-${rand}`;
+}
 
 export default function OrdersPage() {
   useDisplayCurrency();
@@ -32,6 +41,7 @@ export default function OrdersPage() {
   const [reduceOnly, setReduceOnly] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [liveModal, setLiveModal] = useState(false);
+  const pendingOrderId = useRef<string | null>(null);
 
   const rate = displayRate();
   const priceInput = useMoneyInput(price, setPrice);
@@ -45,10 +55,12 @@ export default function OrdersPage() {
 
   const submitPaper = async () => {
     setSubmitting(true);
+    const clientOrderId = pendingOrderId.current ?? newClientOrderId();
+    pendingOrderId.current = clientOrderId;
     try {
       const body: Record<string, unknown> = {
         action: "place", symbol: activeSymbol, side, type, qty: parseFloat(qty) || 0,
-        reduceOnly,
+        reduceOnly, client_order_id: clientOrderId,
       };
       if (type === "limit") body.price = parseFloat(price) || null;
       if (type === "stop_market" || type === "stop_limit") {
@@ -58,6 +70,7 @@ export default function OrdersPage() {
       if (stop) body.stop = parseFloat(stop);
       if (target) body.target = parseFloat(target);
       await api.post("/api/paper", body);
+      pendingOrderId.current = null;
       notify({ title: "Paper order accepted", body: `${side.toUpperCase()} ${qty} ${activeSymbol} (${type})`, tone: "success" });
       refresh();
     } catch (e) {
@@ -75,12 +88,24 @@ export default function OrdersPage() {
 
   const submitLive = async () => {
     setLiveModal(false);
+    if ((stop || target) && !reduceOnly) {
+      notify({
+        title: "Brackets are not sent with live orders",
+        body: "CoinDCX stop/target orders need a separate position-level call. This ticket does not submit them; place them after the entry fills.",
+        tone: "warn",
+      });
+    }
+    const clientOrderId = pendingOrderId.current ?? newClientOrderId();
+    pendingOrderId.current = clientOrderId;
     try {
       const res = await api.post<{ ok: boolean }>("/api/orders", {
         symbol: activeSymbol, side, size: parseFloat(qty) || 0,
         type: type === "limit" ? "limit_order" : "market_order",
         limit_price: type === "limit" ? parseFloat(price) : undefined,
+        reduce_only: reduceOnly,
+        client_order_id: clientOrderId,
       });
+      pendingOrderId.current = null;
       notify({ title: "Live order placed", body: `${activeSymbol} ${side}`, tone: "success" });
       void res;
     } catch (e) {

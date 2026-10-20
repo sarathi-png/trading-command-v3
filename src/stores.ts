@@ -101,12 +101,13 @@ export const useApp = create<AppState>((set, get) => ({
   applySettings: (s) => { setDisplayCurrency(s); set({ settings: s, settingsLoaded: true }); },
 
   patchSettings: async (patch, persist = true) => {
+    const previous = get().settings;
     const next = {
-      ...get().settings,
+      ...previous,
       ...patch,
-      modules: { ...get().settings.modules, ...(patch.modules ?? {}) },
-      strategiesEnabled: { ...get().settings.strategiesEnabled, ...(patch.strategiesEnabled ?? {}) },
-      riskLimits: { ...get().settings.riskLimits, ...(patch.riskLimits ?? {}) },
+      modules: { ...previous.modules, ...(patch.modules ?? {}) },
+      strategiesEnabled: { ...previous.strategiesEnabled, ...(patch.strategiesEnabled ?? {}) },
+      riskLimits: { ...previous.riskLimits, ...(patch.riskLimits ?? {}) },
     };
     setDisplayCurrency(next);
     set({ settings: next });
@@ -115,8 +116,15 @@ export const useApp = create<AppState>((set, get) => ({
         const res = await api.post<{ settings: AppSettings }>("/api/settings", patch);
         setDisplayCurrency(res.settings);
         set({ settings: res.settings });
-      } catch {
-        /* keep optimistic value; server cache resyncs on next load */
+      } catch (e) {
+        // Do not leave the UI claiming a safety setting the server rejected.
+        setDisplayCurrency(previous);
+        set({ settings: previous });
+        get().notify({
+          title: "Setting not saved",
+          body: e instanceof Error ? e.message : "The server rejected this change.",
+          tone: "danger",
+        });
       }
     }
   },

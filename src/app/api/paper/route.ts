@@ -92,6 +92,13 @@ export async function POST(req: Request) {
   }
 
   // action === "place"
+  const clientOrderId = typeof body.client_order_id === "string" ? body.client_order_id : "";
+  if (!/^[A-Za-z0-9._:-]{1,64}$/.test(clientOrderId)) {
+    return Response.json(
+      { error: "client_order_id (1-64 chars of [A-Za-z0-9._:-]) is required; it makes retries idempotent" },
+      { status: 400 }
+    );
+  }
   const symbol = String(body.symbol ?? "").toUpperCase();
   const prices = await priceMap([symbol]);
   const mark = prices.get(symbol);
@@ -108,13 +115,17 @@ export async function POST(req: Request) {
       price: typeof body.price === "number" ? body.price : null,
       stopPrice: typeof body.stopPrice === "number" ? body.stopPrice : null,
       reduceOnly: Boolean(body.reduceOnly),
+      clientOrderId,
     },
     mark,
     settings.riskLimits
   );
 
   if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
-  await logAudit("paper_order_placed", { symbol, side: body.side, type: body.type, qty: body.qty });
+  await logAudit("paper_order_placed", {
+    symbol, side: body.side, type: body.type, qty: body.qty,
+    clientOrderId, deduplicated: result.deduplicated ?? false,
+  });
 
   // Attach optional SL/TP brackets to the resulting position.
   if (typeof body.stop === "number" || typeof body.target === "number") {

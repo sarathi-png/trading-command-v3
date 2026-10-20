@@ -22,6 +22,8 @@ export interface PlaceOrderInput {
   price?: number | null;
   stopPrice?: number | null;
   reduceOnly?: boolean;
+  /** Idempotency key; a retried submission resolves to the same order. */
+  clientOrderId?: string;
 }
 
 export interface PaperEvent {
@@ -42,10 +44,16 @@ export async function placePaperOrder(
     maxLeverage?: number;
     equity?: number;
   }
-): Promise<{ ok: true; orderId: string; status: string } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; orderId: string; status: string; deduplicated?: boolean }
+  | { ok: false; error: string }
+> {
   const { symbol, side, type, qty } = input;
   if (!symbol || !["buy", "sell"].includes(side) || qty <= 0) {
     return { ok: false, error: "Invalid order parameters" };
+  }
+  if (!input.clientOrderId) {
+    return { ok: false, error: "client_order_id is required" };
   }
   if (["limit", "stop_market", "stop_limit"].includes(type) && !(input.price ?? input.stopPrice)) {
     return { ok: false, error: "Limit/stop orders require a price" };
@@ -56,6 +64,17 @@ export async function placePaperOrder(
   // set of rules and neither can drift from the other.
   const refPrice = type === "market" ? markPrice : (input.price ?? input.stopPrice ?? markPrice);
   const repo = await getRepo();
+  // Resolve a retry BEFORE any risk check or fill: the original order may
+  // already have moved positions, so re-evaluating its risk would be wrong.
+  const existing = await repo.findPaperOrderByClientId(input.clientOrderId);
+  if (existing) {
+    return {
+      ok: true,
+      orderId: existing.id,
+      status: existing.status,
+      deduplicated: true,
+    };
+  }
   const positions = await repo.listPaperPositions();
   const dayStart = new Date();
   dayStart.setUTCHours(0, 0, 0, 0);
@@ -93,13 +112,24 @@ export async function placePaperOrder(
   }
 
   // ---- create ------------------------------------------------------------
-  const row = await repo.insertPaperOrder({
+  const inserted = await repo.insertPaperOrder({
     symbol, side, type, qty,
     price: input.price ?? null,
     stopPrice: input.stopPrice ?? null,
     reduceOnly: input.reduceOnly ?? false,
     status: "open",
+    clientOrderId: input.clientOrderId,
   });
+  if (!inserted.created) {
+    // Lost a race with an identical submission: never fill twice.
+    return {
+      ok: true,
+      orderId: inserted.order.id,
+      status: inserted.order.status,
+      deduplicated: true,
+    };
+  }
+  const row = inserted.order;
 
   if (type === "market") {
     await executeFill(row.id, markPrice);

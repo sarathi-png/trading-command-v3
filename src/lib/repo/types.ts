@@ -110,7 +110,9 @@ export interface Repo {
   // ---- paper orders ----
   listPaperOrders(opts?: { status?: string; limit?: number }): Promise<PaperOrderRow[]>;
   getPaperOrder(id: string): Promise<PaperOrderRow | null>;
-  insertPaperOrder(value: PaperOrderInsert): Promise<PaperOrderRow>;
+  findPaperOrderByClientId(clientOrderId: string): Promise<PaperOrderRow | null>;
+  /** Idempotent create: returns the existing row when clientOrderId was seen. */
+  insertPaperOrder(value: PaperOrderInsert): Promise<{ order: PaperOrderRow; created: boolean }>;
   updatePaperOrder(id: string, patch: Partial<PaperOrderRow>): Promise<PaperOrderRow | null>;
 
   // ---- paper positions ----
@@ -147,6 +149,8 @@ export interface PaperOrderRow {
   price: number | null;
   stopPrice: number | null;
   status: "open" | "filled" | "cancelled" | "rejected";
+  /** Client-supplied idempotency key (null for legacy rows). */
+  clientOrderId: string | null;
   filledPrice: number | null;
   reduceOnly: boolean;
   createdAt: Timestamp;
@@ -155,8 +159,9 @@ export interface PaperOrderRow {
 
 export type PaperOrderInsert = Omit<
   PaperOrderRow,
-  "id" | "createdAt" | "updatedAt" | "filledPrice"
+  "id" | "createdAt" | "updatedAt" | "filledPrice" | "clientOrderId"
 > & {
+  clientOrderId?: string | null;
   id?: string;
   createdAt?: Timestamp | Date;
   updatedAt?: Timestamp | Date;

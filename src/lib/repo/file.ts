@@ -293,8 +293,11 @@ export const fileRepo: Repo = {
   async getPaperOrder(id) {
     return readDoc<PaperOrderRow[]>(DOC_PAPER_ORDERS, []).find((r) => r.id === id) ?? null;
   },
+  async findPaperOrderByClientId(clientOrderId) {
+    return readDoc<PaperOrderRow[]>(DOC_PAPER_ORDERS, []).find((r) => r.clientOrderId === clientOrderId) ?? null;
+  },
   async insertPaperOrder(value) {
-    const created = ts(value.createdAt, now());
+    const createdAt = ts(value.createdAt, now());
     const row: PaperOrderRow = {
       id: value.id ?? randomUUID(),
       symbol: value.symbol,
@@ -306,11 +309,27 @@ export const fileRepo: Repo = {
       status: value.status ?? "open",
       filledPrice: value.filledPrice ?? null,
       reduceOnly: value.reduceOnly ?? false,
-      createdAt: created,
-      updatedAt: ts(value.updatedAt, created),
+      clientOrderId: value.clientOrderId ?? null,
+      createdAt,
+      updatedAt: ts(value.updatedAt, createdAt),
     };
-    await mutate<PaperOrderRow[]>(DOC_PAPER_ORDERS, [], (rows) => [row, ...rows]);
-    return row;
+    // The per-document lock makes check-and-insert atomic within a process.
+    // That is sufficient for the single-process dev backend; Vercel refuses
+    // this backend outright (see repo/index.ts).
+    let created = true;
+    let result = row;
+    await mutate<PaperOrderRow[]>(DOC_PAPER_ORDERS, [], (rows) => {
+      if (value.clientOrderId) {
+        const existing = rows.find((r) => r.clientOrderId === value.clientOrderId);
+        if (existing) {
+          created = false;
+          result = existing;
+          return null;
+        }
+      }
+      return [row, ...rows];
+    });
+    return { order: result, created };
   },
   async updatePaperOrder(id, patch) {
     let updated: PaperOrderRow | null = null;

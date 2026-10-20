@@ -60,9 +60,13 @@ export function normalizeRiskLimits(input: Partial<RiskLimits>): RiskLimits {
     if (!Number.isFinite(n) || n <= 0) return fallback;
     return n;
   };
+  // Absolute ceilings: a nonsense value must not be able to disable a cap
+  // (docs/SECURITY.md promises this). The daily-loss cap can never exceed the
+  // single-order cap drawn from the same settings object.
+  const maxOrderValue = Math.min(finite(input.maxOrderValue, 5000), 1_000_000);
   return {
-    maxDailyLoss: finite(input.maxDailyLoss, 200),
-    maxOrderValue: finite(input.maxOrderValue, 5000),
+    maxDailyLoss: Math.min(finite(input.maxDailyLoss, 200), maxOrderValue),
+    maxOrderValue,
     maxLeverage: Math.min(finite(input.maxLeverage, 10), 50),
     maxOpenPositions: Math.max(1, Math.min(Math.round(finite(input.maxOpenPositions, 4)), 50)),
   };

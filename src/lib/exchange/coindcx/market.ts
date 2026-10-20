@@ -38,28 +38,10 @@ interface ActiveInstrumentRow {
   instrument_type?: string;
 }
 
-/** CoinDCX resolution strings: '1', '5', '15', '60', '1D'. */
-export type CoinDcxResolution = "1" | "5" | "15" | "60" | "240" | "1D";
-
-/** App candle timeframe (seconds) → CoinDCX resolution. */
-export function resolutionForTimeframe(seconds: number): CoinDcxResolution {
-  switch (seconds) {
-    case 60:
-      return "1";
-    case 300:
-      return "5";
-    case 900:
-      return "15";
-    case 3600:
-      return "60";
-    case 14400:
-      return "240";
-    case 86400:
-      return "1D";
-    default:
-      return "60";
-  }
-}
+/** CoinDCX resolution strings: '1', '5', '15', '60', '240', '1D'. */
+import type { CoinDcxResolution } from "./timeframes";
+export type { CoinDcxResolution };
+export { resolutionForTimeframe } from "./timeframes";
 
 /** Live futures instruments (USDT-margined). */
 export async function activeInstruments(client: CoinDcxClient): Promise<ExchangeInstrument[]> {
